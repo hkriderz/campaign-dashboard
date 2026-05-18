@@ -1,0 +1,43 @@
+# Next.js
+.next/
+out/
+build/
+
+# Dependencies
+node_modules/
+
+# Environment — never commit real credentials
+.env
+.env.local
+.env*.local
+credentials/pdi.env
+credentials/gcp-service-account.json
+credentials/pdi-credentials.json
+
+# Credentials — GCP service account keys
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!credentials/*.example
+
+# PDI folders — JSON/CSV contents gitignored via *.json above; .gitkeep is tracked
+# pdi-mappings/   Mapper + Syncer mapping JSON
+# pdi-sync-exports/   Sync CSV reports
+
+# Legacy path (migrated into pdi-mappings on first list)
+data/pdi-mappings/
+
+# Local BQ snapshot cache (regenerated on server)
+data/bq-snapshots/
+
+# Sync export artifacts
+pdi-sync-exports/*
+!pdi-sync-exports/.gitkeep
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
