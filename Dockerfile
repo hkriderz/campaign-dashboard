@@ -18,17 +18,18 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+# Primary group `nodejs` avoids fragile `chown -R` after COPY (often failed on Dokploy builders).
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 --ingroup nodejs --home /nonexistent nextjs
 
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-RUN mkdir -p credentials data/bq-snapshots pdi-mappings pdi-sync-exports \
-  && chown -R nextjs:nodejs credentials data pdi-mappings pdi-sync-exports
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
+
+RUN mkdir -p credentials data/bq-snapshots pdi-mappings pdi-sync-exports
+
 EXPOSE 3000
 
 CMD ["node", "server.js"]
