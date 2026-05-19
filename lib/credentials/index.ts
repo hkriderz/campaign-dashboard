@@ -54,4 +54,5 @@ export {
 } from "./gate";
 export { withCredentialContext } from "./api";
 export { runServerWithCredentialContext } from "./server";
+export { runWithRequestCredentialContext } from "./run-request";
 export { PDI_CREDENTIALS_DIR } from "./paths";

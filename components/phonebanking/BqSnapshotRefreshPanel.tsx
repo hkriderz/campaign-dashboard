@@ -88,6 +88,7 @@ export default function BqSnapshotRefreshPanel({
         });
         const res = await fetch("/api/phonebanking/bq-snapshot-refresh", {
           method: "POST",
+          credentials: "same-origin",
           headers: {
             "Content-Type": "application/json",
             "x-snapshot-secret": secret,

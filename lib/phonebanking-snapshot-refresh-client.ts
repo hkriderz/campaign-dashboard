@@ -37,6 +37,7 @@ async function postTagSnapshotRefresh(
 ): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch("/api/phonebanking/bq-snapshot-refresh", {
     method: "POST",
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       "x-snapshot-secret": secret,

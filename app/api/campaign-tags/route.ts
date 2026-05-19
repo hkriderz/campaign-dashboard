@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  attachSessionCookie,
+  resolveContextFromRequestWithSession,
+  runWithCredentialContextAsync,
+} from "@/lib/credentials";
+import {
   CAMPAIGN_TAGS_FILE_VERSION,
   getCampaignTagsConfigPath,
   validateStoredTags,
@@ -56,6 +61,9 @@ export async function POST(req: Request) {
   });
   reloadCampaignTagsFromDisk();
 
+  const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
+  const sessionId = ctx.scope === "session" ? ctx.sessionId : newSessionId;
+
   let snapshotRefresh:
     | Awaited<
         ReturnType<
@@ -68,20 +76,25 @@ export async function POST(req: Request) {
     const { runPhonebankingBqSnapshotRefresh } = await import(
       "@/lib/phonebanking-bq-snapshot-refresh"
     );
-    snapshotRefresh = await runPhonebankingBqSnapshotRefresh({
-      refreshAll: true,
-      clearFirst: body.clearSnapshots === true,
-    });
+    snapshotRefresh = await runWithCredentialContextAsync(ctx, () =>
+      runPhonebankingBqSnapshotRefresh({
+        refreshAll: true,
+        clearFirst: body.clearSnapshots === true,
+      })
+    );
   }
 
   const activePhonebankingTags = getActivePhonebankingTagRows();
 
-  return NextResponse.json({
-    ok: true,
-    configPath: getCampaignTagsConfigPath(),
-    source: "file" as const,
-    tags: validated.tags,
-    activePhonebankingTags,
-    snapshotRefresh: snapshotRefresh ?? null,
-  });
+  return attachSessionCookie(
+    NextResponse.json({
+      ok: true,
+      configPath: getCampaignTagsConfigPath(),
+      source: "file" as const,
+      tags: validated.tags,
+      activePhonebankingTags,
+      snapshotRefresh: snapshotRefresh ?? null,
+    }),
+    sessionId
+  );
 }

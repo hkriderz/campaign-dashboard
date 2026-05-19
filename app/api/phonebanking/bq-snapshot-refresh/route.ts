@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { attachSessionCookie, runWithRequestCredentialContext } from "@/lib/credentials";
 import { runPhonebankingBqSnapshotRefresh } from "@/lib/phonebanking-bq-snapshot-refresh";
 
 /**
@@ -23,39 +24,53 @@ export async function POST(req: Request) {
     clear?: boolean;
   } | null;
 
-  const result = await runPhonebankingBqSnapshotRefresh({
-    refreshAll: body?.refreshAll === true,
-    tagId: typeof body?.tagId === "string" ? body.tagId : "",
-    clearFirst: body?.clear === true,
-  });
+  const { result, sessionId } = await runWithRequestCredentialContext(req, () =>
+    runPhonebankingBqSnapshotRefresh({
+      refreshAll: body?.refreshAll === true,
+      tagId: typeof body?.tagId === "string" ? body.tagId : "",
+      clearFirst: body?.clear === true,
+    })
+  );
 
   if (!result.ok) {
     if ("refreshed" in result && result.refreshed) {
-      return NextResponse.json(
-        {
-          ok: false,
-          refreshed: result.refreshed,
-          errors: result.errors,
-          message: result.error,
-        },
-        { status: result.status }
+      return attachSessionCookie(
+        NextResponse.json(
+          {
+            ok: false,
+            refreshed: result.refreshed,
+            errors: result.errors,
+            message: result.error,
+          },
+          { status: result.status }
+        ),
+        sessionId
       );
     }
-    return NextResponse.json({ error: result.error }, { status: result.status });
+    return attachSessionCookie(
+      NextResponse.json({ error: result.error }, { status: result.status }),
+      sessionId
+    );
   }
 
   if ("refreshAll" in result && result.refreshAll) {
-    return NextResponse.json({
-      ok: true,
-      refreshAll: true,
-      refreshed: result.refreshed,
-      errors: result.errors,
-    });
+    return attachSessionCookie(
+      NextResponse.json({
+        ok: true,
+        refreshAll: true,
+        refreshed: result.refreshed,
+        errors: result.errors,
+      }),
+      sessionId
+    );
   }
 
   if ("tagId" in result) {
-    return NextResponse.json({ ok: true, tagId: result.tagId });
+    return attachSessionCookie(NextResponse.json({ ok: true, tagId: result.tagId }), sessionId);
   }
 
-  return NextResponse.json({ error: "Unexpected refresh result" }, { status: 500 });
+  return attachSessionCookie(
+    NextResponse.json({ error: "Unexpected refresh result" }, { status: 500 }),
+    sessionId
+  );
 }
