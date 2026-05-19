@@ -1,9 +1,15 @@
-import * as fs from "fs";
-import * as path from "path";
+import fs from "fs";
+import path from "path";
 import { parseDotEnvLines } from "@/lib/env/parse-dotenv";
+import { getActiveCredentialContext } from "@/lib/credentials/store";
+import {
+  resolveCredentialsDir,
+  shouldUseGlobalCredentialFallback,
+} from "@/lib/credentials/resolve-dir";
+import type { CredentialContext } from "@/lib/credentials/types";
+import { PDI_CREDENTIALS_DIR } from "@/lib/credentials/paths";
 
-/** App-root folder for uploaded / checked-in local credentials (gitignored json). */
-export const PDI_CREDENTIALS_DIR = path.join(process.cwd(), "credentials");
+export { PDI_CREDENTIALS_DIR };
 
 const GCP_CANDIDATE_NAMES = [
   "gcp-service-account.json",
@@ -32,11 +38,11 @@ function isServiceAccountJson(parsed: unknown): parsed is { project_id?: string;
   return typeof o.private_key === "string" && typeof o.client_email === "string";
 }
 
-function findGcpJsonInCredentialsDir(): string | null {
-  if (!fs.existsSync(PDI_CREDENTIALS_DIR)) return null;
+function findGcpJsonInDir(credentialsDir: string): string | null {
+  if (!fs.existsSync(credentialsDir)) return null;
 
   for (const name of GCP_CANDIDATE_NAMES) {
-    const p = path.join(PDI_CREDENTIALS_DIR, name);
+    const p = path.join(credentialsDir, name);
     if (!fs.existsSync(p)) continue;
     try {
       const parsed = JSON.parse(fs.readFileSync(p, "utf-8")) as unknown;
@@ -47,11 +53,12 @@ function findGcpJsonInCredentialsDir(): string | null {
   }
 
   let fallback: string | null = null;
-  const entries = fs.readdirSync(PDI_CREDENTIALS_DIR, { withFileTypes: true });
+  const entries = fs.readdirSync(credentialsDir, { withFileTypes: true });
   for (const ent of entries) {
     if (!ent.isFile() || !ent.name.toLowerCase().endsWith(".json")) continue;
     if (PDI_JSON_NAMES.includes(ent.name as (typeof PDI_JSON_NAMES)[number])) continue;
-    const p = path.join(PDI_CREDENTIALS_DIR, ent.name);
+    if (ent.name === ".session-meta.json") continue;
+    const p = path.join(credentialsDir, ent.name);
     try {
       const parsed = JSON.parse(fs.readFileSync(p, "utf-8")) as unknown;
       if (isServiceAccountJson(parsed)) {
@@ -74,14 +81,14 @@ function readGcpProjectId(absJsonPath: string): string | null {
   }
 }
 
-function loadPdiFromCredentialsDir(): {
+function loadPdiFromDir(credentialsDir: string): {
   username: string | null;
   password: string | null;
   apiToken: string | null;
   filesRead: boolean;
   anyValueFromFile: boolean;
 } {
-  if (!fs.existsSync(PDI_CREDENTIALS_DIR)) {
+  if (!fs.existsSync(credentialsDir)) {
     return { username: null, password: null, apiToken: null, filesRead: false, anyValueFromFile: false };
   }
 
@@ -92,7 +99,7 @@ function loadPdiFromCredentialsDir(): {
   let anyValueFromFile = false;
 
   for (const name of PDI_JSON_NAMES) {
-    const p = path.join(PDI_CREDENTIALS_DIR, name);
+    const p = path.join(credentialsDir, name);
     if (!fs.existsSync(p)) continue;
     filesRead = true;
     try {
@@ -118,7 +125,7 @@ function loadPdiFromCredentialsDir(): {
   }
 
   for (const name of PDI_ENV_NAMES) {
-    const p = path.join(PDI_CREDENTIALS_DIR, name);
+    const p = path.join(credentialsDir, name);
     if (!fs.existsSync(p)) continue;
     filesRead = true;
     try {
@@ -154,13 +161,21 @@ function pickStr(obj: Record<string, unknown>, keys: string[]): string | null {
   return null;
 }
 
+function activeContext(override?: CredentialContext | null): CredentialContext | undefined {
+  return override ?? getActiveCredentialContext();
+}
+
 /**
  * Resolves GCP service-account path and PDI login fields for PDI Tools API routes and sync spawn.
- * Per-field: `credentials/` files override process.env when set in file; otherwise env is used.
+ * When session credentials are enabled, reads from the active session directory (AsyncLocalStorage or explicit ctx).
  */
-export function resolvePdiToolsCredentials(): ResolvedPdiToolsCredentials {
-  const folderGcp = findGcpJsonInCredentialsDir();
-  const envRel = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+export function resolvePdiToolsCredentials(ctx?: CredentialContext | null): ResolvedPdiToolsCredentials {
+  const active = activeContext(ctx);
+  const credentialsDir = resolveCredentialsDir(active);
+  const envFallback = shouldUseGlobalCredentialFallback(active);
+
+  const folderGcp = findGcpJsonInDir(credentialsDir);
+  const envRel = envFallback ? process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() : undefined;
   let gcpCredentialsPath: string | null = null;
   let gcpSource: CredentialSource = "none";
 
@@ -184,12 +199,15 @@ export function resolvePdiToolsCredentials(): ResolvedPdiToolsCredentials {
 
   const gcpProjectId =
     (gcpCredentialsPath ? readGcpProjectId(gcpCredentialsPath) : null) ??
-    (process.env.GCP_PROJECT_ID?.trim() || null);
+    (envFallback ? process.env.GCP_PROJECT_ID?.trim() || null : null);
 
-  const fromDir = loadPdiFromCredentialsDir();
-  const pdiUsername = fromDir.username ?? process.env.PDI_USERNAME?.trim() ?? null;
-  const pdiPassword = fromDir.password ?? process.env.PDI_PASSWORD?.trim() ?? null;
-  const pdiApiToken = fromDir.apiToken ?? process.env.PDI_API_TOKEN?.trim() ?? null;
+  const fromDir = loadPdiFromDir(credentialsDir);
+  const pdiUsername =
+    fromDir.username ?? (envFallback ? process.env.PDI_USERNAME?.trim() ?? null : null);
+  const pdiPassword =
+    fromDir.password ?? (envFallback ? process.env.PDI_PASSWORD?.trim() ?? null : null);
+  const pdiApiToken =
+    fromDir.apiToken ?? (envFallback ? process.env.PDI_API_TOKEN?.trim() ?? null : null);
 
   const pdiComplete = Boolean(pdiUsername && pdiPassword && pdiApiToken);
 
@@ -212,8 +230,8 @@ export function resolvePdiToolsCredentials(): ResolvedPdiToolsCredentials {
 }
 
 /** Merge for `child_process` / routes so syncer and Python see the same paths as the mapper APIs. */
-export function pdiToolsProcessEnv(): NodeJS.ProcessEnv {
-  const r = resolvePdiToolsCredentials();
+export function pdiToolsProcessEnv(ctx?: CredentialContext | null): NodeJS.ProcessEnv {
+  const r = resolvePdiToolsCredentials(ctx);
   const merged: NodeJS.ProcessEnv = { ...process.env };
   if (r.gcpCredentialsPath) {
     merged.GOOGLE_APPLICATION_CREDENTIALS = r.gcpCredentialsPath;
@@ -231,6 +249,7 @@ export type PdiCredentialsPublicStatus = {
   credentialsDir: string;
   credentialsDirExists: boolean;
   filesInFolder: string[];
+  sessionScoped: boolean;
   gcp: {
     configured: boolean;
     source: CredentialSource;
@@ -246,11 +265,16 @@ export type PdiCredentialsPublicStatus = {
   };
 };
 
-export function getPdiCredentialsPublicStatus(): PdiCredentialsPublicStatus {
-  const r = resolvePdiToolsCredentials();
-  const credentialsDirExists = fs.existsSync(PDI_CREDENTIALS_DIR);
+export function getPdiCredentialsPublicStatus(ctx?: CredentialContext | null): PdiCredentialsPublicStatus {
+  const active = activeContext(ctx);
+  const credentialsDir = resolveCredentialsDir(active);
+  const r = resolvePdiToolsCredentials(active);
+  const credentialsDirExists = fs.existsSync(credentialsDir);
   const filesInFolder = credentialsDirExists
-    ? fs.readdirSync(PDI_CREDENTIALS_DIR).filter((n) => !n.startsWith("."))
+    ? fs
+        .readdirSync(credentialsDir)
+        .filter((n) => !n.startsWith(".") || n === ".session-meta.json")
+        .filter((n) => n !== ".session-meta.json")
     : [];
 
   let gcpFileName: string | null = null;
@@ -259,9 +283,10 @@ export function getPdiCredentialsPublicStatus(): PdiCredentialsPublicStatus {
   }
 
   return {
-    credentialsDir: PDI_CREDENTIALS_DIR,
+    credentialsDir,
     credentialsDirExists,
     filesInFolder,
+    sessionScoped: active?.scope === "session",
     gcp: {
       configured: Boolean(r.gcpCredentialsPath),
       source: r.gcpSource,

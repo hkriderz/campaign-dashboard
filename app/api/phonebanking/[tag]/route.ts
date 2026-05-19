@@ -8,7 +8,7 @@ import { fetchPhoneBanksByTag } from "@/lib/queries/phonebanking";
  * Returns all phone banks (campaigns) matching the given candidate tag.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ tag: string }> }
 ) {
   const { tag: tagId } = await params;
@@ -18,8 +18,12 @@ export async function GET(
     return apiError(`Unknown tag: ${tagId}`, 404);
   }
 
-  return withApiHandler(`/api/phonebanking/${tagId}`, async () => {
-    const phoneBanks = await fetchPhoneBanksByTag(tagId);
-    return { tag, phoneBanks };
-  });
+  return withApiHandler(
+    `/api/phonebanking/${tagId}`,
+    async () => {
+      const phoneBanks = await fetchPhoneBanksByTag(tagId);
+      return { tag, phoneBanks };
+    },
+    { req, requireCredentials: { gcp: true } }
+  );
 }

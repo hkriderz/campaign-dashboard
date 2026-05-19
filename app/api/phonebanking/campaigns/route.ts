@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { withApiHandler } from "@/lib/api/http";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
 import { fetchAllTagStats } from "@/lib/queries/phonebanking";
@@ -7,8 +8,10 @@ import type { CandidateStats } from "@/lib/types";
  * GET /api/phonebanking/campaigns
  * Returns aggregate stats for every phone banking candidate tag.
  */
-export async function GET() {
-  return withApiHandler("/api/phonebanking/campaigns", async () => {
+export async function GET(req: NextRequest) {
+  return withApiHandler(
+    "/api/phonebanking/campaigns",
+    async () => {
     const phonebankingTags = getPhonebankingTags();
     const tagIds = phonebankingTags.map((t) => t.id);
     const phoneBanksByTag = await fetchAllTagStats(tagIds);
@@ -41,5 +44,7 @@ export async function GET() {
     });
 
     return stats;
-  });
+    },
+    { req, requireCredentials: { gcp: true } }
+  );
 }

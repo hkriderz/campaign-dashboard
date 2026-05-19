@@ -15,6 +15,7 @@ import { appendCsvOnlyQuestionRowsForPbDashboard, getSyntheticPivotAllowlistFrom
 import { loadExtraWideColumnOrder } from "@/lib/stw-extra-wide-column-order-store";
 import { loadWideHeaderFieldMap } from "@/lib/stw-wide-header-field-map-store";
 import { loadWideReferenceHeaders } from "@/lib/stw-wide-reference-store";
+import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import TabBar from "@/components/phonebanking/TabBar";
@@ -165,6 +166,7 @@ function blankCsvRow(): PhoneBankCsvRow {
 }
 
 export default async function TagPage({ params, searchParams }: Props) {
+  return runServerWithCredentialContext(async () => {
   const { tag: tagId } = await params;
   const sp = await searchParams;
   const { tab = "overview", date: dateRaw } = sp;
@@ -813,6 +815,7 @@ export default async function TagPage({ params, searchParams }: Props) {
       )}
     </div>
   );
+  });
 }
 
 

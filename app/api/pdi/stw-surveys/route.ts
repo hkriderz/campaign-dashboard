@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+import { withCredentialContext } from "@/lib/credentials";
 import type { StwRow, StwData } from "@/lib/pdi-tools/types";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import { resolveNdjsonDataDir } from "@/lib/pdi-tools/resolve-ndjson-dir";
@@ -29,7 +30,7 @@ async function fetchFromBigQuery(): Promise<StwData> {
   const creds = resolvePdiToolsCredentials();
   if (!creds.gcpCredentialsPath) {
     throw new Error(
-      "No GCP service account configured. Upload `gcp-service-account.json` in PDI Tools → Credentials, set GOOGLE_APPLICATION_CREDENTIALS in .env.local, or add a JSON key under the `credentials/` folder."
+      "No GCP service account configured. Upload gcp-service-account.json for this browser session."
     );
   }
 
@@ -71,10 +72,10 @@ function loadCachedSurveys(): StwData {
   return buildStwData(rows);
 }
 
-export async function GET(req: NextRequest) {
-  const source = req.nextUrl.searchParams.get("source");
+export const GET = withCredentialContext(
+  async (req) => {
+    const source = new URL(req.url).searchParams.get("source");
 
-  try {
     let surveys: StwData;
 
     if (source === "cached") {
@@ -84,8 +85,6 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ surveys }, { status: 200 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message, code: 500 }, { status: 500 });
-  }
-}
+  },
+  { gcp: true }
+);

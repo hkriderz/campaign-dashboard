@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import * as fs from "fs";
 import * as path from "path";
+import { withCredentialContext } from "@/lib/credentials";
 import type { PdiQuestion } from "@/lib/pdi-tools/types";
 import { parseNdjson } from "@/lib/pdi-tools/parse-ndjson";
 import { resolveNdjsonDataDir } from "@/lib/pdi-tools/resolve-ndjson-dir";
@@ -13,7 +14,7 @@ async function getPdiSessionToken(): Promise<string> {
   const c = resolvePdiToolsCredentials();
   if (!c.pdiUsername || !c.pdiPassword || !c.pdiApiToken) {
     throw new Error(
-      "PDI credentials missing. Upload `pdi-credentials.json` on the PDI Tools page, or set PDI_USERNAME, PDI_PASSWORD, and PDI_API_TOKEN in .env.local."
+      "PDI credentials missing. Upload credentials on the PDI Tools page for this browser session."
     );
   }
 
@@ -85,10 +86,10 @@ function loadCachedQuestions(): PdiQuestion[] {
   return parseNdjson<PdiQuestion>(text);
 }
 
-export async function GET(req: NextRequest) {
-  const source = req.nextUrl.searchParams.get("source");
+export const GET = withCredentialContext(
+  async (req) => {
+    const source = new URL(req.url).searchParams.get("source");
 
-  try {
     let questions: PdiQuestion[];
 
     if (source === "cached") {
@@ -99,8 +100,6 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ questions }, { status: 200 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: message, code: 500 }, { status: 500 });
-  }
-}
+  },
+  { pdi: true }
+);

@@ -8,6 +8,7 @@ type StatusResponse = {
   credentialsDir: string;
   credentialsDirExists: boolean;
   filesInFolder: string[];
+  sessionScoped?: boolean;
   gcp: {
     configured: boolean;
     source: CredentialSource;
@@ -29,7 +30,7 @@ function sourceLabel(s: CredentialSource): string {
   return "not set";
 }
 
-export default function PdiCredentialsSection() {
+export default function PdiCredentialsSection({ sessionMode = false }: { sessionMode?: boolean }) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -71,14 +72,18 @@ export default function PdiCredentialsSection() {
       if (pdiFile) fd.append("pdiCredentials", pdiFile);
       if (pdiEnvText.trim()) fd.append("pdiEnvText", pdiEnvText.trim());
 
-      const res = await fetch("/api/pdi/credentials", { method: "POST", body: fd });
+      const res = await fetch("/api/pdi/credentials", { method: "POST", body: fd, credentials: "same-origin" });
       const data = (await res.json()) as { ok?: boolean; status?: StatusResponse; error?: string };
       if (!res.ok) {
         setMessage(data.error ?? "Upload failed");
         return;
       }
       if (data.status) setStatus(data.status);
-      setMessage("Saved. Mapper refresh and Syncer will use these credentials.");
+      setMessage(
+        sessionMode
+          ? "Saved for this browser session. Reload the page to access dashboard data."
+          : "Saved. Mapper refresh and Syncer will use these credentials."
+      );
       setGcpFile(null);
       setPdiFile(null);
       setPdiEnvText("");
@@ -93,9 +98,19 @@ export default function PdiCredentialsSection() {
     <section id="credentials" className="mt-10 scroll-mt-24">
       <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">Credentials</h2>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        Files in <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">campaign-dashboard/credentials/</code> are
-        picked up automatically for live BigQuery + PDI API (Mapper) and for the Python sync (Syncer). You can also upload
-        here — nothing is stored in the browser; the server writes to that folder only.
+        {sessionMode ? (
+          <>
+            Upload credentials for <strong>this browser session only</strong>. They are stored on the server under a
+            private session folder and are not shared with other visitors.
+          </>
+        ) : (
+          <>
+            Files in{" "}
+            <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">campaign-dashboard/credentials/</code>{" "}
+            are picked up automatically for live BigQuery + PDI API (Mapper) and for the Python sync (Syncer). You can
+            also upload here — nothing is stored in the browser; the server writes to that folder only.
+          </>
+        )}
       </p>
 
       {loadError ? (
@@ -155,7 +170,9 @@ export default function PdiCredentialsSection() {
             onChange={(e) => setGcpFile(e.target.files?.[0] ?? null)}
             className="block w-full text-sm text-gray-700 dark:text-gray-200 file:mr-3 file:rounded file:border-0 file:bg-emerald-600 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
           />
-          <p className="mt-1 text-xs text-gray-500">Saved as credentials/gcp-service-account.json</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {sessionMode ? "Saved for this session only." : "Saved as credentials/gcp-service-account.json"}
+          </p>
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
@@ -171,7 +188,7 @@ export default function PdiCredentialsSection() {
             Use keys <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_USERNAME</code>,{" "}
             <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_PASSWORD</code>,{" "}
             <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_API_TOKEN</code> (or camelCase equivalents).
-            Saved as credentials/pdi-credentials.json
+            Saved as {sessionMode ? "session pdi-credentials.json" : "credentials/pdi-credentials.json"}
           </p>
         </div>
         <div>
@@ -185,7 +202,9 @@ export default function PdiCredentialsSection() {
             placeholder={"PDI_USERNAME=...\nPDI_PASSWORD=...\nPDI_API_TOKEN=..."}
             className="w-full text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-2 font-mono"
           />
-          <p className="mt-1 text-xs text-gray-500">Saved as credentials/pdi.env (merged with JSON on the server).</p>
+          <p className="mt-1 text-xs text-gray-500">
+            {sessionMode ? "Saved for this session only." : "Saved as credentials/pdi.env (merged with JSON on the server)."}
+          </p>
         </div>
         <div className="flex flex-wrap gap-3 items-center">
           <button
@@ -193,7 +212,7 @@ export default function PdiCredentialsSection() {
             disabled={busy}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Save to credentials folder"}
+            {busy ? "Saving…" : sessionMode ? "Save for this session" : "Save to credentials folder"}
           </button>
           <button
             type="button"

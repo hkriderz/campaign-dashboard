@@ -35,9 +35,24 @@ Ensure these are **not** committed: `.env.local`, `credentials/*.json`, `starlit
 | `PDI_USERNAME` / `PDI_PASSWORD` / `PDI_API_TOKEN` | For PDI | Or upload via `/pdi` UI into mounted `credentials/` |
 | `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` | Optional | Enables snapshot rebuild API |
 | `CAMPAIGN_DASHBOARD_DATA_DIR` | Optional | Set to `/app` if using volumes under `/app/data` |
+| `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS` | Multi-user | Set to `1` so each browser must upload its own GCP/PDI keys |
+| `CAMPAIGN_DASHBOARD_ALLOW_GLOBAL_CREDENTIALS` | Optional | Default `1`; set `0` to disable env/global fallback for sessions |
+| `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS` | Optional | Prune idle session credential folders (default `72`) |
 | `NODE_ENV` | Auto | `production` in image |
 
-### GCP JSON via env (no file mount)
+### Multi-user session credentials (recommended for shared Dokploy URL)
+
+When `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS=1`:
+
+1. Each visitor gets an anonymous browser session (httpOnly cookie).
+2. They must upload GCP (+ PDI for mapper/syncer) credentials before seeing data.
+3. Credentials are stored under `credentials/sessions/<uuid>/` — **not shared** with other visitors.
+4. **Remove** `GCP_SERVICE_ACCOUNT_JSON` and `PDI_*` from Dokploy env if you do not want a shared global fallback.
+5. Keep `GCP_SERVICE_ACCOUNT_JSON` + `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` only for **cron** snapshot rebuilds (no session cookie → global creds apply).
+
+Idle session folders are deleted automatically after `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS` (default 72h).
+
+### GCP JSON via env (single-tenant / cron only)
 
 Paste the service account JSON into Dokploy as `GCP_SERVICE_ACCOUNT_JSON` (single line), or base64-encode it:
 
@@ -45,7 +60,7 @@ Paste the service account JSON into Dokploy as `GCP_SERVICE_ACCOUNT_JSON` (singl
 base64 -w0 gcp-service-account.json
 ```
 
-On startup, `instrumentation.ts` writes `credentials/gcp-service-account.json` and sets `GOOGLE_APPLICATION_CREDENTIALS`.
+On first server request, the app writes `credentials/gcp-service-account.json` and sets `GOOGLE_APPLICATION_CREDENTIALS` (lazy bootstrap).
 
 ## 4. Domain & HTTPS
 

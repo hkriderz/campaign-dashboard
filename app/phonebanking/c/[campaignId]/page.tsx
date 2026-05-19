@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { fetchPhoneBankDetail } from "@/lib/queries/phonebanking";
+import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankDetailClient from "@/components/phonebanking/PhoneBankDetailClient";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 
@@ -14,6 +15,7 @@ type Props = {
 
 /** Campaign detail reached from the all-campaigns list (no candidate tag in URL). */
 export default async function PhoneBankCampaignOnlyPage({ params }: Props) {
+  return runServerWithCredentialContext(async () => {
   const { campaignId } = await params;
 
   let detail = null;
@@ -63,4 +65,5 @@ export default async function PhoneBankCampaignOnlyPage({ params }: Props) {
       )}
     </div>
   );
+  });
 }

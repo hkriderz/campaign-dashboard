@@ -1,41 +1,56 @@
 import { BigQuery } from "@google-cloud/bigquery";
 import path from "path";
 import fs from "fs";
+import { CredentialsRequiredError } from "@/lib/credentials/gate";
+import { getActiveCredentialContext } from "@/lib/credentials/store";
+import { ensureServerBootstrapped } from "@/lib/server/lazy-bootstrap";
 import { applyPdiToolsEnv } from "@/lib/pdi-tools/sync/apply-env";
 import { resolvePdiToolsCredentials } from "@/lib/pdi-tools/resolve-pdi-credentials";
 
 /**
- * Singleton BigQuery client.
- * Resolves GCP via `credentials/` folder, env vars, or `GCP_SERVICE_ACCOUNT_JSON` (see bootstrap).
+ * Per-context BigQuery client cache (session-scoped when session credentials are enabled).
  */
-let _client: BigQuery | null = null;
-let _clientKey: string | null = null;
+const clientCache = new Map<string, BigQuery>();
+
+function cacheKeyForContext(): string {
+  const ctx = getActiveCredentialContext();
+  const scope = ctx?.scope === "session" && ctx.sessionId ? ctx.sessionId : "global";
+  const resolved = resolvePdiToolsCredentials();
+  const credPath = resolved.gcpCredentialsPath ?? "adc";
+  const projectId = resolved.gcpProjectId ?? process.env.GCP_PROJECT_ID ?? "default";
+  return `${scope}:${projectId}:${credPath}`;
+}
 
 export function getBigQueryClient(): BigQuery {
+  ensureServerBootstrapped();
   applyPdiToolsEnv();
   const resolved = resolvePdiToolsCredentials();
   const credPath =
     resolved.gcpCredentialsPath ?? process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ?? null;
   const projectId = resolved.gcpProjectId ?? process.env.GCP_PROJECT_ID ?? "starlit-link-475400-s5";
-  const cacheKey = `${projectId}:${credPath ?? "adc"}`;
+  const key = cacheKeyForContext();
 
-  if (_client && _clientKey === cacheKey) return _client;
-  _clientKey = cacheKey;
+  const cached = clientCache.get(key);
+  if (cached) return cached;
 
-  if (credPath) {
-    const abs = path.isAbsolute(credPath) ? credPath : path.resolve(process.cwd(), credPath);
-    if (!fs.existsSync(abs)) {
-      throw new Error(
-        `Service account key not found at: ${abs}. ` +
-          `Upload gcp-service-account.json to credentials/ or set GOOGLE_APPLICATION_CREDENTIALS.`
-      );
-    }
-    _client = new BigQuery({ projectId, keyFilename: abs });
-  } else {
-    _client = new BigQuery({ projectId });
+  if (!credPath) {
+    throw new CredentialsRequiredError(
+      "GCP credentials are not configured. Upload a service account JSON on the credentials page, " +
+        "or set GOOGLE_APPLICATION_CREDENTIALS / GCP_SERVICE_ACCOUNT_JSON for this environment."
+    );
   }
 
-  return _client;
+  const abs = path.isAbsolute(credPath) ? credPath : path.resolve(process.cwd(), credPath);
+  if (!fs.existsSync(abs)) {
+    throw new CredentialsRequiredError(
+      `Service account key not found at: ${abs}. Upload gcp-service-account.json or update GOOGLE_APPLICATION_CREDENTIALS.`
+    );
+  }
+
+  const client = new BigQuery({ projectId, keyFilename: abs });
+
+  clientCache.set(key, client);
+  return client;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { apiError, apiOk, errorMessage } from "@/lib/api/http";
+import { apiError, withApiHandler } from "@/lib/api/http";
 import { getTagById } from "@/lib/campaign-tags";
 import { fetchPhoneBankDetail } from "@/lib/queries/phonebanking";
 
@@ -8,7 +8,7 @@ import { fetchPhoneBankDetail } from "@/lib/queries/phonebanking";
  * Full detail for one phone bank (stats, daily breakdown, date list).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ tag: string; campaignId: string }> }
 ) {
   const { tag: tagId, campaignId } = await params;
@@ -18,15 +18,15 @@ export async function GET(
     return apiError(`Unknown tag: ${tagId}`, 404);
   }
 
-  try {
-    const detail = await fetchPhoneBankDetail(campaignId);
-    if (!detail) {
-      return apiError(`Campaign not found: ${campaignId}`, 404);
-    }
-    return apiOk(detail);
-  } catch (err) {
-    const message = errorMessage(err);
-    console.error(`[/api/phonebanking/${tagId}/${campaignId}]`, message);
-    return apiError(message, 500);
-  }
+  return withApiHandler(
+    `/api/phonebanking/${tagId}/${campaignId}`,
+    async () => {
+      const detail = await fetchPhoneBankDetail(campaignId);
+      if (!detail) {
+        throw new Error(`Campaign not found: ${campaignId}`);
+      }
+      return detail;
+    },
+    { req, requireCredentials: { gcp: true } }
+  );
 }

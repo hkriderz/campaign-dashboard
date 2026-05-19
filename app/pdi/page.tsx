@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { sessionCredentialsEnabled } from "@/lib/credentials";
 import PdiCredentialsSection from "@/components/pdi-tools/PdiCredentialsSection";
 
 const TOOLS = [
@@ -50,7 +51,7 @@ export default function PdiPage() {
           ))}
         </div>
 
-        <PdiCredentialsSection />
+        <PdiCredentialsSection sessionMode={sessionCredentialsEnabled()} />
 
         <div className="mt-10 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-5">
           <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm mb-2">How it fits together</p>

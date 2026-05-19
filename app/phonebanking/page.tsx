@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { fetchAllActivePhoneBankSummaries, fetchAllTagStats } from "@/lib/queries/phonebanking";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
+import { runServerWithCredentialContext } from "@/lib/credentials";
 import CandidateGrid from "@/components/phonebanking/CandidateGrid";
 import AllCampaignsDaySection from "@/components/phonebanking/AllCampaignsDaySection";
 import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
@@ -10,6 +11,7 @@ import type { CandidateStats, PhoneBankSummary } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function PhoneBankingPage() {
+  return runServerWithCredentialContext(async () => {
   const phonebankingTags = getPhonebankingTags();
   const snapshotsMeta = getPhonebankingSnapshotsMeta(phonebankingTags.map((t) => t.id));
 
@@ -114,4 +116,5 @@ export default async function PhoneBankingPage() {
       </section>
     </div>
   );
+  });
 }

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getTagById } from "@/lib/campaign-tags";
 import { fetchPhoneBankDetail } from "@/lib/queries/phonebanking";
+import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankDetailClient from "@/components/phonebanking/PhoneBankDetailClient";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export default async function PhoneBankDetailPage({ params }: Props) {
+  return runServerWithCredentialContext(async () => {
   const { tag: tagId, campaignId } = await params;
   const tag = getTagById(tagId);
 
@@ -74,4 +76,5 @@ export default async function PhoneBankDetailPage({ params }: Props) {
       )}
     </div>
   );
+  });
 }

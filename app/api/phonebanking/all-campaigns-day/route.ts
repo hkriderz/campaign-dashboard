@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { apiError, apiOk, errorMessage } from "@/lib/api/http";
+import { apiError, withApiHandler } from "@/lib/api/http";
 import { buildAllCampaignsDayDashboard } from "@/lib/all-campaigns-day-dashboard";
 import { isValidPhonebankingIsoDate } from "@/lib/queries/phonebanking";
 
@@ -17,15 +17,15 @@ export async function GET(req: NextRequest) {
     return apiError("Invalid date (expected YYYY-MM-DD)", 400);
   }
 
-  try {
-    const built = await buildAllCampaignsDayDashboard(date);
-    if ("error" in built) {
-      return apiError(built.error, 400);
-    }
-    return apiOk({ date, dashboard: built });
-  } catch (err) {
-    const message = errorMessage(err);
-    console.error("[/api/phonebanking/all-campaigns-day]", message);
-    return apiError(message, 500);
-  }
+  return withApiHandler(
+    "/api/phonebanking/all-campaigns-day",
+    async () => {
+      const built = await buildAllCampaignsDayDashboard(date);
+      if ("error" in built) {
+        throw new Error(built.error);
+      }
+      return { date, dashboard: built };
+    },
+    { req, requireCredentials: { gcp: true } }
+  );
 }

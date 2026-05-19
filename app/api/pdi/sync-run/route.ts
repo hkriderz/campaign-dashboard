@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import {
+  CredentialsRequiredError,
+  credentialsRequiredResponse,
+  resolveContextFromRequest,
+  runWithCredentialContextAsync,
+  assertDataAccessAllowed,
+} from "@/lib/credentials";
 import { resolveMappingFilePathById } from "@/lib/pdi-tools/mapping-files";
 import { pdiToolsProcessEnv } from "@/lib/pdi-tools/resolve-pdi-credentials";
 import {
@@ -38,7 +45,7 @@ function appendCapText(prev: string, chunk: Buffer, maxChars: number): string {
   return next.slice(next.length - maxChars);
 }
 
-async function runPythonSync(body: SyncBody) {
+async function runPythonSync(body: SyncBody, ctx: ReturnType<typeof resolveContextFromRequest>) {
   const python = process.env.PYTHON_EXECUTABLE ?? (process.platform === "win32" ? "python" : "python3");
   const scriptDir = resolveStwToPdiScriptDir();
   const cwd = ensurePdiSyncExportsDir();
@@ -90,7 +97,7 @@ async function runPythonSync(body: SyncBody) {
     }
   }
 
-  const mergedEnv = pdiToolsProcessEnv();
+  const mergedEnv = pdiToolsProcessEnv(ctx);
 
   const result = await new Promise<{
     exitCode: number | null;
@@ -138,45 +145,58 @@ async function runPythonSync(body: SyncBody) {
 }
 
 export async function POST(req: Request) {
-  let body: SyncBody;
+  const ctx = resolveContextFromRequest(req);
+
   try {
-    body = (await req.json()) as SyncBody;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body", code: 400 }, { status: 400 });
+    return await runWithCredentialContextAsync(ctx, async () => {
+      assertDataAccessAllowed({ gcp: true, pdi: true });
+
+      let body: SyncBody;
+      try {
+        body = (await req.json()) as SyncBody;
+      } catch {
+        return NextResponse.json({ error: "Invalid JSON body", code: 400 }, { status: 400 });
+      }
+
+      if (usePythonEngine()) {
+        return runPythonSync(body, ctx);
+      }
+
+      if (body.mode === "range" && !body.rollbackRun?.trim() && !body.start?.trim()) {
+        return NextResponse.json(
+          { error: "For range mode, start date (YYYY-MM-DD) is required.", code: 400, engine: "typescript" },
+          { status: 400 }
+        );
+      }
+
+      const runId = new Date().toISOString();
+      createSyncRun(runId, ctx);
+
+      const options = {
+        mode: body.mode === "range" ? ("range" as const) : ("incremental" as const),
+        start: body.start,
+        end: body.end,
+        dryRun: Boolean(body.dryRun),
+        minRecords:
+          typeof body.minRecords === "number" && Number.isFinite(body.minRecords)
+            ? Math.floor(body.minRecords)
+            : DEFAULT_MIN_RECORDS,
+        mappingFileId: body.mappingFileId?.trim() || "auto",
+        rollbackRun: body.rollbackRun?.trim(),
+      };
+
+      void runWithCredentialContextAsync(ctx, () => runPdiSyncEngine(runId, options));
+
+      return NextResponse.json({
+        engine: "typescript",
+        runId,
+        streamUrl: `/api/pdi/sync-run/${encodeURIComponent(runId)}/stream`,
+      });
+    });
+  } catch (err) {
+    if (err instanceof CredentialsRequiredError) {
+      return credentialsRequiredResponse(err.message);
+    }
+    throw err;
   }
-
-  if (usePythonEngine()) {
-    return runPythonSync(body);
-  }
-
-  if (body.mode === "range" && !body.rollbackRun?.trim() && !body.start?.trim()) {
-    return NextResponse.json(
-      { error: "For range mode, start date (YYYY-MM-DD) is required.", code: 400, engine: "typescript" },
-      { status: 400 }
-    );
-  }
-
-  const runId = new Date().toISOString();
-  createSyncRun(runId);
-
-  const options = {
-    mode: body.mode === "range" ? "range" as const : "incremental" as const,
-    start: body.start,
-    end: body.end,
-    dryRun: Boolean(body.dryRun),
-    minRecords:
-      typeof body.minRecords === "number" && Number.isFinite(body.minRecords)
-        ? Math.floor(body.minRecords)
-        : DEFAULT_MIN_RECORDS,
-    mappingFileId: body.mappingFileId?.trim() || "auto",
-    rollbackRun: body.rollbackRun?.trim(),
-  };
-
-  void runPdiSyncEngine(runId, options);
-
-  return NextResponse.json({
-    engine: "typescript",
-    runId,
-    streamUrl: `/api/pdi/sync-run/${encodeURIComponent(runId)}/stream`,
-  });
 }

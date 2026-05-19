@@ -1,5 +1,6 @@
 import type { SyncLogEvent } from "./logger";
 import type { SyncRunSummary } from "./types";
+import type { CredentialContext } from "@/lib/credentials/types";
 
 export type SyncRunStatus = "running" | "completed" | "failed";
 
@@ -11,6 +12,7 @@ export type SyncRunRecord = {
   summary: SyncRunSummary | null;
   error: string | null;
   startedAt: string;
+  credentialContext: CredentialContext | null;
 };
 
 type RegistryGlobal = {
@@ -25,7 +27,10 @@ function getRegistry(): Map<string, SyncRunRecord> {
   return g.__pdiSyncRunRegistry;
 }
 
-export function createSyncRun(runId: string): SyncRunRecord {
+export function createSyncRun(
+  runId: string,
+  credentialContext: CredentialContext | null = null
+): SyncRunRecord {
   const record: SyncRunRecord = {
     runId,
     status: "running",
@@ -34,6 +39,7 @@ export function createSyncRun(runId: string): SyncRunRecord {
     summary: null,
     error: null,
     startedAt: new Date().toISOString(),
+    credentialContext,
   };
   getRegistry().set(runId, record);
   return record;

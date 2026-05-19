@@ -20,8 +20,12 @@ export async function GET(req: NextRequest) {
     return apiError(`Unknown tag: ${tagId}`, 404);
   }
 
-  return withApiHandler("/api/phonebankers", async () => {
-    const phonebankers = await fetchPhonebankersByTag(tagId, date);
-    return { tag, phonebankers, date: date ?? null };
-  });
+  return withApiHandler(
+    "/api/phonebankers",
+    async () => {
+      const phonebankers = await fetchPhonebankersByTag(tagId, date);
+      return { tag, phonebankers, date: date ?? null };
+    },
+    { req, requireCredentials: { gcp: true } }
+  );
 }

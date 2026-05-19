@@ -1,4 +1,5 @@
 import { runQuery, PROJECT, DATASET } from "../bigquery";
+import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { isValidIsoDate } from "../validation/iso-date";
 import { rowToPhoneBankSummary, toNum, toStr, toDateString } from "./bq-row-parsers";
 import {
@@ -34,6 +35,11 @@ import type {
 const P = PROJECT;
 const D = DATASET;
 const PHONEBANK_WINDOW_START_DATE = "2025-12-01";
+
+/** When session credentials are enabled, block shared snapshots until this browser uploads GCP keys. */
+function requireDashboardDataAccess(): void {
+  assertDataAccessAllowed({ gcp: true });
+}
 
 type CampaignLifecycleColumnSet = {
   status: boolean;
@@ -103,6 +109,7 @@ function buildCampaignLifecycleFilter(
 export async function fetchPhoneBanksByTag(
   tagId: string
 ): Promise<PhoneBankSummary[]> {
+  requireDashboardDataAccess();
   if (!snapshotsDisabled()) {
     const snap = loadPhoneBanksSnapshot(tagId);
     if (snap) {
@@ -159,6 +166,7 @@ async function fetchPhoneBanksByTagUncached(tagId: string): Promise<PhoneBankSum
  * without filtering by candidate tag (name LIKE terms).
  */
 export async function fetchAllActivePhoneBankSummaries(): Promise<PhoneBankSummary[]> {
+  requireDashboardDataAccess();
   return cachedBq(["fetchAllActivePhoneBankSummaries"], () => fetchAllActivePhoneBankSummariesUncached());
 }
 
@@ -205,6 +213,7 @@ export function isValidPhonebankingIsoDate(raw: string): boolean {
  * Cached per ISO date when BQ cache env is enabled.
  */
 export async function fetchAllPhoneBankSummariesForDate(isoDate: string): Promise<PhoneBankSummary[]> {
+  requireDashboardDataAccess();
   if (!isValidPhonebankingIsoDate(isoDate)) return [];
   return cachedBq(
     ["fetchAllPhoneBankSummariesForDate", isoDate],
@@ -250,6 +259,7 @@ async function fetchAllPhoneBankSummariesForDateUncached(isoDate: string): Promi
  * Mirrors {@link fetchPhonebankersByTag} date grain (`callers.created_at`) but without a candidate tag filter.
  */
 export async function fetchAllPhonebankersForDate(isoDate: string): Promise<PhonebankerAggregateStat[]> {
+  requireDashboardDataAccess();
   if (!isValidPhonebankingIsoDate(isoDate)) return [];
   return cachedBq(
     ["fetchAllPhonebankersForDate", isoDate],
@@ -359,6 +369,7 @@ export async function fetchAllTagStats(
 export async function fetchPhoneBankDetail(
   campaignId: string
 ): Promise<PhoneBankDetail | null> {
+  requireDashboardDataAccess();
   // Fetch the basic campaign info
   const campaignSql = `
     SELECT
@@ -549,6 +560,7 @@ export async function fetchPhonebankersByTag(
   tagId: string,
   filterDate?: string
 ): Promise<PhonebankerAggregateStat[]> {
+  requireDashboardDataAccess();
   const tag = getTagById(tagId);
   if (!tag) return [];
 
@@ -645,6 +657,7 @@ export async function fetchTagDailyCallerStats(
   tagId: string,
   options?: { snapshotFullRebuild?: boolean }
 ): Promise<TagDailyCallerStat[]> {
+  requireDashboardDataAccess();
   if (snapshotsDisabled()) {
     const full = await fetchTagDailyCallerStatsUncached(tagId);
     return full.filter(tagDailyCallerHasWorkBeyondLoggedHours).sort(sortTagDailyCallerStats);
@@ -1030,6 +1043,7 @@ export async function fetchTagPhonebankerQuestionStats(
   tagId: string,
   options?: { snapshotFullRebuild?: boolean }
 ): Promise<PhonebankerQuestionResponseStat[]> {
+  requireDashboardDataAccess();
   if (snapshotsDisabled()) {
     const full = await fetchTagPhonebankerQuestionStatsUncached(tagId);
     return full.sort(sortQuestionResponseStats);
@@ -1141,6 +1155,7 @@ export async function fetchTagCallSurveyRowsForFinalFill(
   tagId: string,
   options?: { snapshotFullRebuild?: boolean }
 ): Promise<CallSurveyRowForFill[]> {
+  requireDashboardDataAccess();
   if (snapshotsDisabled()) {
     const full = await fetchTagCallSurveyRowsForFinalFillUncached(tagId);
     return full.sort(sortCallSurveyFill);

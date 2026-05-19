@@ -1,6 +1,6 @@
 import SessionCredentialsGate from "@/components/credentials/SessionCredentialsGate";
 
-export default function PdiMapperLayout({
+export default function PdiSyncerLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -8,8 +8,8 @@ export default function PdiMapperLayout({
   return (
     <SessionCredentialsGate
       requirements={{ gcp: true, pdi: true }}
-      title="PDI Mapper credentials required"
-      description="Upload your GCP service account and PDI API credentials to load live survey data and PDI questions for mapping."
+      title="PDI Syncer credentials required"
+      description="Upload your GCP service account and PDI API credentials before running sync jobs."
     >
       {children}
     </SessionCredentialsGate>

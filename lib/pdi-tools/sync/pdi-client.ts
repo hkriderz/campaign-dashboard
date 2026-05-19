@@ -1,3 +1,4 @@
+import { getActiveCredentialContext } from "@/lib/credentials/store";
 import { resolvePdiToolsCredentials } from "@/lib/pdi-tools/resolve-pdi-credentials";
 import type { CreatedFlagInstanceRow } from "./flag-instances";
 import type { PdiFlagPayloadItem } from "./types";
@@ -7,12 +8,21 @@ import type { SyncLogger } from "./logger";
 
 const PDI_BASE_URL = "https://api.bluevote.com";
 
-let cachedToken: { token: string; exp: number } | null = null;
+const tokenCache = new Map<string, { token: string; exp: number }>();
+
+function tokenCacheKey(): string {
+  const ctx = getActiveCredentialContext();
+  const scope = ctx?.scope === "session" && ctx.sessionId ? ctx.sessionId : "global";
+  const creds = resolvePdiToolsCredentials();
+  return `${scope}:${creds.pdiUsername ?? ""}:${creds.pdiApiToken ?? ""}`;
+}
 
 async function getSessionToken(): Promise<string> {
   const now = Date.now();
-  if (cachedToken && cachedToken.exp > now + 60_000) {
-    return cachedToken.token;
+  const key = tokenCacheKey();
+  const cached = tokenCache.get(key);
+  if (cached && cached.exp > now + 60_000) {
+    return cached.token;
   }
 
   const c = resolvePdiToolsCredentials();
@@ -42,7 +52,7 @@ async function getSessionToken(): Promise<string> {
   }
 
   const exp = data.ExpirationDate ? Date.parse(data.ExpirationDate) : now + 3_600_000;
-  cachedToken = { token: data.AccessToken, exp };
+  tokenCache.set(key, { token: data.AccessToken, exp });
   return data.AccessToken;
 }
 
