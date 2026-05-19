@@ -3,6 +3,8 @@ import Sidebar from "@/components/layout/Sidebar";
 import SessionCredentialsGate from "@/components/credentials/SessionCredentialsGate";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
 
+export const dynamic = "force-dynamic";
+
 export default function PhoneBankingLayout({
   children,
 }: {

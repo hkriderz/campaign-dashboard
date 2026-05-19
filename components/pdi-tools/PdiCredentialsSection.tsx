@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type CredentialSource = "credentials-folder" | "env" | "none";
 
@@ -33,13 +33,25 @@ function sourceLabel(s: CredentialSource): string {
   return "not set";
 }
 
+type GateRequirements = { gcp?: boolean; pdi?: boolean };
+
+function meetsGateRequirements(status: StatusResponse, req?: GateRequirements): boolean {
+  if (!req) return status.gcp.configured;
+  if (req.gcp !== false && !status.gcp.configured) return false;
+  if (req.pdi && !status.pdi.configured) return false;
+  return true;
+}
+
 export default function PdiCredentialsSection({
   sessionMode = false,
   redirectAfterSave,
+  gateRequirements,
 }: {
   sessionMode?: boolean;
   /** After a successful session upload, navigate here (e.g. /phonebanking). */
   redirectAfterSave?: string;
+  /** When set (session gate), treat these as required before showing continue / auto-redirect. */
+  gateRequirements?: GateRequirements;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -69,6 +81,18 @@ export default function PdiCredentialsSection({
     void refresh();
   }, [refresh]);
 
+  const sessionReady =
+    Boolean(status) &&
+    status!.credentialScope === "session" &&
+    meetsGateRequirements(status!, gateRequirements);
+
+  const didAutoRefresh = useRef(false);
+  useEffect(() => {
+    if (!sessionMode || !sessionReady || didAutoRefresh.current) return;
+    didAutoRefresh.current = true;
+    router.refresh();
+  }, [sessionMode, sessionReady, router]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
@@ -91,9 +115,9 @@ export default function PdiCredentialsSection({
       }
       if (data.status) setStatus(data.status);
 
-      const gcpReady = data.status?.gcp?.configured ?? false;
       const sessionBound = !sessionMode || data.status?.credentialScope === "session";
-      const canOpenDashboard = sessionBound && gcpReady;
+      const canOpenDashboard =
+        sessionBound && data.status != null && meetsGateRequirements(data.status, gateRequirements);
 
       if (sessionMode && canOpenDashboard && redirectAfterSave) {
         setMessage("Saved. Opening dashboard…");
@@ -144,6 +168,24 @@ export default function PdiCredentialsSection({
       {loadError ? (
         <div className="mb-4 text-sm text-red-600 dark:text-red-400 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3 py-2">
           {loadError}
+        </div>
+      ) : null}
+
+      {sessionMode && sessionReady && redirectAfterSave ? (
+        <div className="mb-6 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-4 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-emerald-900 dark:text-emerald-100 flex-1 min-w-[12rem]">
+            Credentials are ready for this session.
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              router.refresh();
+              router.push(redirectAfterSave);
+            }}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
+          >
+            Open dashboard
+          </button>
         </div>
       ) : null}
 

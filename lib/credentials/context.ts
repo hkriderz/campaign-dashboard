@@ -16,6 +16,27 @@ import {
 } from "./session";
 import type { CredentialContext } from "./types";
 
+function readSessionIdFromCookieHeader(cookieHeader: string | null): string | undefined {
+  if (!cookieHeader) return undefined;
+  const match = cookieHeader.match(
+    new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`)
+  );
+  const raw = match?.[1] ? decodeURIComponent(match[1].trim()) : undefined;
+  return isValidSessionId(raw) ? raw : undefined;
+}
+
+/** Middleware sets this on the incoming request; headers() is case-insensitive but be defensive. */
+function readSessionIdFromRequestHeaders(hdrs: Headers): string | undefined {
+  const direct = hdrs.get(SESSION_REQUEST_HEADER);
+  if (isValidSessionId(direct)) return direct;
+  for (const [key, value] of hdrs.entries()) {
+    if (key.toLowerCase() === SESSION_REQUEST_HEADER.toLowerCase() && isValidSessionId(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function globalContext(): CredentialContext {
   return {
     scope: "global",
@@ -43,7 +64,9 @@ export async function resolveContextFromCookies(): Promise<CredentialContext> {
 
   if (!isValidSessionId(raw)) {
     const hdrs = await headers();
-    raw = hdrs.get(SESSION_REQUEST_HEADER) ?? undefined;
+    raw =
+      readSessionIdFromRequestHeaders(hdrs) ??
+      readSessionIdFromCookieHeader(hdrs.get("cookie"));
   }
 
   if (!isValidSessionId(raw)) {
@@ -80,11 +103,7 @@ export function resolveContextFromRequestWithSession(req: Request): RequestCrede
     return { ctx: sessionContext(headerSession), newSessionId: null };
   }
 
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  const match = cookieHeader.match(
-    new RegExp(`(?:^|;\\s*)${SESSION_COOKIE_NAME}=([^;]+)`)
-  );
-  const raw = match?.[1] ? decodeURIComponent(match[1]) : null;
+  const raw = readSessionIdFromCookieHeader(req.headers.get("cookie")) ?? null;
 
   if (isValidSessionId(raw)) {
     ensureSessionCredentialsDir(raw);

@@ -4,6 +4,7 @@ import {
   sessionCredentialsEnabled,
   type DataAccessRequirements,
 } from "@/lib/credentials";
+import SessionCredentialsGateUnlock from "@/components/credentials/SessionCredentialsGateUnlock";
 import PdiCredentialsSection from "@/components/pdi-tools/PdiCredentialsSection";
 
 type Props = {
@@ -34,9 +35,16 @@ export default async function SessionCredentialsGate({
 
   const needsPdi = Boolean(requirements.pdi);
   const needsGcp = requirements.gcp !== false;
+  const continueHref = needsPdi ? "/pdi/mapper" : "/phonebanking";
+  const continueLabel = needsPdi ? "Continue to PDI Mapper" : "Continue to Phone Banking";
 
   return (
     <div className="max-w-3xl mx-auto">
+      <SessionCredentialsGateUnlock
+        requirements={requirements}
+        continueHref={continueHref}
+        continueLabel={continueLabel}
+      />
       <div className="mb-8 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-6">
         <h1 className="text-xl font-bold text-amber-950 dark:text-amber-100">{title}</h1>
         <p className="text-sm text-amber-900/90 dark:text-amber-200/90 mt-2">{description}</p>
@@ -48,7 +56,11 @@ export default async function SessionCredentialsGate({
           Credentials are stored only for this browser session on the server and are not visible to other users.
         </p>
       </div>
-      <PdiCredentialsSection sessionMode redirectAfterSave="/phonebanking" />
+      <PdiCredentialsSection
+        sessionMode
+        redirectAfterSave={continueHref}
+        gateRequirements={requirements}
+      />
     </div>
   );
 }

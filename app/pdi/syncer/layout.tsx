@@ -1,5 +1,7 @@
 import SessionCredentialsGate from "@/components/credentials/SessionCredentialsGate";
 
+export const dynamic = "force-dynamic";
+
 export default function PdiSyncerLayout({
   children,
 }: {
