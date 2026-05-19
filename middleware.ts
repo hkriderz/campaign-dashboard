@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
-  SESSION_COOKIE_MAX_AGE_SEC,
   SESSION_COOKIE_NAME,
   SESSION_REQUEST_HEADER,
+  getSessionCookieOptions,
   sessionCredentialsEnabled,
 } from "@/lib/credentials/config";
 import { createSessionId, isValidSessionId } from "@/lib/credentials/session-id";
@@ -17,11 +17,9 @@ export function middleware(request: NextRequest) {
 
   const requestHeaders = new Headers(request.headers);
   let sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  let setCookie = false;
 
   if (!isValidSessionId(sessionId)) {
     sessionId = createSessionId();
-    setCookie = true;
   }
 
   requestHeaders.set(SESSION_REQUEST_HEADER, sessionId);
@@ -30,15 +28,8 @@ export function middleware(request: NextRequest) {
     request: { headers: requestHeaders },
   });
 
-  if (setCookie) {
-    response.cookies.set(SESSION_COOKIE_NAME, sessionId, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_COOKIE_MAX_AGE_SEC,
-    });
-  }
+  // Re-issue every response so Max-Age slides and Secure matches current env (fixes HTTP deploys).
+  response.cookies.set(SESSION_COOKIE_NAME, sessionId, getSessionCookieOptions());
 
   return response;
 }

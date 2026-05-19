@@ -32,7 +32,8 @@ export async function GET(req: Request) {
     }
   });
 
-  return attachSessionCookie(res, newSessionId);
+  const sessionId = ctx.scope === "session" ? ctx.sessionId : newSessionId;
+  return attachSessionCookie(res, sessionId);
 }
 
 export async function POST(req: Request) {
@@ -116,5 +117,6 @@ export async function POST(req: Request) {
     }
   });
 
-  return attachSessionCookie(res, newSessionId);
+  const sessionId = ctx.scope === "session" ? ctx.sessionId : newSessionId;
+  return attachSessionCookie(res, sessionId);
 }

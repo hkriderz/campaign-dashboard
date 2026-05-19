@@ -52,6 +52,10 @@ When `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS=1` (or `true` / `yes` / `on`):
 
 Idle session folders are deleted automatically after `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS` (default 72h).
 
+**HTTP (no TLS):** leave `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE` unset or set `0` so the `cd_session` cookie is stored. If it is missing, every refresh creates a new session and uploads appear to vanish.
+
+**HTTPS:** set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
+
 ### GCP JSON via env (single-tenant / cron only)
 
 Paste the service account JSON into Dokploy as `GCP_SERVICE_ACCOUNT_JSON` (single line), or base64-encode it:

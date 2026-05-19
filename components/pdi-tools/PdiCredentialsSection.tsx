@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 type CredentialSource = "credentials-folder" | "env" | "none";
@@ -32,7 +33,15 @@ function sourceLabel(s: CredentialSource): string {
   return "not set";
 }
 
-export default function PdiCredentialsSection({ sessionMode = false }: { sessionMode?: boolean }) {
+export default function PdiCredentialsSection({
+  sessionMode = false,
+  redirectAfterSave,
+}: {
+  sessionMode?: boolean;
+  /** After a successful session upload, navigate here (e.g. /phonebanking). */
+  redirectAfterSave?: string;
+}) {
+  const router = useRouter();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,14 +90,31 @@ export default function PdiCredentialsSection({ sessionMode = false }: { session
         return;
       }
       if (data.status) setStatus(data.status);
+
+      const gcpReady = data.status?.gcp?.configured ?? false;
+      const sessionBound = !sessionMode || data.status?.credentialScope === "session";
+      const canOpenDashboard = sessionBound && gcpReady;
+
+      if (sessionMode && canOpenDashboard && redirectAfterSave) {
+        setMessage("Saved. Opening dashboard…");
+        router.refresh();
+        router.push(redirectAfterSave);
+        return;
+      }
+
       setMessage(
         sessionMode
-          ? "Saved for this browser session. Reload the page to access dashboard data."
+          ? canOpenDashboard
+            ? "Saved for this browser session. You can open Phone Banking or PDI tools now."
+            : "Saved, but the session cookie may not be set. On HTTP deploys set CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=0."
           : "Saved. Mapper refresh and Syncer will use these credentials."
       );
       setGcpFile(null);
       setPdiFile(null);
       setPdiEnvText("");
+      if (sessionMode && canOpenDashboard) {
+        router.refresh();
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Upload failed");
     } finally {

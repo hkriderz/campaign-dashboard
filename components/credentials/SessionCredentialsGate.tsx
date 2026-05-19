@@ -48,7 +48,7 @@ export default async function SessionCredentialsGate({
           Credentials are stored only for this browser session on the server and are not visible to other users.
         </p>
       </div>
-      <PdiCredentialsSection sessionMode />
+      <PdiCredentialsSection sessionMode redirectAfterSave="/phonebanking" />
     </div>
   );
 }
