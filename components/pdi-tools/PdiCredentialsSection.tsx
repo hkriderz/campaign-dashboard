@@ -47,12 +47,15 @@ export default function PdiCredentialsSection({
   sessionMode = false,
   redirectAfterSave,
   gateRequirements,
+  onCredentialsSaved,
 }: {
   sessionMode?: boolean;
   /** After a successful session upload, navigate here (e.g. /phonebanking). */
   redirectAfterSave?: string;
   /** When set (session gate), treat these as required before showing continue / auto-redirect. */
   gateRequirements?: GateRequirements;
+  /** Called after a successful session upload when gate requirements are met. */
+  onCredentialsSaved?: () => void;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<StatusResponse | null>(null);
@@ -68,7 +71,7 @@ export default function PdiCredentialsSection({
   const refresh = useCallback(async () => {
     setLoadError(null);
     try {
-      const res = await fetch("/api/pdi/credentials");
+      const res = await fetch("/api/pdi/credentials", { credentials: "same-origin", cache: "no-store" });
       const data = (await res.json()) as StatusResponse & { error?: string };
       if (!res.ok) {
         setLoadError(data.error ?? res.statusText);
@@ -123,10 +126,12 @@ export default function PdiCredentialsSection({
       const canOpenDashboard =
         sessionBound && data.status != null && meetsGateRequirements(data.status, gateRequirements);
 
-      if (sessionMode && canOpenDashboard && redirectAfterSave) {
+      if (sessionMode && canOpenDashboard) {
         setMessage("Saved. Opening dashboard…");
-        router.refresh();
-        router.push(redirectAfterSave);
+        onCredentialsSaved?.();
+        if (redirectAfterSave) {
+          window.location.assign(redirectAfterSave);
+        }
         return;
       }
 
@@ -184,8 +189,7 @@ export default function PdiCredentialsSection({
           <button
             type="button"
             onClick={() => {
-              router.refresh();
-              router.push(redirectAfterSave);
+              window.location.assign(redirectAfterSave);
             }}
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white"
           >

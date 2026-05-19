@@ -1,11 +1,5 @@
-import {
-  meetsDataAccessRequirements,
-  resolveContextFromCookies,
-  sessionCredentialsEnabled,
-  type DataAccessRequirements,
-} from "@/lib/credentials";
-import SessionCredentialsGateUnlock from "@/components/credentials/SessionCredentialsGateUnlock";
-import PdiCredentialsSection from "@/components/pdi-tools/PdiCredentialsSection";
+import { sessionCredentialsEnabled, type DataAccessRequirements } from "@/lib/credentials";
+import SessionCredentialsGateClient from "@/components/credentials/SessionCredentialsGateClient";
 
 type Props = {
   children: React.ReactNode;
@@ -15,8 +9,8 @@ type Props = {
 };
 
 /**
- * Server gate: when session credentials are enabled, show an upload wall until
- * the current browser session has the required keys configured.
+ * When session credentials are enabled, the client gate checks /api/pdi/credentials
+ * (same source as uploads) so the wall never disagrees with "Ready" status.
  */
 export default async function SessionCredentialsGate({
   children,
@@ -28,39 +22,9 @@ export default async function SessionCredentialsGate({
     return children;
   }
 
-  const ctx = await resolveContextFromCookies();
-  if (ctx.scope === "session" && meetsDataAccessRequirements(ctx, requirements)) {
-    return children;
-  }
-
-  const needsPdi = Boolean(requirements.pdi);
-  const needsGcp = requirements.gcp !== false;
-  const continueHref = needsPdi ? "/pdi/mapper" : "/phonebanking";
-  const continueLabel = needsPdi ? "Continue to PDI Mapper" : "Continue to Phone Banking";
-
   return (
-    <div className="max-w-3xl mx-auto">
-      <SessionCredentialsGateUnlock
-        requirements={requirements}
-        continueHref={continueHref}
-        continueLabel={continueLabel}
-      />
-      <div className="mb-8 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-6">
-        <h1 className="text-xl font-bold text-amber-950 dark:text-amber-100">{title}</h1>
-        <p className="text-sm text-amber-900/90 dark:text-amber-200/90 mt-2">{description}</p>
-        <ul className="mt-3 text-sm text-amber-800 dark:text-amber-300 list-disc list-inside space-y-1">
-          {needsGcp ? <li>GCP service account JSON (BigQuery access)</li> : null}
-          {needsPdi ? <li>PDI username, password, and API token</li> : null}
-        </ul>
-        <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
-          Credentials are stored only for this browser session on the server and are not visible to other users.
-        </p>
-      </div>
-      <PdiCredentialsSection
-        sessionMode
-        redirectAfterSave={continueHref}
-        gateRequirements={requirements}
-      />
-    </div>
+    <SessionCredentialsGateClient requirements={requirements} title={title} description={description}>
+      {children}
+    </SessionCredentialsGateClient>
   );
 }
