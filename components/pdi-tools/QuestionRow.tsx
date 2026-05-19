@@ -92,7 +92,7 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
 
       {qMapping ? (
         <>
-          <div className="flex items-center px-3 py-1 bg-gray-50 dark:bg-zinc-900/60 border-b border-gray-100 dark:border-zinc-800/60">
+          <div className="hidden sm:flex items-center px-3 py-1 bg-gray-50 dark:bg-zinc-900/60 border-b border-gray-100 dark:border-zinc-800/60">
             <span className="text-[10px] font-semibold text-gray-400 dark:text-zinc-600 uppercase tracking-wide w-44 flex-shrink-0">
               STW Answer
             </span>
@@ -142,15 +142,15 @@ function AnswerRow({
   const aMapping: AnswerMappingEntry | undefined = state.answerMappings[aKeyFull];
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 dark:hover:bg-zinc-800/40 transition-colors">
-      <div className="w-44 flex-shrink-0 min-w-0">
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2 sm:py-1.5 hover:bg-gray-50 dark:hover:bg-zinc-800/40 transition-colors">
+      <div className="w-full sm:w-44 flex-shrink-0 min-w-0">
         <p className="text-[11px] text-gray-700 dark:text-zinc-200 truncate" title={answerValue}>
           {answerValue}
         </p>
         <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">{questionName}</p>
       </div>
 
-      <span className="text-gray-300 dark:text-zinc-700 text-[11px] flex-shrink-0">—</span>
+      <span className="hidden sm:inline text-gray-300 dark:text-zinc-700 text-[11px] flex-shrink-0">—</span>
 
       <div className="flex items-center gap-1 flex-shrink-0">
         {aMapping ? (
@@ -175,7 +175,7 @@ function AnswerRow({
       <select
         value={aMapping?.pdiAnswerOptionId ?? ""}
         onChange={(e) => onSelect(answerValue, e.target.value, pdiQuestionId)}
-        className="flex-1 text-[11px] px-1.5 py-0.5 rounded border border-gray-200 dark:border-zinc-700/50 focus:outline-none focus:ring-1 focus:ring-green-500/40 bg-white dark:bg-zinc-900 text-gray-700 dark:text-zinc-200 cursor-pointer transition-colors"
+        className="flex-1 min-w-0 text-sm sm:text-[11px] px-2 py-2 sm:py-0.5 min-h-10 sm:min-h-0 rounded border border-gray-200 dark:border-zinc-700/50 focus:outline-none focus:ring-1 focus:ring-green-500/40 bg-white dark:bg-zinc-900 text-gray-700 dark:text-zinc-200 cursor-pointer transition-colors"
       >
         <option value="">— unmapped —</option>
         {answerOptions.map((opt) => (

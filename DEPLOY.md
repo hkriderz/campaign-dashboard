@@ -47,6 +47,8 @@ When `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS=1` (or `true` / `yes` / `on`):
 1. Each visitor gets an anonymous browser session (httpOnly cookie).
 2. They must upload GCP (+ PDI for mapper/syncer) credentials before seeing data.
 3. Credentials are stored under `credentials/sessions/<uuid>/` — **not shared** with other visitors.
+
+**One-file upload:** Users can upload a single JSON bundle with `gcp` and `pdi` objects (see `credentials/campaign-credentials.example.json`). The server splits it into `gcp-service-account.json` and `pdi-credentials.json` in the session folder.
 4. **Remove** `GCP_SERVICE_ACCOUNT_JSON` and `PDI_*` from Dokploy env if you do not want a shared global fallback.
 5. Keep `GCP_SERVICE_ACCOUNT_JSON` + `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` only for **cron** snapshot rebuilds (no session cookie → global creds apply).
 

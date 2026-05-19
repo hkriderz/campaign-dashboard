@@ -14,7 +14,7 @@ export default function RightPanel() {
   ];
 
   return (
-    <aside className="w-72 flex-shrink-0 flex flex-col border-l border-gray-200 dark:border-zinc-700/50 bg-white dark:bg-zinc-900 overflow-hidden transition-colors">
+    <aside className="w-full lg:w-72 lg:flex-shrink-0 flex flex-col border-l border-gray-200 dark:border-zinc-700/50 bg-white dark:bg-zinc-900 overflow-hidden transition-colors min-h-0">
       <div className="flex border-b border-gray-200 dark:border-zinc-700/50">
         {tabs.map((tab) => (
           <button

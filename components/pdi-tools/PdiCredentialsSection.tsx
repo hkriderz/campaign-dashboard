@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { COMBINED_CREDENTIALS_EXAMPLE } from "@/lib/pdi-tools/combined-credentials-example";
 
 type CredentialSource = "credentials-folder" | "env" | "none";
 
@@ -58,6 +59,8 @@ export default function PdiCredentialsSection({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [bundleFile, setBundleFile] = useState<File | null>(null);
+  const [showSeparateUploads, setShowSeparateUploads] = useState(false);
   const [gcpFile, setGcpFile] = useState<File | null>(null);
   const [pdiFile, setPdiFile] = useState<File | null>(null);
   const [pdiEnvText, setPdiEnvText] = useState("");
@@ -96,13 +99,14 @@ export default function PdiCredentialsSection({
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setMessage(null);
-    if (!gcpFile && !pdiFile && !pdiEnvText.trim()) {
-      setMessage("Choose at least one file or paste PDI env lines.");
+    if (!bundleFile && !gcpFile && !pdiFile && !pdiEnvText.trim()) {
+      setMessage("Choose a credentials bundle or at least one separate file / PDI env lines.");
       return;
     }
     setBusy(true);
     try {
       const fd = new FormData();
+      if (bundleFile) fd.append("credentialsBundle", bundleFile);
       if (gcpFile) fd.append("gcpServiceAccount", gcpFile);
       if (pdiFile) fd.append("pdiCredentials", pdiFile);
       if (pdiEnvText.trim()) fd.append("pdiEnvText", pdiEnvText.trim());
@@ -133,6 +137,7 @@ export default function PdiCredentialsSection({
             : "Saved, but the session cookie may not be set. On HTTP deploys set CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=0."
           : "Saved. Mapper refresh and Syncer will use these credentials."
       );
+      setBundleFile(null);
       setGcpFile(null);
       setPdiFile(null);
       setPdiEnvText("");
@@ -244,6 +249,39 @@ export default function PdiCredentialsSection({
       ) : null}
 
       <form onSubmit={(e) => void onSubmit(e)} className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 space-y-4">
+        <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/50 dark:bg-emerald-950/20 p-4 space-y-3">
+          <label className="block text-sm font-semibold text-gray-800 dark:text-gray-100">
+            Credentials bundle (recommended)
+          </label>
+          <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+            One JSON with <code className="px-1 rounded bg-white/80 dark:bg-gray-800">gcp</code> and{" "}
+            <code className="px-1 rounded bg-white/80 dark:bg-gray-800">pdi</code> sections. Phone Banking needs only{" "}
+            <code className="px-1 rounded bg-white/80 dark:bg-gray-800">gcp</code>.
+          </p>
+          <input
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => setBundleFile(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-gray-700 dark:text-gray-200 file:mr-3 file:rounded file:border-0 file:bg-emerald-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+          />
+          <details className="text-xs text-gray-600 dark:text-gray-400">
+            <summary className="cursor-pointer font-medium text-emerald-800 dark:text-emerald-300">Example JSON shape</summary>
+            <pre className="mt-2 p-3 rounded-lg bg-gray-900/90 dark:bg-black/40 text-emerald-100/90 overflow-x-auto text-[10px] leading-relaxed max-h-48">
+              {COMBINED_CREDENTIALS_EXAMPLE}
+            </pre>
+          </details>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowSeparateUploads((v) => !v)}
+          className="text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 underline-offset-2 hover:underline"
+        >
+          {showSeparateUploads ? "Hide separate file uploads" : "Upload GCP and PDI as separate files instead"}
+        </button>
+
+        {showSeparateUploads ? (
+        <>
         <div>
           <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">
             GCP service account JSON
@@ -290,6 +328,9 @@ export default function PdiCredentialsSection({
             {sessionMode ? "Saved for this session only." : "Saved as credentials/pdi.env (merged with JSON on the server)."}
           </p>
         </div>
+        </>
+        ) : null}
+
         <div className="flex flex-wrap gap-3 items-center">
           <button
             type="submit"

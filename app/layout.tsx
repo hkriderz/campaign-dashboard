@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Inter } from "next/font/google";
 import {
@@ -19,6 +19,12 @@ export const metadata: Metadata = {
   title: "Campaign Operations Dashboard",
   description:
     "Phone banking and canvassing analytics for Scale to Win campaigns.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default async function RootLayout({
@@ -46,7 +52,7 @@ export default async function RootLayout({
       </head>
       <body
         suppressHydrationWarning
-        className="font-sans bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased min-h-screen"
+        className="font-sans bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased min-h-screen overflow-x-hidden"
       >
         {children}
       </body>

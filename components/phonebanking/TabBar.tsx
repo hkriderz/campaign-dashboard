@@ -21,7 +21,7 @@ export default function TabBar({ tabs, paramKey = "tab", defaultTab }: Props) {
   const active = searchParams.get(paramKey) ?? defaultTab ?? tabs[0]?.id;
 
   return (
-    <div className="flex gap-1 border-b border-gray-200/80 dark:border-white/10 mb-6">
+    <div className="flex gap-1 border-b border-gray-200/80 dark:border-white/10 mb-6 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {tabs.map((tab) => {
         const isActive = active === tab.id;
         const params = new URLSearchParams(searchParams.toString());
@@ -33,7 +33,7 @@ export default function TabBar({ tabs, paramKey = "tab", defaultTab }: Props) {
             key={tab.id}
             href={href}
             className={[
-              "flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors",
+              "flex items-center gap-1.5 px-3 sm:px-4 py-2.5 min-h-11 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0",
               isActive
                 ? "border-indigo-500 text-indigo-600 dark:text-indigo-300 shadow-[0_4px_12px_-4px_rgba(124,108,240,0.5)]"
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600",

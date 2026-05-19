@@ -20,6 +20,7 @@ credentials/pdi-credentials.json
 !package-lock.json
 !tsconfig.json
 !credentials/*.example
+!credentials/*.example.json
 
 # PDI folders — JSON/CSV contents gitignored via *.json above; .gitkeep is tracked
 # pdi-mappings/   Mapper + Syncer mapping JSON

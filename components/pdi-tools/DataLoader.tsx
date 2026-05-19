@@ -63,16 +63,15 @@ export default function DataLoader() {
   const hasMappings = Object.keys(state.questionMappings).length > 0;
 
   return (
-    <header className="flex items-center gap-3 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-700/50 min-h-[52px] transition-colors">
-      <div className="flex-shrink-0">
-        <p className="text-[15px] font-bold text-green-600 dark:text-green-400 leading-tight">🗺 PDI Magic Mapper</p>
+    <header className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-3 px-3 sm:px-4 py-3 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-700/50 transition-colors">
+      <div className="flex-shrink-0 min-w-0">
+        <p className="text-sm sm:text-[15px] font-bold text-green-600 dark:text-green-400 leading-tight">🗺 PDI Magic Mapper</p>
         <p className="text-[11px] text-gray-400 dark:text-zinc-500 leading-tight mt-0.5">
           Scale to Win → PDI schema unifier
         </p>
       </div>
 
-      <div className="flex-1" />
-
+      <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2 lg:flex-1 lg:justify-end min-w-0">
       {toast ? (
         <span className="text-[11px] text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700/50 px-2 py-0.5 rounded">
           {toast}
@@ -89,15 +88,15 @@ export default function DataLoader() {
         <CountPill label="STW" count={stwCount} unit=" surveys" loaded={stwCount > 0} />
       </div>
 
-      <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700/60 flex-shrink-0" />
+      <div className="hidden sm:block w-px h-4 bg-gray-200 dark:bg-zinc-700/60 flex-shrink-0" />
 
-      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+      <div className="flex items-center gap-1.5 flex-wrap sm:justify-end">
         <button
           type="button"
           onClick={() => void refreshFromApi()}
           disabled={state.isRefreshing}
           title="Refresh data from live API"
-          className="text-[11px] px-2.5 py-1 rounded border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800 hover:border-gray-400 dark:hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="text-xs px-3 py-2 min-h-10 rounded border border-gray-300 dark:border-zinc-600 text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800 hover:border-gray-400 dark:hover:border-zinc-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {state.isRefreshing ? "Refreshing…" : "⟳ Refresh"}
         </button>
@@ -148,10 +147,11 @@ export default function DataLoader() {
         <button
           type="button"
           onClick={handleExport}
-          className="text-[11px] px-2.5 py-1 rounded bg-green-600 hover:bg-green-500 text-white font-medium transition-colors"
+          className="text-xs px-3 py-2 min-h-10 rounded bg-green-600 hover:bg-green-500 text-white font-medium transition-colors"
         >
           ⬇ Export Mapping
         </button>
+      </div>
       </div>
     </header>
   );

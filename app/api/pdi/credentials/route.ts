@@ -9,6 +9,7 @@ import {
   pruneStaleSessionCredentials,
 } from "@/lib/credentials";
 import { ensureServerBootstrapped } from "@/lib/server/lazy-bootstrap";
+import { parseCombinedCredentialsBundle } from "@/lib/pdi-tools/combined-credentials";
 import {
   assertPdiEnvTextHasKeys,
   assertValidPdiCredentialsJson,
@@ -54,14 +55,21 @@ export async function POST(req: Request) {
       }
 
       const form = await req.formData();
+      const bundleFile = form.get("credentialsBundle");
       const gcpFile = form.get("gcpServiceAccount");
       const pdiFile = form.get("pdiCredentials");
       const pdiEnvText = form.get("pdiEnvText");
 
-      if (!(gcpFile instanceof File) && !(pdiFile instanceof File) && typeof pdiEnvText !== "string") {
+      const hasBundle = bundleFile instanceof File && bundleFile.size > 0;
+      const hasGcp = gcpFile instanceof File && gcpFile.size > 0;
+      const hasPdi = pdiFile instanceof File && pdiFile.size > 0;
+      const hasPdiEnv = typeof pdiEnvText === "string" && pdiEnvText.trim().length > 0;
+
+      if (!hasBundle && !hasGcp && !hasPdi && !hasPdiEnv) {
         return NextResponse.json(
           {
-            error: "Provide at least one of: gcpServiceAccount file, pdiCredentials file, or pdiEnvText.",
+            error:
+              "Provide a credentials bundle JSON, or separate GCP / PDI files, or PDI env lines.",
             code: 400,
           },
           { status: 400 }
@@ -70,6 +78,26 @@ export async function POST(req: Request) {
 
       const credentialsDir = ctx.credentialsDir;
       fs.mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
+
+      if (hasBundle) {
+        const buf = Buffer.from(await (bundleFile as File).arrayBuffer());
+        if (buf.length > MAX_FILE_BYTES) {
+          return NextResponse.json({ error: "Credentials bundle file is too large.", code: 400 }, { status: 400 });
+        }
+        const parts = parseCombinedCredentialsBundle(buf.toString("utf-8"));
+        if (parts.gcpJson) {
+          fs.writeFileSync(`${credentialsDir}/gcp-service-account.json`, parts.gcpJson, {
+            mode: 0o600,
+            encoding: "utf-8",
+          });
+        }
+        if (parts.pdiJson) {
+          fs.writeFileSync(`${credentialsDir}/pdi-credentials.json`, parts.pdiJson, {
+            mode: 0o600,
+            encoding: "utf-8",
+          });
+        }
+      }
 
       if (gcpFile instanceof File && gcpFile.size > 0) {
         const buf = Buffer.from(await gcpFile.arrayBuffer());

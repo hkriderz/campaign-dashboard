@@ -72,10 +72,10 @@ export default function LandingPage() {
             className="mx-auto mb-5"
             alt=""
           />
-          <h1 className="text-4xl font-bold tracking-tight text-gray-900 dark:text-gray-50 mb-3">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 dark:text-gray-50 mb-3">
             Campaign Operations Dashboard
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 text-lg max-w-xl mx-auto">
+          <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg max-w-xl mx-auto">
             Phone banking analytics, canvassing tracking, and PDI tools — all
             in one place.
           </p>

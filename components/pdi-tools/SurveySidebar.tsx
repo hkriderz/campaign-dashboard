@@ -75,7 +75,7 @@ export default function SurveySidebar() {
   );
 
   return (
-    <aside className="w-64 flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-zinc-700/50 bg-white dark:bg-zinc-900 overflow-hidden transition-colors">
+    <aside className="w-full lg:w-64 lg:flex-shrink-0 flex flex-col border-r border-gray-200 dark:border-zinc-700/50 bg-white dark:bg-zinc-900 overflow-hidden transition-colors min-h-0">
       <div className="px-3 py-2.5 border-b border-gray-200 dark:border-zinc-700/50">
         <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-2">
           Data Files

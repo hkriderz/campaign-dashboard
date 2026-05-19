@@ -235,7 +235,7 @@ export default function TagDataRefreshBar({
                 type="button"
                 onClick={onRefreshThisTag}
                 disabled={busy || !secret.trim()}
-                className="rounded bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-1 text-xs font-medium"
+                className="rounded bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-2 min-h-10 text-xs font-medium"
               >
                 {loading === "tag" ? "Refreshing…" : "Refresh this tag"}
               </button>
@@ -244,7 +244,7 @@ export default function TagDataRefreshBar({
               type="button"
               onClick={onRefreshAllTags}
               disabled={busy || !secret.trim()}
-              className="rounded bg-violet-700 hover:bg-violet-800 disabled:opacity-50 text-white px-3 py-1 text-xs font-medium"
+              className="rounded bg-violet-700 hover:bg-violet-800 disabled:opacity-50 text-white px-3 py-2 min-h-10 text-xs font-medium"
             >
               {loading === "all" ? "Refreshing all…" : "Refresh all tags"}
             </button>

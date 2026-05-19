@@ -83,7 +83,8 @@ export default function PhonebankerBarChart({
   }));
 
   return (
-    <ResponsiveContainer width="100%" height={360}>
+    <div className="w-full h-64 sm:h-[360px] min-w-0">
+    <ResponsiveContainer width="100%" height="100%">
       <BarChart
         data={chartData}
         margin={{ top: 10, right: 20, left: 0, bottom: 60 }}
@@ -96,7 +97,7 @@ export default function PhonebankerBarChart({
           tick={{ fontSize: 11, fill: darkMode ? "#9ca3af" : "#6b7280" }}
           angle={-40}
           textAnchor="end"
-          interval={0}
+          interval="preserveStartEnd"
         />
 
         <YAxis
@@ -154,5 +155,6 @@ export default function PhonebankerBarChart({
         )}
       </BarChart>
     </ResponsiveContainer>
+    </div>
   );
 }
