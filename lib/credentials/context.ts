@@ -56,14 +56,28 @@ export async function resolveContextFromCookies(): Promise<CredentialContext> {
 
 /** Resolve context from a `Request` (API routes). */
 export function resolveContextFromRequest(req: Request): CredentialContext {
+  return resolveContextFromRequestWithSession(req).ctx;
+}
+
+export type RequestCredentialResolution = {
+  ctx: CredentialContext;
+  /** Set on the response when a new browser session was created for this request. */
+  newSessionId: string | null;
+};
+
+/**
+ * When session mode is on, always resolve to a session directory (never global).
+ * Creates a new session id if the cookie/header is missing (e.g. first API call before middleware cookie is stored).
+ */
+export function resolveContextFromRequestWithSession(req: Request): RequestCredentialResolution {
   if (!sessionCredentialsEnabled()) {
-    return globalContext();
+    return { ctx: globalContext(), newSessionId: null };
   }
 
   const headerSession = req.headers.get(SESSION_REQUEST_HEADER);
   if (isValidSessionId(headerSession)) {
     ensureSessionCredentialsDir(headerSession);
-    return sessionContext(headerSession);
+    return { ctx: sessionContext(headerSession), newSessionId: null };
   }
 
   const cookieHeader = req.headers.get("cookie") ?? "";
@@ -72,12 +86,13 @@ export function resolveContextFromRequest(req: Request): CredentialContext {
   );
   const raw = match?.[1] ? decodeURIComponent(match[1]) : null;
 
-  if (!isValidSessionId(raw)) {
-    return globalContext();
+  if (isValidSessionId(raw)) {
+    ensureSessionCredentialsDir(raw);
+    return { ctx: sessionContext(raw), newSessionId: null };
   }
 
-  ensureSessionCredentialsDir(raw);
-  return sessionContext(raw);
+  const newId = issueNewSessionId();
+  return { ctx: sessionContext(newId), newSessionId: newId };
 }
 
 /** New session id for middleware when cookie is absent or invalid. */

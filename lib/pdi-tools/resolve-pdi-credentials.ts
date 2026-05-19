@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { parseDotEnvLines } from "@/lib/env/parse-dotenv";
+import { sessionCredentialsEnabled } from "@/lib/credentials/config";
 import { getActiveCredentialContext } from "@/lib/credentials/store";
 import {
   resolveCredentialsDir,
@@ -249,6 +250,8 @@ export type PdiCredentialsPublicStatus = {
   credentialsDir: string;
   credentialsDirExists: boolean;
   filesInFolder: string[];
+  sessionModeEnabled: boolean;
+  credentialScope: "global" | "session";
   sessionScoped: boolean;
   gcp: {
     configured: boolean;
@@ -282,11 +285,16 @@ export function getPdiCredentialsPublicStatus(ctx?: CredentialContext | null): P
     gcpFileName = path.basename(r.gcpCredentialsPath);
   }
 
+  const scope: "global" | "session" =
+    active?.scope === "session" ? "session" : "global";
+
   return {
     credentialsDir,
     credentialsDirExists,
     filesInFolder,
-    sessionScoped: active?.scope === "session",
+    sessionModeEnabled: sessionCredentialsEnabled(),
+    credentialScope: scope,
+    sessionScoped: scope === "session",
     gcp: {
       configured: Boolean(r.gcpCredentialsPath),
       source: r.gcpSource,

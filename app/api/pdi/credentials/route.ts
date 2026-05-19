@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import * as fs from "fs";
 import {
-  resolveContextFromRequest,
+  attachSessionCookie,
+  resolveContextFromRequestWithSession,
   runWithCredentialContextAsync,
+  sessionCredentialsEnabled,
   touchSessionMeta,
   pruneStaleSessionCredentials,
 } from "@/lib/credentials";
@@ -18,8 +20,9 @@ const MAX_FILE_BYTES = 1_500_000;
 
 export async function GET(req: Request) {
   ensureServerBootstrapped();
-  const ctx = resolveContextFromRequest(req);
-  return runWithCredentialContextAsync(ctx, async () => {
+  const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
+
+  const res = await runWithCredentialContextAsync(ctx, async () => {
     try {
       const status = getPdiCredentialsPublicStatus(ctx);
       return NextResponse.json(status);
@@ -28,14 +31,27 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: message, code: 500 }, { status: 500 });
     }
   });
+
+  return attachSessionCookie(res, newSessionId);
 }
 
 export async function POST(req: Request) {
   ensureServerBootstrapped();
-  const ctx = resolveContextFromRequest(req);
+  const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
 
-  return runWithCredentialContextAsync(ctx, async () => {
+  const res = await runWithCredentialContextAsync(ctx, async () => {
     try {
+      if (sessionCredentialsEnabled() && ctx.scope !== "session") {
+        return NextResponse.json(
+          {
+            error:
+              "Session credentials mode is on but this request has no session. Refresh the page and try again.",
+            code: "SESSION_REQUIRED",
+          },
+          { status: 401 }
+        );
+      }
+
       const form = await req.formData();
       const gcpFile = form.get("gcpServiceAccount");
       const pdiFile = form.get("pdiCredentials");
@@ -99,4 +115,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: message, code: 400 }, { status: 400 });
     }
   });
+
+  return attachSessionCookie(res, newSessionId);
 }

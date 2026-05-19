@@ -9,6 +9,8 @@ type StatusResponse = {
   credentialsDirExists: boolean;
   filesInFolder: string[];
   sessionScoped?: boolean;
+  sessionModeEnabled?: boolean;
+  credentialScope?: "global" | "session";
   gcp: {
     configured: boolean;
     source: CredentialSource;
@@ -121,6 +123,20 @@ export default function PdiCredentialsSection({ sessionMode = false }: { session
 
       {status ? (
         <div className="mb-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 text-sm space-y-3">
+          {status.sessionModeEnabled ? (
+            <div className="text-xs rounded-lg bg-slate-100 dark:bg-slate-800/80 px-3 py-2 text-slate-700 dark:text-slate-300">
+              <span className="font-medium">Session mode:</span>{" "}
+              {status.credentialScope === "session" ? (
+                <>
+                  storing under <code className="text-[11px] break-all">{status.credentialsDir}</code>
+                </>
+              ) : (
+                <span className="text-amber-700 dark:text-amber-300">
+                  waiting for session cookie — save again after the page loads
+                </span>
+              )}
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-2 items-center">
             <span className="font-semibold text-gray-800 dark:text-gray-200">GCP (BigQuery)</span>
             <StatusPill ok={status.gcp.configured} label={status.gcp.configured ? "Ready" : "Missing"} />

@@ -32,9 +32,12 @@ export {
 export {
   resolveContextFromCookies,
   resolveContextFromRequest,
+  resolveContextFromRequestWithSession,
   issueNewSessionId,
   credentialsDirLabel,
+  type RequestCredentialResolution,
 } from "./context";
+export { attachSessionCookie } from "./session-cookie";
 export {
   resolveCredentialsDir,
   shouldUseGlobalCredentialFallback,

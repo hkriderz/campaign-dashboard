@@ -1,6 +1,8 @@
 /** Session-scoped credential storage (per-browser isolation). */
 export function sessionCredentialsEnabled(): boolean {
-  return process.env.CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS === "1";
+  const raw = process.env.CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS?.trim().toLowerCase();
+  if (!raw) return false;
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 /** Allow global `credentials/` + env vars when no session context (cron, local dev). */
@@ -20,7 +22,7 @@ export const SESSION_COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 30;
 /** Delete session credential folders older than this (hours). */
 export function sessionCredentialsTtlHours(): number {
   const raw = process.env.CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS;
-  if (raw == null || raw.trim() === "") return 72;
+  if (raw == null || String(raw).trim() === "") return 72;
   const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) return 72;
   return Math.min(n, 24 * 30);

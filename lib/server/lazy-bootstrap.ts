@@ -29,6 +29,9 @@ export function ensureServerBootstrapped(): void {
 }
 
 function materializeGcpKeyFromEnv(): void {
+  // In per-session mode, never write a shared global key from env (would leak to all users).
+  if (sessionCredentialsEnabled()) return;
+
   if (fs.existsSync(GLOBAL_GCP_KEY)) {
     if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
       process.env.GOOGLE_APPLICATION_CREDENTIALS = GLOBAL_GCP_KEY;

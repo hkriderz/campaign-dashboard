@@ -42,7 +42,7 @@ Ensure these are **not** committed: `.env.local`, `credentials/*.json`, `starlit
 
 ### Multi-user session credentials (recommended for shared Dokploy URL)
 
-When `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS=1`:
+When `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS=1` (or `true` / `yes` / `on`):
 
 1. Each visitor gets an anonymous browser session (httpOnly cookie).
 2. They must upload GCP (+ PDI for mapper/syncer) credentials before seeing data.
