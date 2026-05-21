@@ -152,6 +152,85 @@ function buildOverviewPhoneBankRowsForSelectedDate(
   );
 }
 
+/**
+ * The daily caller snapshot is the dashboard's source of truth after refresh.
+ * Build overview rows from the same visible slices so the "All Phone Banks" tab
+ * cannot go empty while the aggregate panels still have data.
+ */
+function buildOverviewPhoneBankRowsFromSlices(
+  slices: PbDashboardSlice[],
+  callerMetricsBySlice: Record<string, TagDailyCallerStat[]>,
+  phoneBanksByCampaignKey: Map<string, PhoneBankSummary>
+): PhoneBankSummary[] {
+  type Acc = {
+    campaignId: string;
+    campaignName: string;
+    totalDials: number;
+    totalSeconds: number;
+    callerKeys: Set<string>;
+    firstCallDate: string | null;
+    lastCallDate: string | null;
+    campaignCreatedDate: string;
+  };
+
+  const byCampaign = new Map<string, Acc>();
+  for (const slice of slices) {
+    const campaignKey = normalizeCampaignKey(slice.campaignName);
+    const base = phoneBanksByCampaignKey.get(campaignKey);
+    const existing = byCampaign.get(campaignKey);
+    const acc: Acc =
+      existing ??
+      {
+        campaignId: base?.campaignId ?? "",
+        campaignName: slice.campaignName,
+        totalDials: 0,
+        totalSeconds: 0,
+        callerKeys: new Set<string>(),
+        firstCallDate: null,
+        lastCallDate: null,
+        campaignCreatedDate: base?.campaignCreatedDate ?? "",
+      };
+
+    const callerRows = callerMetricsBySlice[slice.sliceKey] ?? [];
+    if (callerRows.length > 0) {
+      for (const row of callerRows) {
+        acc.totalDials += row.numDials;
+        acc.totalSeconds += row.totalCallSeconds;
+        acc.callerKeys.add(canonicalizePhonebankerKey(row.phonebankerName));
+        if (!acc.campaignId && row.campaignId) acc.campaignId = row.campaignId;
+      }
+    } else {
+      acc.totalDials += slice.numDials;
+      acc.totalSeconds += slice.callSeconds;
+      for (let i = 0; i < slice.pbers; i += 1) {
+        acc.callerKeys.add(`${slice.sliceKey}:${i}`);
+      }
+    }
+
+    if (!acc.firstCallDate || slice.callDate < acc.firstCallDate) acc.firstCallDate = slice.callDate;
+    if (!acc.lastCallDate || slice.callDate > acc.lastCallDate) acc.lastCallDate = slice.callDate;
+    byCampaign.set(campaignKey, acc);
+  }
+
+  return Array.from(byCampaign.values())
+    .map((acc) => ({
+      campaignId: acc.campaignId,
+      campaignName: acc.campaignName,
+      totalDials: acc.totalDials,
+      uniqueCallers: acc.callerKeys.size,
+      totalHours: Math.round((acc.totalSeconds / 3600) * 100) / 100,
+      totalSeconds: acc.totalSeconds,
+      firstCallDate: acc.firstCallDate,
+      lastCallDate: acc.lastCallDate,
+      campaignCreatedDate: acc.campaignCreatedDate,
+    }))
+    .sort((a, b) => {
+      const dateCompare = (b.lastCallDate ?? "").localeCompare(a.lastCallDate ?? "");
+      if (dateCompare !== 0) return dateCompare;
+      return b.totalDials - a.totalDials || a.campaignName.localeCompare(b.campaignName);
+    });
+}
+
 function blankCsvRow(): PhoneBankCsvRow {
   return {
     ...EMPTY_CSV_ROW,
@@ -426,13 +505,6 @@ export default async function TagPage({ params, searchParams }: Props) {
       return a.campaignName.localeCompare(b.campaignName);
     });
 
-  const visibleCampaignKeysAll = new Set(
-    dashboardSlices.map((s) => normalizeCampaignKey(s.campaignName))
-  );
-  const phoneBanksForDashboard = phoneBanks.filter((p) =>
-    visibleCampaignKeysAll.has(normalizeCampaignKey(p.campaignName))
-  );
-
   const csvSliceKeys = getCsvSliceKeys(tagId);
   const missingSlices = dashboardSlices.filter((s) => bqSliceKeys.has(s.sliceKey) && !csvSliceKeys.has(s.sliceKey));
 
@@ -551,14 +623,6 @@ export default async function TagPage({ params, searchParams }: Props) {
   const filteredRowsForPhonebankers = activeDate
     ? mergedRowsForPhonebankers.filter((r) => r.date === activeDate)
     : mergedRowsForPhonebankers;
-  const visibleCampaignKeysForDate = new Set(
-    filteredSlices.map((s) => normalizeCampaignKey(s.campaignName))
-  );
-  const filteredPhoneBanks = activeDate
-    ? phoneBanksForDashboard.filter((p) =>
-        visibleCampaignKeysForDate.has(normalizeCampaignKey(p.campaignName))
-      )
-    : phoneBanksForDashboard;
   const phoneBanksByCampaignKey = new Map(
     phoneBanks.map((p) => [normalizeCampaignKey(p.campaignName), p] as const)
   );
@@ -569,7 +633,11 @@ export default async function TagPage({ params, searchParams }: Props) {
         phoneBanksByCampaignKey,
         activeDate
       )
-    : filteredPhoneBanks;
+    : buildOverviewPhoneBankRowsFromSlices(
+        filteredSlices,
+        callerMetricsBySlice,
+        phoneBanksByCampaignKey
+      );
   const aggregateSliceKeys = new Set(filteredSlices.map((s) => s.sliceKey));
   const rollupPf = rollupPollingAndFinalAnswers(bqQuestionStats, {
     sliceKeys: aggregateSliceKeys,
@@ -620,16 +688,16 @@ export default async function TagPage({ params, searchParams }: Props) {
   const headerStatsForSelectedDate = Boolean(activeDate);
   const phoneBankCountBox = headerStatsForSelectedDate
     ? filteredSlices.length
-    : filteredPhoneBanks.length;
+    : overviewPhoneBanks.length;
   const totalDials = headerStatsForSelectedDate
     ? filteredSlices.reduce((s, x) => s + x.numDials, 0)
-    : filteredPhoneBanks.reduce((s, p) => s + p.totalDials, 0);
+    : overviewPhoneBanks.reduce((s, p) => s + p.totalDials, 0);
   const totalHours = headerStatsForSelectedDate
     ? Math.round((filteredSlices.reduce((s, x) => s + x.callSeconds, 0) / 3600) * 100) / 100
-    : Math.round(filteredPhoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100;
+    : Math.round(overviewPhoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100;
   const uniqueCallers = headerStatsForSelectedDate
     ? uniquePbersForAggregate
-    : filteredPhoneBanks.reduce((s, p) => s + p.uniqueCallers, 0);
+    : overviewPhoneBanks.reduce((s, p) => s + p.uniqueCallers, 0);
 
   return (
     <div className="max-w-7xl mx-auto">
