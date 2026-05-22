@@ -103,6 +103,7 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         pdiQuestions: action.pdiQuestions,
         stwData: action.stwData,
+        activeSurvey: null,
         dataLoaded: true,
         loadError: null,
         isRefreshing: false,

@@ -5,19 +5,16 @@ import { useApp } from "@/lib/pdi-tools/mapping-context";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import type { PdiQuestion, StwRow } from "@/lib/pdi-tools/types";
 
+type CompletionFilter = "all" | "filled" | "empty";
+
 export default function SurveySidebar() {
   const { state, dispatch } = useApp();
   const pdiFileRef = useRef<HTMLInputElement>(null);
   const stwFileRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
+  const [completionFilter, setCompletionFilter] = useState<CompletionFilter>("all");
 
   const surveyNames = useMemo(() => Object.keys(state.stwData).sort(), [state.stwData]);
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return surveyNames;
-    const q = search.toLowerCase();
-    return surveyNames.filter((n) => n.toLowerCase().includes(q));
-  }, [surveyNames, search]);
 
   function handlePdiUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -67,6 +64,23 @@ export default function SurveySidebar() {
     }
     return { mappedQ, totalQ, mappedA, totalA };
   }
+
+  function matchesCompletionFilter(surveyName: string, filter: CompletionFilter): boolean {
+    if (filter === "all") return true;
+    const { mappedQ, totalQ, mappedA, totalA } = getSurveyStats(surveyName);
+    const filled = totalQ > 0 && totalA > 0 && mappedQ === totalQ && mappedA === totalA;
+    const empty = mappedQ === 0 && mappedA === 0;
+    return filter === "filled" ? filled : empty;
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return surveyNames.filter((n) => {
+      const matchesSearch = !q || n.toLowerCase().includes(q);
+      return matchesSearch && matchesCompletionFilter(n, completionFilter);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surveyNames, search, completionFilter, state.questionMappings, state.answerMappings]);
 
   const pdiCount = state.pdiQuestions.length;
   const stwRecords = Object.values(state.stwData).reduce(
@@ -131,6 +145,22 @@ export default function SurveySidebar() {
           placeholder="Filter surveys…"
           className="w-full text-[11px] px-2 py-1 rounded border border-gray-300 dark:border-zinc-700 focus:outline-none focus:ring-1 focus:ring-green-500/40 bg-gray-50 dark:bg-zinc-800 dark:bg-zinc-900 text-gray-800 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-600 transition-colors"
         />
+        <div className="mt-2 grid grid-cols-3 gap-1">
+          {(["all", "filled", "empty"] as CompletionFilter[]).map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => setCompletionFilter(filter)}
+              className={`text-[10px] rounded border px-1.5 py-1 font-medium capitalize transition-colors ${
+                completionFilter === filter
+                  ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
+                  : "border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {filter}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -140,7 +170,7 @@ export default function SurveySidebar() {
           </p>
         ) : filtered.length === 0 ? (
           <p className="px-3 py-4 text-center text-[11px] text-gray-400 dark:text-zinc-600">
-            No matches for &ldquo;{search}&rdquo;
+            No surveys match the current filter.
           </p>
         ) : (
           <ul>

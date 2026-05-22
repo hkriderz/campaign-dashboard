@@ -6,7 +6,18 @@ import type { SyncLogger } from "./logger";
 
 const LOCK_TTL_SEC = 1800;
 
-type LockRow = { locked_by: string; locked_at: unknown };
+type LockRow = { lock_key?: string; locked_by: string; locked_at: unknown };
+
+export type SyncLockStatus = {
+  table: string;
+  lockKey: "global";
+  locked: boolean;
+  lockedBy: string | null;
+  lockedAt: string | null;
+  ageSeconds: number | null;
+  stale: boolean;
+  ttlSeconds: number;
+};
 
 function coerceTimestamp(val: unknown): string {
   if (val == null) return "";
@@ -33,6 +44,43 @@ function parseLockedAt(raw: string): Date {
 function lockHolderIdentity(): string {
   const user = process.env.USER ?? process.env.USERNAME ?? "unknown";
   return `${user}@${os.hostname()}`;
+}
+
+export async function getSyncLockStatus(): Promise<SyncLockStatus> {
+  const rows = await runQuery<LockRow>(
+    `SELECT lock_key, locked_by, locked_at FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = 'global' LIMIT 1`
+  );
+
+  if (rows.length === 0) {
+    return {
+      table: BQ_LOCK_TABLE,
+      lockKey: "global",
+      locked: false,
+      lockedBy: null,
+      lockedAt: null,
+      ageSeconds: null,
+      stale: false,
+      ttlSeconds: LOCK_TTL_SEC,
+    };
+  }
+
+  const row = rows[0]!;
+  const lockedAt = parseLockedAt(coerceTimestamp(row.locked_at));
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - lockedAt.getTime()) / 1000));
+  return {
+    table: BQ_LOCK_TABLE,
+    lockKey: "global",
+    locked: true,
+    lockedBy: row.locked_by,
+    lockedAt: lockedAt.toISOString(),
+    ageSeconds,
+    stale: ageSeconds >= LOCK_TTL_SEC,
+    ttlSeconds: LOCK_TTL_SEC,
+  };
+}
+
+export async function clearGlobalSyncLock(): Promise<void> {
+  await executeSql(`DELETE FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = 'global'`);
 }
 
 /**

@@ -40,6 +40,25 @@ type SyncReportsResponse = {
   error?: string;
 };
 
+type SyncLockStatus = {
+  table: string;
+  lockKey: "global";
+  locked: boolean;
+  lockedBy: string | null;
+  lockedAt: string | null;
+  ageSeconds: number | null;
+  stale: boolean;
+  ttlSeconds: number;
+  error?: string;
+};
+
+type ClearSyncLockResponse = {
+  ok?: boolean;
+  previous?: SyncLockStatus;
+  current?: SyncLockStatus;
+  error?: string;
+};
+
 type PythonSyncResponse = {
   engine?: "python";
   exitCode: number | null;
@@ -83,6 +102,16 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function formatAge(seconds: number | null): string {
+  if (seconds == null) return "—";
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remMinutes = minutes % 60;
+  return remMinutes > 0 ? `${hours}h ${remMinutes}m` : `${hours}h`;
+}
+
 type RunStatus = "idle" | "running" | "completed" | "failed";
 
 export default function SyncerClient() {
@@ -97,6 +126,10 @@ export default function SyncerClient() {
   const [mappingLoadError, setMappingLoadError] = useState<string | null>(null);
   const [reportsCatalog, setReportsCatalog] = useState<SyncReportsResponse | null>(null);
   const [reportsLoadError, setReportsLoadError] = useState<string | null>(null);
+  const [syncLock, setSyncLock] = useState<SyncLockStatus | null>(null);
+  const [syncLockError, setSyncLockError] = useState<string | null>(null);
+  const [syncLockBusy, setSyncLockBusy] = useState(false);
+  const [syncLockMessage, setSyncLockMessage] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -142,10 +175,29 @@ export default function SyncerClient() {
     }
   }, []);
 
+  const refreshSyncLock = useCallback(async () => {
+    setSyncLockError(null);
+    try {
+      const res = await fetch("/api/pdi/sync-lock", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const data = (await res.json()) as SyncLockStatus;
+      if (!res.ok) {
+        setSyncLockError(data.error ?? res.statusText);
+        return;
+      }
+      setSyncLock(data);
+    } catch (e) {
+      setSyncLockError(e instanceof Error ? e.message : "Failed to load sync lock status");
+    }
+  }, []);
+
   useEffect(() => {
     void refreshMappingFiles();
     void refreshReports();
-  }, [refreshMappingFiles, refreshReports]);
+    void refreshSyncLock();
+  }, [refreshMappingFiles, refreshReports, refreshSyncLock]);
 
   useEffect(() => {
     return () => {
@@ -187,6 +239,34 @@ export default function SyncerClient() {
 
   function appendLog(event: SyncLogEvent) {
     setLogEvents((prev) => [...prev, event]);
+  }
+
+  async function clearSyncLock() {
+    const confirmed = window.confirm(
+      "Only clear the sync lock if you are sure no PDI sync is currently running. Clear the global sync lock now?"
+    );
+    if (!confirmed) return;
+
+    setSyncLockBusy(true);
+    setSyncLockMessage(null);
+    setSyncLockError(null);
+    try {
+      const res = await fetch("/api/pdi/sync-lock", {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const data = (await res.json()) as ClearSyncLockResponse;
+      if (!res.ok) {
+        setSyncLockError(data.error ?? res.statusText);
+        return;
+      }
+      setSyncLock(data.current ?? null);
+      setSyncLockMessage("Sync lock cleared. You can retry the sync.");
+    } catch (e) {
+      setSyncLockError(e instanceof Error ? e.message : "Failed to clear sync lock");
+    } finally {
+      setSyncLockBusy(false);
+    }
   }
 
   async function runParityCheck() {
@@ -248,6 +328,7 @@ export default function SyncerClient() {
       if (!res.ok) {
         setClientError("error" in data && data.error ? data.error : res.statusText);
         setRunStatus("failed");
+        void refreshSyncLock();
         setLoading(false);
         return;
       }
@@ -269,6 +350,7 @@ export default function SyncerClient() {
             setRunStatus(parsed.status === "failed" ? "failed" : "completed");
             setTsSummary(parsed.summary);
             void refreshReports();
+            void refreshSyncLock();
             if (parsed.error) {
               setClientError(parsed.error);
             }
@@ -294,6 +376,7 @@ export default function SyncerClient() {
       setPythonResult(data as PythonSyncResponse);
       setRunStatus((data as PythonSyncResponse).exitCode === 0 ? "completed" : "failed");
       void refreshReports();
+      void refreshSyncLock();
       setLoading(false);
     } catch (e) {
       setClientError(e instanceof Error ? e.message : "Request failed");
@@ -311,6 +394,69 @@ export default function SyncerClient() {
           <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_SYNC_ENGINE=python</code> to use{" "}
           <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">stw_to_pdi.py</code> instead.
         </p>
+      </div>
+
+      <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Sync lock</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Prevents overlapping PDI syncs. Clear only when a previous run crashed or was interrupted.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void refreshSyncLock()}
+            className="text-xs px-3 py-1.5 rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+          >
+            Refresh lock
+          </button>
+        </div>
+
+        {syncLock ? (
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              syncLock.locked
+                ? syncLock.stale
+                  ? "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-100"
+                  : "border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/20 text-red-900 dark:text-red-100"
+                : "border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-100"
+            }`}
+          >
+            <p className="font-semibold">
+              {syncLock.locked
+                ? syncLock.stale
+                  ? "Stale lock detected"
+                  : "Sync lock is active"
+                : "No active sync lock"}
+            </p>
+            <p className="mt-1 text-xs opacity-90">
+              {syncLock.locked ? (
+                <>
+                  Locked by <span className="font-mono">{syncLock.lockedBy ?? "unknown"}</span> · age{" "}
+                  <span className="font-mono">{formatAge(syncLock.ageSeconds)}</span>
+                  {syncLock.lockedAt ? ` · ${new Date(syncLock.lockedAt).toLocaleString()}` : ""}
+                </>
+              ) : (
+                "The next sync can acquire the lock normally."
+              )}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">Loading sync lock status…</p>
+        )}
+
+        {syncLockError ? <p className="text-xs text-red-600 dark:text-red-400">{syncLockError}</p> : null}
+        {syncLockMessage ? <p className="text-xs text-emerald-600 dark:text-emerald-400">{syncLockMessage}</p> : null}
+
+        <button
+          type="button"
+          onClick={() => void clearSyncLock()}
+          disabled={syncLockBusy || !syncLock?.locked}
+          className="px-4 py-2 rounded-lg text-sm font-semibold border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {syncLockBusy ? "Clearing…" : "Clear stale sync lock"}
+        </button>
       </div>
 
       <div className="rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-6 shadow-sm space-y-5">
