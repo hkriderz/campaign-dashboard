@@ -1,11 +1,13 @@
 import { Suspense } from "react";
-import { fetchAllActivePhoneBankSummaries, fetchAllTagStats } from "@/lib/queries/phonebanking";
+import { fetchAllActivePhoneBankSummaries, fetchTagDailyCallerStats } from "@/lib/queries/phonebanking";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import CandidateGrid from "@/components/phonebanking/CandidateGrid";
 import AllCampaignsDaySection from "@/components/phonebanking/AllCampaignsDaySection";
 import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
 import { getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
+import { getTombstonedSliceKeys } from "@/lib/csv-slice-tombstones";
+import { buildCandidateStatsFromDailyCallerStats } from "@/lib/phonebanking-candidate-stats";
 import type { CandidateStats, PhoneBankSummary } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -21,34 +23,12 @@ export default async function PhoneBankingPage() {
   let allCampaignsError: string | null = null;
 
   try {
-    const tagIds = phonebankingTags.map((t) => t.id);
-    const phoneBanksByTag = await fetchAllTagStats(tagIds);
-
-    candidates = phonebankingTags.map((tag) => {
-      const phoneBanks = phoneBanksByTag[tag.id] ?? [];
-      const totalDials = phoneBanks.reduce((s, p) => s + p.totalDials, 0);
-      const totalHours =
-        Math.round(phoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) /
-        100;
-      const uniqueCallers = phoneBanks.reduce(
-        (s, p) => s + p.uniqueCallers,
-        0
-      );
-      const dates = phoneBanks
-        .flatMap((p) => [p.firstCallDate, p.lastCallDate])
-        .filter(Boolean) as string[];
-
-      return {
-        tag,
-        totalDials,
-        uniqueCallers,
-        totalHours,
-        phoneBankCount: phoneBanks.length,
-        firstCallDate: dates.length ? dates.sort()[0] : null,
-        lastCallDate: dates.length ? dates.sort().at(-1) ?? null : null,
-        phoneBanks,
-      };
-    });
+    candidates = await Promise.all(
+      phonebankingTags.map(async (tag) => {
+        const rows = await fetchTagDailyCallerStats(tag.id);
+        return buildCandidateStatsFromDailyCallerStats(tag, rows, getTombstonedSliceKeys(tag.id));
+      })
+    );
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }
