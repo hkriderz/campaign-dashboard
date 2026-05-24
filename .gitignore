@@ -6,6 +6,10 @@ build/
 # Dependencies
 node_modules/
 
+# Python generated files
+__pycache__/
+*.py[cod]
+
 # Environment — never commit real credentials
 .env
 .env.local
@@ -31,6 +35,10 @@ data/pdi-mappings/
 
 # Local BQ snapshot cache (regenerated on server)
 data/bq-snapshots/
+
+# District classifier runtime data — may contain uploaded voter/contact CSVs
+data/district-classifier/
+data/district-sort-cache/
 
 # Sync export artifacts
 pdi-sync-exports/*

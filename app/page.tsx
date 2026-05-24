@@ -22,6 +22,14 @@ const MODES = [
     badge: "Coming soon",
   },
   {
+    href: "/district-classifier",
+    icon: "🗺",
+    title: "District Classifier",
+    description:
+      "Upload address CSVs and classify signups into political districts with a Python GIS pipeline.",
+    color: "sky",
+  },
+  {
     href: "/pdi",
     icon: "🔧",
     title: "PDI Tools",
@@ -43,6 +51,12 @@ const colorMap = {
     glow: "from-violet-500/20",
     icon: "bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/20",
     btn: "bg-violet-600 hover:bg-violet-500 text-white rounded-full font-semibold",
+  },
+  sky: {
+    ring: "ring-sky-400/50 dark:ring-sky-500/40",
+    glow: "from-sky-500/20",
+    icon: "bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/20",
+    btn: "bg-sky-600 hover:bg-sky-500 text-white rounded-full font-semibold",
   },
   mint: {
     ring: "ring-mint-500/40",
@@ -81,7 +95,7 @@ export default function LandingPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
           {MODES.map((mode) => {
             const c = colorMap[mode.color];
             return (

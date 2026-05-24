@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
         stringIgnores.push(prev);
       }
       stringIgnores.push("**/data/bq-snapshots/**");
+      stringIgnores.push("**/data/district-classifier/**");
       config.watchOptions = {
         ...config.watchOptions,
         ignored: stringIgnores,

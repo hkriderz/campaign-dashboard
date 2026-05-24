@@ -29,6 +29,31 @@ A unified Next.js dashboard for phone banking analytics, canvassing tracking, an
 
 **Canvassing** is still a placeholder. **PDI Tools** are integrated under `/pdi` (overview, mapper, syncer).
 
+### District Classifier
+
+The district classifier is available at `/district-classifier`. It is the first app-integrated wrapper around
+`geomodule/sort-signups.py` and is intentionally small for Dokploy:
+
+- uploads CSV files through the Next.js app
+- stores job metadata and files under `data/district-classifier/`
+- starts the existing Python GIS sorter in the background
+- tracks queued, processing, completed, and failed jobs
+- exposes generated CSV outputs as downloads
+
+This first pass preserves the existing Python behavior. Confidence scoring, historical duplicate suppression,
+review queues, and richer exact-address persistence are planned as incremental layers on top of this job flow.
+
+Runtime requirements:
+
+- `PYTHON_EXECUTABLE` may be set when Python is not available as `python3`/`python`.
+- `DISTRICT_SORT_SIGNUPS_SCRIPT` may be set when the sorter does not live at `geomodule/sort-signups.py`.
+- Local Python installs should include the packages in `geomodule/requirements.txt`.
+- Dokploy builds install Python, `requests`, and `shapely` in the production image.
+- District GeoJSON files must be available under `geodata/`:
+  - `geodata/la-city-council.geojson` from LA City Boundaries, Council Districts layer.
+  - `geodata/ca-state-assembly.geojson` from California Districts, State Assembly layer.
+- Generated ZIP lookup caches live under `data/district-sort-cache/` and should be treated as runtime cache data.
+
 ### PDI Tools
 
 | Route | Purpose |

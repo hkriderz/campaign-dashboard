@@ -8,6 +8,7 @@ import ThemeToggle from "./ThemeToggle";
 const MODES = [
   { href: "/phonebanking", label: "Phone Banking", shortLabel: "Phone", icon: "📞" },
   { href: "/canvassing", label: "Canvassing", shortLabel: "Canvas", icon: "🚶" },
+  { href: "/district-classifier", label: "Districts", shortLabel: "Districts", icon: "🗺" },
   { href: "/pdi", label: "PDI Tools", shortLabel: "PDI", icon: "🔧" },
 ] as const;
 
