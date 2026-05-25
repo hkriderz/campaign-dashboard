@@ -15,6 +15,7 @@ const runningJobs = new Set<string>();
 const DATA_ROOT = path.join(process.cwd(), "data", "district-classifier");
 const RUN_LOCK_PATH = path.join(DATA_ROOT, "district-engine.lock.json");
 const STARTING_LOCK_TTL_MS = 2 * 60 * 1000;
+const RUN_LOCK_MAX_MS = 2 * 60 * 60 * 1000;
 
 export function isDistrictClassificationRunning(): boolean {
   return runningJobs.size > 0 || activeRunLock() !== null;
@@ -83,12 +84,23 @@ function activeRunLock(): RunLock | null {
   const lock = readRunLock();
   if (!lock) return null;
 
+  const startedAt = Date.parse(lock.startedAt);
+  if (Number.isFinite(startedAt) && Date.now() - startedAt > RUN_LOCK_MAX_MS) {
+    removeRunLock(lock.jobId);
+    return null;
+  }
+
+  const job = getDistrictJob(lock.jobId);
+  if (job && (job.status === "completed" || job.status === "failed")) {
+    removeRunLock(lock.jobId);
+    return null;
+  }
+
   if (lock.pid && processExists(lock.pid)) {
     return lock;
   }
 
   if (!lock.pid) {
-    const startedAt = Date.parse(lock.startedAt);
     if (Number.isFinite(startedAt) && Date.now() - startedAt < STARTING_LOCK_TTL_MS) {
       return lock;
     }
@@ -140,6 +152,39 @@ function assertRequiredGeodata(layers: DistrictLayerId[]): void {
       "Add the GeoJSON files under geodata/ before running classification.",
     ].join(" ")
   );
+}
+
+export function validateDistrictClassificationEnvironment(layers: DistrictLayerId[]): void {
+  const scriptPath = resolveEngineCli();
+  if (!fs.existsSync(scriptPath)) {
+    throw new Error(
+      `District engine CLI not found at ${scriptPath}. Set DISTRICT_ENGINE_CLI if it lives elsewhere.`
+    );
+  }
+  assertRequiredGeodata(layers);
+}
+
+export function cancelDistrictClassificationJob(jobId: string): void {
+  runningJobs.delete(jobId);
+
+  const lock = readRunLock();
+  if (lock?.jobId === jobId) {
+    if (lock.pid && processExists(lock.pid)) {
+      try {
+        process.kill(lock.pid);
+      } catch {
+        // The process may have exited between the liveness check and kill.
+      }
+    }
+    removeRunLock(jobId);
+  }
+
+  updateDistrictJob(jobId, {
+    status: "failed",
+    progressMessage: "Classification cancelled.",
+    errorMessage: "This job was manually cancelled before it completed.",
+    completedAt: new Date().toISOString(),
+  });
 }
 
 function buildArgs(scriptPath: string, jobId: string): string[] {
@@ -236,13 +281,8 @@ export function runDistrictClassificationJob(jobId: string): void {
         return;
       }
 
+      validateDistrictClassificationEnvironment(job.layers);
       const scriptPath = resolveEngineCli();
-      if (!fs.existsSync(scriptPath)) {
-        throw new Error(
-          `District engine CLI not found at ${scriptPath}. Set DISTRICT_ENGINE_CLI if it lives elsewhere.`
-        );
-      }
-      assertRequiredGeodata(job.layers);
 
       fs.mkdirSync(job.outputDir, { recursive: true });
       updateDistrictJob(jobId, {

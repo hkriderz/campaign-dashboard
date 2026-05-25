@@ -68,7 +68,7 @@ export default function SurveySidebar() {
   function matchesCompletionFilter(surveyName: string, filter: CompletionFilter): boolean {
     if (filter === "all") return true;
     const { mappedQ, totalQ, mappedA, totalA } = getSurveyStats(surveyName);
-    const filled = totalQ > 0 && totalA > 0 && mappedQ === totalQ && mappedA === totalA;
+    const filled = mappedQ > 0;
     const empty = mappedQ === 0 && mappedA === 0;
     return filter === "filled" ? filled : empty;
   }

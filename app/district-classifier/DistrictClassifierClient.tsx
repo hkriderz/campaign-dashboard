@@ -185,6 +185,25 @@ export default function DistrictClassifierClient() {
     }
   }
 
+  async function cancelJob(jobId: string) {
+    setError("");
+    setMessage("");
+    try {
+      const res = await fetch(`/api/district-classifier/jobs/${encodeURIComponent(jobId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel" }),
+      });
+      const json = (await res.json()) as ApiResponse<{ job: DistrictClassifierJob }>;
+      if (!json.ok || !json.data) throw new Error(json.error || "Unable to cancel job.");
+      setJobs((current) => current.map((job) => (job.id === jobId ? json.data!.job : job)));
+      setMessage("Job cancelled. You can start a new classifier job now.");
+      void loadJobs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       <section>
@@ -300,10 +319,16 @@ export default function DistrictClassifierClient() {
 
         {message ? <Notice tone="ok" message={message} /> : null}
         {error ? <Notice tone="err" message={error} /> : null}
+        {hasRunningJob ? (
+          <Notice
+            tone="warn"
+            message="A classifier job is queued or running. Cancel stale jobs from the Jobs list before starting another upload."
+          />
+        ) : null}
 
         <button
           type="submit"
-          disabled={uploading || !file || !scan}
+          disabled={uploading || !file || !scan || hasRunningJob}
           className="dash-btn-primary px-5 py-2.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {uploading ? "Starting..." : "Start processing"}
@@ -328,7 +353,13 @@ export default function DistrictClassifierClient() {
         ) : (
           <div className="space-y-4">
             {jobs.map((job) => (
-              <JobCard key={job.id} job={job} reviewRows={reviewRows[job.id] ?? []} onLoadReview={() => void loadReview(job.id)} />
+              <JobCard
+                key={job.id}
+                job={job}
+                reviewRows={reviewRows[job.id] ?? []}
+                onLoadReview={() => void loadReview(job.id)}
+                onCancel={() => void cancelJob(job.id)}
+              />
             ))}
           </div>
         )}
@@ -363,10 +394,12 @@ function ColumnSelect({
   );
 }
 
-function Notice({ tone, message }: { tone: "ok" | "err"; message: string }) {
+function Notice({ tone, message }: { tone: "ok" | "err" | "warn"; message: string }) {
   const cls =
     tone === "ok"
       ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300"
+      : tone === "warn"
+        ? "border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
       : "border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300";
   return <div className={`rounded-xl border p-4 text-sm ${cls}`}>{message}</div>;
 }
@@ -375,14 +408,17 @@ function JobCard({
   job,
   reviewRows,
   onLoadReview,
+  onCancel,
 }: {
   job: DistrictClassifierJob;
   reviewRows: DistrictReviewRow[];
   onLoadReview: () => void;
+  onCancel: () => void;
 }) {
   const progress = typeof job.progress === "number" ? job.progress : 0;
   const processedRows = typeof job.processedRows === "number" ? job.processedRows : 0;
   const totalRows = typeof job.totalRows === "number" ? job.totalRows : null;
+  const canCancel = job.status === "queued" || job.status === "processing";
 
   return (
     <article className="dash-card space-y-4">
@@ -412,6 +448,14 @@ function JobCard({
       </div>
 
       {job.errorMessage ? <Notice tone="err" message={job.errorMessage} /> : null}
+
+      {canCancel ? (
+        <div>
+          <button type="button" onClick={onCancel} className="dash-action-btn dash-action-btn-md dash-action-btn-hide">
+            Cancel stuck job
+          </button>
+        </div>
+      ) : null}
 
       {job.exports.length ? (
         <div>

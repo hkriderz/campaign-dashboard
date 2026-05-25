@@ -11,7 +11,11 @@ import {
   type DistrictLayerId,
   type DistrictTargetSelection,
 } from "@/lib/district-classifier/types";
-import { isDistrictClassificationRunning, runDistrictClassificationJob } from "@/lib/district-classifier/runner";
+import {
+  isDistrictClassificationRunning,
+  runDistrictClassificationJob,
+  validateDistrictClassificationEnvironment,
+} from "@/lib/district-classifier/runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,10 +112,13 @@ export async function POST(req: Request) {
       );
     }
 
+    const selectedLayers = parseLayers(form.get("layers"));
+    validateDistrictClassificationEnvironment(selectedLayers);
+
     const job = createDistrictJob({
       originalFileName: file.name,
       fileBuffer: bytes,
-      layers: parseLayers(form.get("layers")),
+      layers: selectedLayers,
       targetSelection: parseTargetSelection(form.get("targetSelection")),
       compareHistorical: form.get("compareHistorical")?.toString() !== "false",
       columnMapping: {

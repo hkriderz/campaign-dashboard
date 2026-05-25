@@ -22,6 +22,7 @@ const DB_PATH = process.env.DISTRICT_ENGINE_DB_PATH
   ? path.resolve(process.env.DISTRICT_ENGINE_DB_PATH)
   : path.join(DATA_ROOT, "district-engine-v2.sqlite");
 const STALE_PROCESSING_MS = 5 * 60 * 1000;
+const STALE_QUEUED_MS = 90 * 1000;
 
 type CreateDistrictJobInput = {
   originalFileName: string;
@@ -266,18 +267,25 @@ export function updateDistrictJob(jobId: string, patch: DistrictJobPatch): Distr
 
 export function markStaleDistrictJobsFailed(now = Date.now()): DistrictClassifierJob[] {
   const staleJobs = listDistrictJobs().filter((job) => {
-    if (job.status !== "processing") return false;
+    if (job.status !== "queued" && job.status !== "processing") return false;
     const updatedAt = Date.parse(job.updatedAt);
-    return Number.isFinite(updatedAt) && now - updatedAt > STALE_PROCESSING_MS;
+    if (!Number.isFinite(updatedAt)) return false;
+    const staleAfter = job.status === "queued" ? STALE_QUEUED_MS : STALE_PROCESSING_MS;
+    return now - updatedAt > staleAfter;
   });
 
   return staleJobs
     .map((job) =>
       updateDistrictJob(job.id, {
         status: "failed",
-        progressMessage: "Classification worker stopped before reporting progress.",
+        progressMessage:
+          job.status === "queued"
+            ? "Classification never started."
+            : "Classification worker stopped before reporting progress.",
         errorMessage:
-          "The classifier worker became stale. This can happen during local dev reloads or a stalled geocoder request. Start a new job to rerun it.",
+          job.status === "queued"
+            ? "This queued job became stale before the worker started. This can happen if the server reloads or prerequisites fail during startup. Start a new job to rerun it."
+            : "The classifier worker became stale. This can happen during local dev reloads or a stalled geocoder request. Start a new job to rerun it.",
         completedAt: new Date(now).toISOString(),
       })
     )
