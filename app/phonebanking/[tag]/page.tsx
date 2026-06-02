@@ -58,12 +58,13 @@ import {
   buildPhonebankerBqOutcomeMap,
   mergePhoneBankRowWithBqOutcomes,
 } from "@/lib/phonebanker-bq-outcomes";
+import { compareIsoDates, normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ tag: string }>;
-  searchParams: Promise<{ tab?: string; date?: string | string[] }>;
+  searchParams: Promise<{ tab?: string; date?: string | string[]; endDate?: string | string[] }>;
 };
 
 function firstSearchParam(v: string | string[] | undefined): string {
@@ -78,6 +79,15 @@ function normalizeSelectedDateParam(raw: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(head)) return head;
   const fromUs = normalizeDateToIso(head);
   return fromUs ?? "";
+}
+
+function isoDateInRange(value: string, startDate: string, endDate: string): boolean {
+  return compareIsoDates(value, startDate) >= 0 && compareIsoDates(value, endDate) <= 0;
+}
+
+function formatDateRangeLabel(startDate: string, endDate: string): string {
+  if (!startDate || !endDate) return "All dates";
+  return startDate === endDate ? startDate : `${startDate} to ${endDate}`;
 }
 
 const TABS = [
@@ -248,8 +258,9 @@ export default async function TagPage({ params, searchParams }: Props) {
   return runServerWithCredentialContext(async () => {
   const { tag: tagId } = await params;
   const sp = await searchParams;
-  const { tab = "overview", date: dateRaw } = sp;
+  const { tab = "overview", date: dateRaw, endDate: endDateRaw } = sp;
   const selectedDate = normalizeSelectedDateParam(firstSearchParam(dateRaw));
+  const selectedEndDate = normalizeSelectedDateParam(firstSearchParam(endDateRaw)) || selectedDate;
 
   const tag = getTagById(tagId);
   if (!tag) notFound();
@@ -616,32 +627,36 @@ export default async function TagPage({ params, searchParams }: Props) {
   const availableDates = [...new Set(dashboardSlices.map((s) => s.callDate))].sort((a, b) =>
     b.localeCompare(a)
   );
-  const activeDate = selectedDate && availableDates.includes(selectedDate) ? selectedDate : "";
-  const filteredSlices = activeDate
-    ? dashboardSlices.filter((s) => s.callDate === activeDate)
+  const normalizedRange = selectedDate ? normalizeIsoDateRange(selectedDate, selectedEndDate) : null;
+  const requestedStartDate = normalizedRange?.ok ? normalizedRange.startDate : "";
+  const requestedEndDate = normalizedRange?.ok ? normalizedRange.endDate : "";
+  const hasAvailableDateInRange =
+    requestedStartDate && requestedEndDate
+      ? availableDates.some((date) => isoDateInRange(date, requestedStartDate, requestedEndDate))
+      : false;
+  const activeStartDate = hasAvailableDateInRange ? requestedStartDate : "";
+  const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
+  const filteredSlices = activeStartDate
+    ? dashboardSlices.filter((s) => isoDateInRange(s.callDate, activeStartDate, activeEndDate))
     : dashboardSlices;
-  const filteredRowsForPhonebankers = activeDate
-    ? mergedRowsForPhonebankers.filter((r) => r.date === activeDate)
+  const filteredRowsForPhonebankers = activeStartDate
+    ? mergedRowsForPhonebankers.filter((r) => {
+        const iso = normalizeDateToIso(r.date);
+        return Boolean(iso && isoDateInRange(iso, activeStartDate, activeEndDate));
+      })
     : mergedRowsForPhonebankers;
   const phoneBanksByCampaignKey = new Map(
     phoneBanks.map((p) => [normalizeCampaignKey(p.campaignName), p] as const)
   );
-  const overviewPhoneBanks = activeDate
-    ? buildOverviewPhoneBankRowsForSelectedDate(
-        filteredSlices,
-        callerMetricsBySlice,
-        phoneBanksByCampaignKey,
-        activeDate
-      )
-    : buildOverviewPhoneBankRowsFromSlices(
-        filteredSlices,
-        callerMetricsBySlice,
-        phoneBanksByCampaignKey
-      );
+  const overviewPhoneBanks = buildOverviewPhoneBankRowsFromSlices(
+    filteredSlices,
+    callerMetricsBySlice,
+    phoneBanksByCampaignKey
+  );
   const aggregateSliceKeys = new Set(filteredSlices.map((s) => s.sliceKey));
   const rollupPf = rollupPollingAndFinalAnswers(bqQuestionStats, {
     sliceKeys: aggregateSliceKeys,
-    dateFilter: activeDate || null,
+    dateFilter: null,
     surveyScriptProfile,
   });
   let bqPollingBreakdown = rollupPf.polling;
@@ -654,7 +669,7 @@ export default async function TagPage({ params, searchParams }: Props) {
   ) {
     const filled = aggregateFilledFinalResults(bqCallSurveyForFill, {
       sliceKeys: aggregateSliceKeys,
-      dateFilter: activeDate || null,
+      dateFilter: null,
     });
     if (filled.length > 0) {
       bqFinalResultBreakdown = filled;
@@ -672,7 +687,6 @@ export default async function TagPage({ params, searchParams }: Props) {
   for (const r of bqQuestionStats) {
     const sk = makeSliceKey(r.campaignName, r.callDate);
     if (!aggregateSliceKeys.has(sk)) continue;
-    if (activeDate && r.callDate !== activeDate) continue;
     aggregateScopeRows.push({
       questionName: r.questionName,
       answerValue: r.answerValue,
@@ -684,20 +698,21 @@ export default async function TagPage({ params, searchParams }: Props) {
     bqDailyCaller,
     aggregateSliceKeys
   );
-  /** Date filter: header boxes match daily slices (session-day grain), not phone-bank rollups (can omit campaigns). */
-  const headerStatsForSelectedDate = Boolean(activeDate);
-  const phoneBankCountBox = headerStatsForSelectedDate
+  /** Date filter: header boxes match selected session-day slices, not phone-bank rollups (can omit campaigns). */
+  const headerStatsForSelectedRange = Boolean(activeStartDate);
+  const phoneBankCountBox = headerStatsForSelectedRange
     ? filteredSlices.length
     : overviewPhoneBanks.length;
-  const totalDials = headerStatsForSelectedDate
+  const totalDials = headerStatsForSelectedRange
     ? filteredSlices.reduce((s, x) => s + x.numDials, 0)
     : overviewPhoneBanks.reduce((s, p) => s + p.totalDials, 0);
-  const totalHours = headerStatsForSelectedDate
+  const totalHours = headerStatsForSelectedRange
     ? Math.round((filteredSlices.reduce((s, x) => s + x.callSeconds, 0) / 3600) * 100) / 100
     : Math.round(overviewPhoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100;
-  const uniqueCallers = headerStatsForSelectedDate
+  const uniqueCallers = headerStatsForSelectedRange
     ? uniquePbersForAggregate
     : overviewPhoneBanks.reduce((s, p) => s + p.uniqueCallers, 0);
+  const activeDateLabel = formatDateRangeLabel(activeStartDate, activeEndDate);
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -777,8 +792,9 @@ export default async function TagPage({ params, searchParams }: Props) {
             basePath={`/phonebanking/${tagId}`}
             activeTab={tab}
             availableDates={availableDates}
-            activeDate={activeDate}
-            dateLabel={activeDate || "All dates"}
+            activeDate={activeStartDate}
+            activeEndDate={activeEndDate}
+            dateLabel={activeDateLabel}
             slices={filteredSlices}
             uniquePhonebankers={uniquePbersForAggregate}
             showPollingAggregate={tag.showPollingAggregate !== false}

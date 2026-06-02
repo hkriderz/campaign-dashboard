@@ -13,7 +13,7 @@ type SidebarProps = {
 
 function navLinkClass(isActive: boolean) {
   return [
-    "flex items-center gap-2.5 px-3 py-2.5 min-h-11 rounded-xl text-sm font-medium transition-all duration-150",
+    "flex items-center gap-2.5 px-3 py-2.5 min-h-11 rounded-xl text-sm font-medium transition-all duration-150 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60",
     isActive
       ? "dash-nav-active"
       : "text-gray-500 dark:text-gray-400 hover:bg-gray-100/80 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-100 border border-transparent",
@@ -32,14 +32,38 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
     <aside className="w-full lg:w-56 flex-shrink-0 border-r border-gray-200/80 dark:border-white/10 bg-white/80 dark:bg-gray-950/90 backdrop-blur-xl min-h-full py-5 px-2.5">
       <nav className="space-y-1">
         <div className="space-y-1 pb-4 mb-4 border-b border-gray-100 dark:border-white/10">
-          <Link
-            href={`${basePath}#all-campaigns`}
-            onClick={onNavClick}
-            className={navLinkClass(pathname === basePath)}
-          >
-            <span className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 flex-shrink-0" />
-            All Campaigns
-          </Link>
+          {basePath === "/canvassing" ? (
+            <>
+              <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
+                Canvassing tools
+              </p>
+              <Link
+                href="/canvassing"
+                onClick={onNavClick}
+                className={navLinkClass(pathname === "/canvassing")}
+              >
+                <span className="w-2 h-2 rounded-full bg-violet-500 flex-shrink-0 shadow-[0_0_8px_rgba(139,92,246,0.55)]" />
+                Knock Analysis
+              </Link>
+              <Link
+                href="/canvassing/doorknocks-results"
+                onClick={onNavClick}
+                className={navLinkClass(pathname.startsWith("/canvassing/doorknocks-results"))}
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.55)]" />
+                Doorknocks and Results
+              </Link>
+            </>
+          ) : (
+            <Link
+              href={`${basePath}#all-campaigns`}
+              onClick={onNavClick}
+              className={navLinkClass(pathname === basePath)}
+            >
+              <span className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 flex-shrink-0" />
+              All Campaigns
+            </Link>
+          )}
           {basePath === "/phonebanking" ? (
             <Link
               href="/phonebanking/campaign-tags"
@@ -65,9 +89,11 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
           ) : null}
         </div>
 
-        <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
-          Candidates
-        </p>
+        {tags.length ? (
+          <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
+            Candidates
+          </p>
+        ) : null}
         {tags.map((tag, i) => {
           const href = `${basePath}/${tag.id}`;
           const isActive = pathname.startsWith(href);

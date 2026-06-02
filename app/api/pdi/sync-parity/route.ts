@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withCredentialContext } from "@/lib/credentials";
 import { compareSyncParity } from "@/lib/pdi-tools/sync/parity";
 import type { SyncRunOptions } from "@/lib/pdi-tools/sync/types";
+import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 type ParityBody = {
   mode?: "incremental" | "range";
@@ -9,6 +10,10 @@ type ParityBody = {
   end?: string;
   mappingFileId?: string;
 };
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export const POST = withCredentialContext(
   async (req) => {
@@ -19,11 +24,12 @@ export const POST = withCredentialContext(
       return NextResponse.json({ error: "Invalid JSON body", code: 400 }, { status: 400 });
     }
 
-    if (body.mode === "range" && !body.start?.trim()) {
-      return NextResponse.json(
-        { error: "For range mode, start date (YYYY-MM-DD) is required.", code: 400 },
-        { status: 400 }
-      );
+    if (body.mode === "range") {
+      const normalized = normalizeIsoDateRange(body.start ?? "", body.end?.trim() || todayIsoDate());
+      if (!normalized.ok) {
+        return NextResponse.json({ error: normalized.error, code: 400 }, { status: 400 });
+      }
+      body = { ...body, start: normalized.startDate, end: normalized.endDate };
     }
 
     const options: SyncRunOptions = {

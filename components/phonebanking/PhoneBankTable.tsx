@@ -18,7 +18,7 @@ function fmt(n: number) {
 }
 
 function fmtHours(h: number) {
-  if (h === 0) return "—";
+  if (h === 0) return "0m";
   return h >= 1 ? `${h.toFixed(1)}h` : `${Math.round(h * 60)}m`;
 }
 

@@ -17,9 +17,8 @@ const MODES = [
     icon: "🚶",
     title: "Canvassing",
     description:
-      "Track door-to-door canvassing results from Google Sheets and uploaded campaign files.",
+      "Run Knock Analysis, save reports, and build Doorknocks Results pivots from uploaded PDI files.",
     color: "violet",
-    badge: "Coming soon",
   },
   {
     href: "/district-classifier",
@@ -78,8 +77,8 @@ export default function LandingPage() {
         aria-hidden
       />
 
-      <div className="relative max-w-4xl w-full">
-        <div className="text-center mb-12">
+      <div className="relative w-full max-w-6xl">
+        <div className="mb-10 text-center sm:mb-12">
           <WhaleMark
             variant="boxed"
             size="hero"
@@ -95,24 +94,14 @@ export default function LandingPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4 xl:gap-6">
           {MODES.map((mode) => {
             const c = colorMap[mode.color];
             return (
               <div
                 key={mode.href}
-                className={`relative dash-card dash-card-glow flex flex-col gap-4 transition-all duration-200 ${
-                  "badge" in mode
-                    ? "opacity-75"
-                    : `hover:ring-2 ${c.ring} hover:shadow-[0_0_40px_rgba(124,108,240,0.15)]`
-                }`}
+                className={`relative dash-card dash-card-glow flex flex-col gap-4 transition-all duration-200 hover:ring-2 ${c.ring} hover:shadow-[0_0_40px_rgba(124,108,240,0.15)]`}
               >
-                {"badge" in mode ? (
-                  <span className="absolute top-4 right-4 text-xs font-semibold bg-white/10 text-gray-400 px-2.5 py-1 rounded-full border border-white/10">
-                    {mode.badge}
-                  </span>
-                ) : null}
-
                 <FeatureIconBox toneClassName={c.icon}>{mode.icon}</FeatureIconBox>
 
                 <div className="flex-1 relative z-[1]">
@@ -122,21 +111,12 @@ export default function LandingPage() {
                   <p className="text-sm text-gray-500 dark:text-gray-400">{mode.description}</p>
                 </div>
 
-                {"badge" in mode ? (
-                  <button
-                    disabled
-                    className="w-full py-2.5 rounded-full text-sm font-semibold bg-white/5 text-gray-500 border border-white/10 cursor-not-allowed"
-                  >
-                    Coming Soon
-                  </button>
-                ) : (
-                  <Link
-                    href={mode.href}
-                    className={`block text-center w-full py-2.5 text-sm ${c.btn} transition-colors relative z-[1]`}
-                  >
-                    Open {mode.title} →
-                  </Link>
-                )}
+                <Link
+                  href={mode.href}
+                  className={`block text-center w-full py-2.5 text-sm ${c.btn} transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 relative z-[1]`}
+                >
+                  Open {mode.title} →
+                </Link>
               </div>
             );
           })}

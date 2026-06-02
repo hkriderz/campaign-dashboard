@@ -18,6 +18,7 @@ import {
 import { runPdiSyncEngine } from "@/lib/pdi-tools/sync/engine";
 import { createSyncRun } from "@/lib/pdi-tools/sync/run-registry";
 import { DEFAULT_MIN_RECORDS } from "@/lib/pdi-tools/sync/constants";
+import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 const MAX_CAPTURE_BYTES = 512 * 1024;
 
@@ -29,6 +30,11 @@ type SyncBody = {
   minRecords?: number;
   rollbackRun?: string;
   mappingFileId?: string;
+};
+
+type ValidatedSyncBody = SyncBody & {
+  start?: string;
+  end?: string;
 };
 
 /**
@@ -45,7 +51,34 @@ function appendCapText(prev: string, chunk: Buffer, maxChars: number): string {
   return next.slice(next.length - maxChars);
 }
 
-async function runPythonSync(body: SyncBody, ctx: ReturnType<typeof resolveContextFromRequest>) {
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function validateSyncBody(body: SyncBody): { ok: true; body: ValidatedSyncBody } | { ok: false; response: NextResponse } {
+  if (body.mode !== "range" || body.rollbackRun?.trim()) {
+    return { ok: true, body };
+  }
+
+  const normalized = normalizeIsoDateRange(body.start ?? "", body.end?.trim() || todayIsoDate());
+  if (!normalized.ok) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: normalized.error, code: 400 }, { status: 400 }),
+    };
+  }
+
+  return {
+    ok: true,
+    body: {
+      ...body,
+      start: normalized.startDate,
+      end: normalized.endDate,
+    },
+  };
+}
+
+async function runPythonSync(body: ValidatedSyncBody, ctx: ReturnType<typeof resolveContextFromRequest>) {
   const python = process.env.PYTHON_EXECUTABLE ?? (process.platform === "win32" ? "python" : "python3");
   const scriptDir = resolveStwToPdiScriptDir();
   const cwd = ensurePdiSyncExportsDir();
@@ -78,16 +111,8 @@ async function runPythonSync(body: SyncBody, ctx: ReturnType<typeof resolveConte
     const mode = body.mode === "range" ? "range" : "incremental";
     args.push("--mode", mode);
     if (mode === "range") {
-      if (!body.start?.trim()) {
-        return NextResponse.json(
-          { error: "For range mode, start date (YYYY-MM-DD) is required.", code: 400, engine: "python" },
-          { status: 400 }
-        );
-      }
-      args.push("--start", body.start.trim());
-      if (body.end?.trim()) {
-        args.push("--end", body.end.trim());
-      }
+      args.push("--start", body.start!.trim());
+      args.push("--end", body.end!.trim());
     }
     if (body.dryRun) {
       args.push("--dry-run");
@@ -158,15 +183,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Invalid JSON body", code: 400 }, { status: 400 });
       }
 
+      const validation = validateSyncBody(body);
+      if (!validation.ok) return validation.response;
+      body = validation.body;
+
       if (usePythonEngine()) {
         return runPythonSync(body, ctx);
-      }
-
-      if (body.mode === "range" && !body.rollbackRun?.trim() && !body.start?.trim()) {
-        return NextResponse.json(
-          { error: "For range mode, start date (YYYY-MM-DD) is required.", code: 400, engine: "typescript" },
-          { status: 400 }
-        );
       }
 
       const runId = new Date().toISOString();

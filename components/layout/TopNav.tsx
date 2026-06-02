@@ -35,7 +35,7 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
             <button
               type="button"
               onClick={onOpenSidebar}
-              className="lg:hidden flex items-center justify-center min-h-11 min-w-11 rounded-xl border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10"
+              className="lg:hidden flex items-center justify-center min-h-11 min-w-11 rounded-xl border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 transition-all"
               aria-label="Open navigation menu"
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden>
@@ -64,7 +64,7 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
                   key={mode.href}
                   href={mode.href}
                   className={[
-                    "flex items-center gap-1 px-2.5 sm:px-3.5 py-2 sm:py-1.5 min-h-10 sm:min-h-9 rounded-full text-xs sm:text-sm font-medium transition-all duration-150 whitespace-nowrap flex-shrink-0",
+                    "flex items-center gap-1 px-2.5 sm:px-3.5 py-2 sm:py-1.5 min-h-10 sm:min-h-9 rounded-full text-xs sm:text-sm font-medium transition-all duration-150 whitespace-nowrap flex-shrink-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60",
                     isActive
                       ? "bg-indigo-600 text-white shadow-[0_0_18px_rgba(124,108,240,0.45)]"
                       : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-white/10",

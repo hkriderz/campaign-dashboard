@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { MappingOutput } from "@/lib/pdi-tools/types";
-import { listMappingFiles, resolveMappingFilePathById } from "@/lib/pdi-tools/mapping-files";
+import { listMappingFiles, resolveMappingFilePathById, validateMappingOutput } from "@/lib/pdi-tools/mapping-files";
 import { resolvePdiMappingsDir } from "@/lib/pdi-tools/sync-working-dir";
 
 export type MappingMaps = {
@@ -85,6 +85,10 @@ export function loadMappingForSync(mappingFileId: string): MappingMaps {
   if (!mapping.questionMappings?.length || !mapping.answerMappings?.length) {
     throw new Error("Mapping file must include questionMappings and answerMappings.");
   }
+  const validationErrors = validateMappingOutput(mapping);
+  if (validationErrors.length > 0) {
+    throw new Error(`Mapping file failed validation:\n${validationErrors.slice(0, 12).join("\n")}`);
+  }
 
   return buildMappingMaps(mapping, mappingPath);
 }
@@ -95,7 +99,8 @@ export function newestMappingFromCatalog(): string | null {
   return files[0]?.absolutePath ?? null;
 }
 
-export function getFlag(
+/** Diagnostic helper only: falls back to treating raw answer text as a flag code. Do not use for sync payloads. */
+export function getFlagUnsafe(
   maps: MappingMaps,
   survey: string,
   question: string,

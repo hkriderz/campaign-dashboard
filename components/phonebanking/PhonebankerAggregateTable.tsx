@@ -132,7 +132,7 @@ function buildColumns(otherPositiveLabel: string): ColDef[] {
     getValue: (r) =>
       r.summedRow.callsAnswered
         ? `${((r.summedRow.correctPerson / r.summedRow.callsAnswered) * 100).toFixed(1)}%`
-        : "—",
+        : "0.0%",
     sortKey: (r) =>
       r.summedRow.callsAnswered ? (r.summedRow.correctPerson / r.summedRow.callsAnswered) * 100 : 0,
   },
@@ -193,7 +193,6 @@ export default function PhonebankerAggregateTable({
       if (!allExtra.includes(h)) allExtra.push(h);
     }
     const extras: ColDef[] = allExtra
-      .filter((header) => rows.some((r) => (r.extraWideColumns?.[header] ?? 0) !== 0))
       .map((header) => ({
         key: `ew:${header}`,
         label: header,

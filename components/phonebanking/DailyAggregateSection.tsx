@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import DateRangePicker from "@/components/common/DateRangePicker";
 import type { AggregateAnswerLine } from "@/lib/daily-aggregate-survey-rollup";
 import { sumAnswerLines } from "@/lib/daily-aggregate-survey-rollup";
 import type { DashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
@@ -109,6 +110,7 @@ type Props = {
   activeTab: string;
   availableDates: string[];
   activeDate: string;
+  activeEndDate: string;
   dateLabel: string;
   slices: PbDashboardSlice[];
   uniquePhonebankers: number;
@@ -137,6 +139,7 @@ export default function DailyAggregateSection({
   activeTab,
   availableDates,
   activeDate,
+  activeEndDate,
   dateLabel,
   slices,
   uniquePhonebankers,
@@ -154,6 +157,8 @@ export default function DailyAggregateSection({
   const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [draft, setDraft] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
+  const minAvailableDate = availableDates.length ? [...availableDates].sort((a, b) => a.localeCompare(b))[0] : undefined;
+  const maxAvailableDate = availableDates.length ? [...availableDates].sort((a, b) => b.localeCompare(a))[0] : undefined;
 
   useEffect(() => {
     const raw = localStorage.getItem(layoutStorageKey(tagId));
@@ -388,32 +393,26 @@ export default function DailyAggregateSection({
     <>
       <div className="flex items-center gap-2 flex-wrap mb-3">
         {availableDates.length > 0 ? (
-          <>
-            <label
-              htmlFor={`date-filter-${activeTab}`}
-              className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400"
-            >
-              Date
-            </label>
-            <select
-              id={`date-filter-${activeTab}`}
-              value={activeDate}
-              onChange={(e) => {
-                const date = e.target.value;
-                const url =
-                  date === "" ? `${basePath}?tab=${activeTab}` : `${basePath}?tab=${activeTab}&date=${date}`;
-                router.push(url);
+          <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-950/30">
+            <DateRangePicker
+              startDate={activeDate}
+              endDate={activeEndDate}
+              minDate={minAvailableDate}
+              maxDate={maxAvailableDate}
+              allowEmpty
+              label="Filter"
+              helpText="Choose one day or a range. Clear to show all available dates."
+              onChange={(range) => {
+                if (!range.startDate || !range.endDate) {
+                  router.push(`${basePath}?tab=${activeTab}`);
+                  return;
+                }
+                const params = new URLSearchParams({ tab: activeTab, date: range.startDate });
+                if (range.endDate !== range.startDate) params.set("endDate", range.endDate);
+                router.push(`${basePath}?${params.toString()}`);
               }}
-              className="px-3 py-1.5 rounded-md border border-gray-300 dark:border-gray-600 text-sm text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            >
-              <option value="">All dates</option>
-              {availableDates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </>
+            />
+          </div>
         ) : null}
         <button
           type="button"

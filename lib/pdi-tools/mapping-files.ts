@@ -114,6 +114,108 @@ export function resolveMappingFilePathById(id: string): string {
   return absolutePath;
 }
 
+function nonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function questionKey(surveyName: string, stwQuestionName: string): string {
+  return `${surveyName.trim()}\0${stwQuestionName.trim()}`;
+}
+
+function answerKey(surveyName: string, stwQuestionName: string, stwAnswerValue: string): string {
+  return `${questionKey(surveyName, stwQuestionName)}\0${stwAnswerValue.trim()}`;
+}
+
+export function validateMappingOutput(mapping: MappingOutput): string[] {
+  const errors: string[] = [];
+  const questionByKey = new Map<string, { pdiQuestionId: string; index: number }>();
+  const answerByKey = new Map<
+    string,
+    { pdiQuestionId: string; pdiFlagId: string; pdiFlagCode: string; index: number }
+  >();
+
+  if (!Array.isArray(mapping.questionMappings)) {
+    errors.push("questionMappings must be an array.");
+  }
+  if (!Array.isArray(mapping.answerMappings)) {
+    errors.push("answerMappings must be an array.");
+  }
+  if (!Array.isArray(mapping.flagRegistry)) {
+    errors.push("flagRegistry must be an array.");
+  }
+  if (errors.length > 0) return errors;
+
+  mapping.questionMappings.forEach((entry, index) => {
+    const context = `questionMappings[${index}]`;
+    if (!nonEmptyString(entry.surveyName)) errors.push(`${context}.surveyName is required.`);
+    if (!nonEmptyString(entry.stwQuestionName)) errors.push(`${context}.stwQuestionName is required.`);
+    if (!nonEmptyString(entry.pdiQuestionId)) errors.push(`${context}.pdiQuestionId is required.`);
+    if (!nonEmptyString(entry.surveyName) || !nonEmptyString(entry.stwQuestionName) || !nonEmptyString(entry.pdiQuestionId)) {
+      return;
+    }
+    const key = questionKey(entry.surveyName, entry.stwQuestionName);
+    const existing = questionByKey.get(key);
+    if (existing && existing.pdiQuestionId !== entry.pdiQuestionId.trim()) {
+      errors.push(
+        `${context} conflicts with questionMappings[${existing.index}] for the same STW question (${existing.pdiQuestionId} vs ${entry.pdiQuestionId}).`
+      );
+      return;
+    }
+    questionByKey.set(key, { pdiQuestionId: entry.pdiQuestionId.trim(), index });
+  });
+
+  mapping.answerMappings.forEach((entry, index) => {
+    const context = `answerMappings[${index}]`;
+    if (!nonEmptyString(entry.surveyName)) errors.push(`${context}.surveyName is required.`);
+    if (!nonEmptyString(entry.stwQuestionName)) errors.push(`${context}.stwQuestionName is required.`);
+    if (!nonEmptyString(entry.stwAnswerValue)) errors.push(`${context}.stwAnswerValue is required.`);
+    if (!nonEmptyString(entry.pdiQuestionId)) errors.push(`${context}.pdiQuestionId is required.`);
+    if (!nonEmptyString(entry.pdiAnswerOptionId)) errors.push(`${context}.pdiAnswerOptionId is required.`);
+    if (!nonEmptyString(entry.pdiFlagId)) errors.push(`${context}.pdiFlagId is required.`);
+    if (!nonEmptyString(entry.pdiFlagCode)) errors.push(`${context}.pdiFlagCode is required.`);
+    if (
+      !nonEmptyString(entry.surveyName) ||
+      !nonEmptyString(entry.stwQuestionName) ||
+      !nonEmptyString(entry.stwAnswerValue) ||
+      !nonEmptyString(entry.pdiQuestionId) ||
+      !nonEmptyString(entry.pdiFlagId) ||
+      !nonEmptyString(entry.pdiFlagCode)
+    ) {
+      return;
+    }
+
+    const qKey = questionKey(entry.surveyName, entry.stwQuestionName);
+    const questionMapping = questionByKey.get(qKey);
+    if (!questionMapping) {
+      errors.push(`${context} has no matching question mapping for "${entry.surveyName}" / "${entry.stwQuestionName}".`);
+    } else if (questionMapping.pdiQuestionId !== entry.pdiQuestionId.trim()) {
+      errors.push(
+        `${context} is stale: answer maps to PDI question ${entry.pdiQuestionId}, but the question maps to ${questionMapping.pdiQuestionId}.`
+      );
+    }
+
+    const key = answerKey(entry.surveyName, entry.stwQuestionName, entry.stwAnswerValue);
+    const existing = answerByKey.get(key);
+    if (
+      existing &&
+      (existing.pdiQuestionId !== entry.pdiQuestionId.trim() ||
+        existing.pdiFlagId !== entry.pdiFlagId.trim() ||
+        existing.pdiFlagCode !== entry.pdiFlagCode.trim().toUpperCase())
+    ) {
+      errors.push(`${context} conflicts with answerMappings[${existing.index}] for the same STW answer.`);
+      return;
+    }
+    answerByKey.set(key, {
+      pdiQuestionId: entry.pdiQuestionId.trim(),
+      pdiFlagId: entry.pdiFlagId.trim(),
+      pdiFlagCode: entry.pdiFlagCode.trim().toUpperCase(),
+      index,
+    });
+  });
+
+  return errors;
+}
+
 export function assertValidMappingJsonContent(content: string): void {
   let parsed: unknown;
   try {
@@ -127,6 +229,10 @@ export function assertValidMappingJsonContent(content: string): void {
   const o = parsed as Record<string, unknown>;
   if (!Array.isArray(o.questionMappings) || !Array.isArray(o.answerMappings)) {
     throw new Error("Mapping file must include questionMappings and answerMappings arrays (schema v2).");
+  }
+  const errors = validateMappingOutput(o as unknown as MappingOutput);
+  if (errors.length > 0) {
+    throw new Error(`Mapping file failed validation:\n${errors.slice(0, 12).join("\n")}`);
   }
 }
 

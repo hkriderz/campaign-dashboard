@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import DateRangePicker from "@/components/common/DateRangePicker";
 import ParityReportCard from "@/components/pdi-tools/ParityReportCard";
 import SyncRunConsole from "@/components/pdi-tools/SyncRunConsole";
 import type { SyncLogEvent } from "@/lib/pdi-tools/sync/logger";
 import type { ParityReport } from "@/lib/pdi-tools/sync/parity";
 import type { SyncRunSummary } from "@/lib/pdi-tools/sync/types";
+import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 type MappingFileEntry = {
   id: string;
@@ -114,6 +116,10 @@ function formatAge(seconds: number | null): string {
 
 type RunStatus = "idle" | "running" | "completed" | "failed";
 
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function SyncerClient() {
   const [mode, setMode] = useState<"incremental" | "range">("incremental");
   const [start, setStart] = useState("");
@@ -141,6 +147,13 @@ export default function SyncerClient() {
   const [parityLoading, setParityLoading] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+
+  function validateRangeMode(): { ok: true; start?: string; end?: string } | { ok: false; error: string } {
+    if (mode !== "range") return { ok: true };
+    const normalized = normalizeIsoDateRange(start, end || todayIsoDate());
+    if (!normalized.ok) return { ok: false, error: normalized.error };
+    return { ok: true, start: normalized.startDate, end: normalized.endDate };
+  }
 
   const refreshMappingFiles = useCallback(async () => {
     setMappingLoadError(null);
@@ -270,6 +283,11 @@ export default function SyncerClient() {
   }
 
   async function runParityCheck() {
+    const range = validateRangeMode();
+    if (!range.ok) {
+      setClientError(range.error);
+      return;
+    }
     setParityLoading(true);
     setParityReport(null);
     setClientError(null);
@@ -279,8 +297,8 @@ export default function SyncerClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode,
-          start: start.trim() || undefined,
-          end: end.trim() || undefined,
+          start: range.start,
+          end: range.end,
           mappingFileId,
         }),
       });
@@ -298,6 +316,12 @@ export default function SyncerClient() {
   }
 
   async function runSync() {
+    const range = validateRangeMode();
+    if (!range.ok) {
+      setClientError(range.error);
+      setRunStatus("failed");
+      return;
+    }
     eventSourceRef.current?.close();
     eventSourceRef.current = null;
 
@@ -314,8 +338,8 @@ export default function SyncerClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode,
-          start: start.trim() || undefined,
-          end: end.trim() || undefined,
+          start: range.start,
+          end: range.end,
           dryRun,
           minRecords,
           rollbackRun: rollbackRun.trim() || undefined,
@@ -533,26 +557,18 @@ export default function SyncerClient() {
         </div>
 
         {mode === "range" ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Start (YYYY-MM-DD)</label>
-              <input
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-                placeholder="2026-04-01"
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">End (optional)</label>
-              <input
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                placeholder="Leave empty for today"
-                className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
-              />
-            </div>
-          </div>
+          <DateRangePicker
+            startDate={start}
+            endDate={end || todayIsoDate()}
+            onChange={(range) => {
+              setStart(range.startDate);
+              setEnd(range.endDate);
+            }}
+            label="Sync range"
+            helpText="Range mode syncs survey results from the selected start through the selected end date."
+            maxDate={todayIsoDate()}
+            tone="emerald"
+          />
         ) : null}
 
         <div className="flex flex-wrap gap-6 items-center">

@@ -1,6 +1,6 @@
 import { ACQUISITION_TYPE_ID } from "./constants";
 import { ledgerKey } from "./ledger";
-import { getFlag, getQuestionId, type MappingMaps } from "./mapping";
+import { getFlagStrict, getQuestionId, type MappingMaps } from "./mapping";
 import type { PdiFlagPayloadItem, SurveyResultRow } from "./types";
 
 function norm(x: unknown): string {
@@ -66,7 +66,7 @@ export function transformSurveyRows(
       continue;
     }
 
-    const flagId = getFlag(maps, survey, question, answer);
+    const flagId = getFlagStrict(maps, survey, question, answer);
     if (!flagId) {
       rowsSkipped += 1;
       continue;

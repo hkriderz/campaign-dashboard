@@ -19,6 +19,27 @@ import { loadSyncState, saveSyncState, type SyncState } from "./sync-state";
 import { acquireSyncLock, releaseSyncLock } from "./sync-lock";
 import { buildMappingReport, writeSyncCsvReports } from "./sync-reports";
 import type { SurveyResultRow, SyncRunOptions, SyncRunSummary } from "./types";
+import { isValidIsoDate, normalizeIsoDateRange } from "@/lib/validation/iso-date";
+
+function parseIsoDateAtLocalTime(isoDate: string, endOfDay = false): Date {
+  if (!isValidIsoDate(isoDate)) {
+    throw new Error(`Invalid date '${isoDate}'. Expected YYYY-MM-DD.`);
+  }
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(year, month - 1, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0);
+}
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function parseCheckedDateTime(raw: string, label: string): Date {
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) {
+    throw new Error(`${label} is invalid or missing: ${raw || "(empty)"}`);
+  }
+  return date;
+}
 
 function parseRangeOptions(
   options: SyncRunOptions,
@@ -26,8 +47,11 @@ function parseRangeOptions(
   log: SyncLogger
 ): { start: Date; end: Date; startStr: string; endStr: string } {
   if (options.mode === "incremental") {
-    const start = new Date(syncState.last_sync_timestamp);
+    const start = parseCheckedDateTime(syncState.last_sync_timestamp, "syncState.last_sync_timestamp");
     const end = new Date();
+    if (start.getTime() > end.getTime()) {
+      throw new Error("syncState.last_sync_timestamp is in the future; refusing to run incremental sync.");
+    }
     log.info("Mode: INCREMENTAL (since last sync)");
     return {
       start,
@@ -37,14 +61,13 @@ function parseRangeOptions(
     };
   }
 
-  if (!options.start?.trim()) {
-    throw new Error("For range mode, start date (YYYY-MM-DD) is required.");
+  const normalized = normalizeIsoDateRange(options.start ?? "", options.end?.trim() || todayIsoDate());
+  if (!normalized.ok) {
+    throw new Error(normalized.error);
   }
 
-  const start = new Date(`${options.start.trim()}T00:00:00`);
-  const end = options.end?.trim()
-    ? new Date(`${options.end.trim()}T23:59:59`)
-    : new Date();
+  const start = parseIsoDateAtLocalTime(normalized.startDate);
+  const end = parseIsoDateAtLocalTime(normalized.endDate, true);
   log.info("Mode: RANGE");
   return {
     start,

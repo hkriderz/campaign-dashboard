@@ -1,13 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useCallback, useEffect, useState, type ChangeEvent } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import DateRangePicker from "@/components/common/DateRangePicker";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
 import TabBar from "@/components/phonebanking/TabBar";
 import type { AllCampaignsDayDashboardPayload } from "@/lib/all-campaigns-day-dashboard";
 import type { PhoneBankSummary } from "@/lib/types";
-import { isValidIsoDate } from "@/lib/validation/iso-date";
+import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 const PbDashboardStack = dynamic(() => import("@/components/phonebanking/PbDashboardStack"), {
   ssr: false,
@@ -38,6 +39,8 @@ const DAY_TABS = [
 ] as const;
 
 const ALL_DATE_PARAM = "allDate";
+const ALL_START_PARAM = "allStart";
+const ALL_END_PARAM = "allEnd";
 const ALL_TAB_PARAM = "allTab";
 const TAB_OVERVIEW = DAY_TABS[0].id;
 const TAB_AGGREGATE = DAY_TABS[1].id;
@@ -58,6 +61,8 @@ type ApiOk = {
   ok: true;
   data: {
     date: string;
+    start?: string;
+    end?: string;
     dashboard: AllCampaignsDayDashboardPayload;
   };
 };
@@ -71,8 +76,16 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const rawDate = searchParams.get(ALL_DATE_PARAM)?.trim() ?? "";
-  const allDate = isValidIsoDate(rawDate) ? rawDate : "";
+  const rawStart = searchParams.get(ALL_START_PARAM)?.trim() || searchParams.get(ALL_DATE_PARAM)?.trim() || "";
+  const rawEnd = searchParams.get(ALL_END_PARAM)?.trim() || rawStart;
+  const normalizedRange = rawStart ? normalizeIsoDateRange(rawStart, rawEnd) : null;
+  const allStartDate = normalizedRange?.ok ? normalizedRange.startDate : "";
+  const allEndDate = normalizedRange?.ok ? normalizedRange.endDate : "";
+  const allDateLabel = allStartDate
+    ? allStartDate === allEndDate
+      ? allStartDate
+      : `${allStartDate} to ${allEndDate}`
+    : "";
 
   const rawTab = searchParams.get(ALL_TAB_PARAM)?.trim() ?? "";
   const activeTab = normalizeAllTab(rawTab);
@@ -91,19 +104,27 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
     [pathname, router, searchParams]
   );
 
-  const onDateInputChange = useCallback(
-    (e: ChangeEvent<HTMLInputElement>) => {
-      const v = e.target.value;
-      if (!v) {
+  const onDateRangeChange = useCallback(
+    (range: { startDate: string; endDate: string }) => {
+      if (!range.startDate || !range.endDate) {
         replaceQuery((p) => {
           p.delete(ALL_DATE_PARAM);
+          p.delete(ALL_START_PARAM);
+          p.delete(ALL_END_PARAM);
           p.delete(ALL_TAB_PARAM);
         });
         return;
       }
-      if (!isValidIsoDate(v)) return;
+      const normalized = normalizeIsoDateRange(range.startDate, range.endDate);
+      if (!normalized.ok) return;
       replaceQuery((p) => {
-        p.set(ALL_DATE_PARAM, v);
+        p.delete(ALL_DATE_PARAM);
+        p.set(ALL_START_PARAM, normalized.startDate);
+        if (normalized.startDate === normalized.endDate) {
+          p.delete(ALL_END_PARAM);
+        } else {
+          p.set(ALL_END_PARAM, normalized.endDate);
+        }
         if (!p.get(ALL_TAB_PARAM)) p.set(ALL_TAB_PARAM, TAB_OVERVIEW);
       });
     },
@@ -113,12 +134,14 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
   const onClearDate = useCallback(() => {
     replaceQuery((p) => {
       p.delete(ALL_DATE_PARAM);
+      p.delete(ALL_START_PARAM);
+      p.delete(ALL_END_PARAM);
       p.delete(ALL_TAB_PARAM);
     });
   }, [replaceQuery]);
 
   useEffect(() => {
-    if (!allDate) {
+    if (!allStartDate) {
       setDayDashboard(null);
       setDayError(null);
       setDayLoading(false);
@@ -129,7 +152,8 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
     setDayLoading(true);
     setDayError(null);
 
-    fetch(`/api/phonebanking/all-campaigns-day?date=${encodeURIComponent(allDate)}`, {
+    const params = new URLSearchParams({ start: allStartDate, end: allEndDate });
+    fetch(`/api/phonebanking/all-campaigns-day?${params.toString()}`, {
       signal: ac.signal,
     })
       .then(async (res) => {
@@ -154,41 +178,42 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
       });
 
     return () => ac.abort();
-  }, [allDate]);
+  }, [allStartDate, allEndDate]);
 
-  const showDayUi = Boolean(allDate);
+  const showDayUi = Boolean(allStartDate);
   const showTabs = showDayUi && !dayLoading && !dayError && dayDashboard !== null;
 
-  const showDefaultFullWindowTable = !allDate;
+  const showDefaultFullWindowTable = !allStartDate;
 
   const d = dayDashboard;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-        <label className="flex flex-col gap-1 text-sm max-w-xs">
-          <span className="font-medium text-gray-700 dark:text-gray-200">Filter by day (Pacific)</span>
-          <input
-            type="date"
-            value={allDate}
-            onChange={onDateInputChange}
-            className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm text-gray-900 dark:text-gray-100"
+        <div className="w-full max-w-xl">
+          <DateRangePicker
+            startDate={allStartDate}
+            endDate={allEndDate}
+            onChange={onDateRangeChange}
+            label="Filter"
+            helpText="Choose one Pacific day or a multi-day range across all campaign tags."
+            allowEmpty
           />
-        </label>
-        {allDate ? (
+        </div>
+        {allStartDate ? (
           <button
             type="button"
             onClick={onClearDate}
-            className="text-xs font-medium text-indigo-600 dark:text-indigo-300 hover:underline self-start sm:self-auto"
+            className="text-xs font-medium text-indigo-600 dark:text-indigo-300 hover:underline active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 self-start sm:self-auto"
           >
-            Clear date (full window)
+            Clear range (full window)
           </button>
         ) : null}
       </div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-        Leave the date empty for the usual all-time window list (since Dec 1, 2025). Choosing a day loads merged
+        Leave the range empty for the usual all-time window list (since Dec 1, 2025). Choosing a range loads merged
         BigQuery + CSV from <strong className="font-medium text-gray-600 dark:text-gray-300">all candidate tags</strong>{" "}
-        — same calculations as each candidate&rsquo;s dashboard for that Pacific day.
+        — same calculations as each candidate&rsquo;s dashboard for that Pacific window.
       </p>
 
       {dayError ? (
@@ -203,8 +228,8 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
         </Suspense>
       ) : null}
 
-      {dayLoading && allDate ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400 py-4">Loading data for {allDate}…</p>
+      {dayLoading && allStartDate ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400 py-4">Loading data for {allDateLabel}…</p>
       ) : null}
 
       {showDefaultFullWindowTable ? (
@@ -219,7 +244,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           <h3 className="text-base font-semibold text-gray-700 dark:text-gray-200">All Phone Banks</h3>
           <PhoneBankTable
             phoneBanks={d.overviewPhoneBanks}
-            emptyMessage={`No campaigns with activity on ${allDate} (BQ + CSV merge).`}
+            emptyMessage={`No campaigns with activity on ${allDateLabel} (BQ + CSV merge).`}
           />
         </section>
       ) : null}
@@ -235,7 +260,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
             verbatimFinalResultLabels={false}
             syntheticPivotAllowlistByQuestion={d.syntheticPivotAllowlistByQuestion}
             widePivotHeaderOrderHint={d.widePivotHeaderOrderHint}
-            exportFilenameDate={allDate}
+            exportFilenameDate={allDateLabel || allStartDate}
           />
         </div>
       ) : null}

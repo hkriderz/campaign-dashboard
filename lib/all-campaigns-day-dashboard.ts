@@ -48,6 +48,7 @@ import {
   buildPhonebankerBqOutcomeMap,
   mergePhoneBankRowWithBqOutcomes,
 } from "@/lib/phonebanker-bq-outcomes";
+import { compareIsoDates, normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 const ALL_CAMPAIGNS_PAGE_TAG: CampaignTag = {
   id: "_all_campaigns",
@@ -84,14 +85,17 @@ function blankCsvRow(): PhoneBankCsvRow {
   };
 }
 
+function isoDateInRange(value: string, startDate: string, endDate: string): boolean {
+  return compareIsoDates(value, startDate) >= 0 && compareIsoDates(value, endDate) <= 0;
+}
+
 /**
  * When a date is selected, align overview list with slice + caller rows (same as tag page).
  */
 function buildOverviewPhoneBankRowsForSelectedDate(
   filteredSlices: PbDashboardSlice[],
   callerMetricsBySlice: Record<string, TagDailyCallerStat[]>,
-  phoneBanksByCampaignKey: Map<string, PhoneBankSummary>,
-  isoDate: string
+  phoneBanksByCampaignKey: Map<string, PhoneBankSummary>
 ): PhoneBankSummary[] {
   const out: PhoneBankSummary[] = [];
   for (const slice of filteredSlices) {
@@ -121,8 +125,8 @@ function buildOverviewPhoneBankRowsForSelectedDate(
       uniqueCallers,
       totalHours: Math.round((totalSeconds / 3600) * 100) / 100,
       totalSeconds,
-      firstCallDate: isoDate,
-      lastCallDate: isoDate,
+      firstCallDate: slice.callDate,
+      lastCallDate: slice.callDate,
       campaignCreatedDate: base?.campaignCreatedDate ?? "",
     });
   }
@@ -132,11 +136,18 @@ function buildOverviewPhoneBankRowsForSelectedDate(
 }
 
 export async function buildAllCampaignsDayDashboard(
-  isoDate: string
+  isoDate: string,
+  endIsoDate = isoDate
 ): Promise<AllCampaignsDayDashboardPayload | { error: string }> {
-  if (!isValidPhonebankingIsoDate(isoDate)) {
+  if (!isValidPhonebankingIsoDate(isoDate) || !isValidPhonebankingIsoDate(endIsoDate)) {
     return { error: "Invalid date" };
   }
+  const normalizedRange = normalizeIsoDateRange(isoDate, endIsoDate);
+  if (!normalizedRange.ok) {
+    return { error: normalizedRange.error };
+  }
+  const startDate = normalizedRange.startDate;
+  const endDate = normalizedRange.endDate;
 
   const tags = getPhonebankingTags();
   if (!tags.length) {
@@ -177,11 +188,11 @@ export async function buildAllCampaignsDayDashboard(
   const wideRefHeadersList: string[][] = [];
 
   for (const tr of tagResults) {
-    bqDailyCaller.push(...tr.daily.filter((r) => r.callDate === isoDate));
-    bqQuestionStats.push(...tr.questions.filter((r) => r.callDate === isoDate));
+    bqDailyCaller.push(...tr.daily.filter((r) => isoDateInRange(r.callDate, startDate, endDate)));
+    bqQuestionStats.push(...tr.questions.filter((r) => isoDateInRange(r.callDate, startDate, endDate)));
     for (const row of tr.csv) {
       const d = normalizeDateToIso(row.date);
-      if (d === isoDate) csvRowsSafe.push(row);
+      if (d && isoDateInRange(d, startDate, endDate)) csvRowsSafe.push(row);
     }
     if (tr.wideExtraColumnOrder?.length) headerOrders.push(tr.wideExtraColumnOrder);
     if (tr.wideRefHeaders.length) wideRefHeadersList.push(tr.wideRefHeaders);
@@ -362,7 +373,7 @@ export async function buildAllCampaignsDayDashboard(
     return a.campaignName.localeCompare(b.campaignName);
   });
 
-  const filteredSlices = dashboardSlices.filter((s) => s.callDate === isoDate);
+  const filteredSlices = dashboardSlices.filter((s) => isoDateInRange(s.callDate, startDate, endDate));
 
   const csvRowsBySliceCaller = new Map<string, PhoneBankCsvRow[]>();
   for (const row of csvRowsSafe) {
@@ -469,7 +480,7 @@ export async function buildAllCampaignsDayDashboard(
 
   for (const row of csvRowsSafe) {
     const iso = normalizeDateToIso(row.date);
-    if (!iso || iso !== isoDate) continue;
+    if (!iso || !isoDateInRange(iso, startDate, endDate)) continue;
     const sk = makeSliceKey(row.phoneBankName, iso);
     if (bqSliceKeys.has(sk)) continue;
     const canonicalCaller = resolvePhonebankerRep(
@@ -496,15 +507,14 @@ export async function buildAllCampaignsDayDashboard(
     callerMetricsBySlice[sk].push(stat);
   }
 
-  const phoneBanksDay = await fetchAllPhoneBankSummariesForDate(isoDate);
+  const phoneBanksDay = startDate === endDate ? await fetchAllPhoneBankSummariesForDate(startDate) : [];
   const phoneBanksByCampaignKey = new Map(
     phoneBanksDay.map((p) => [normalizeCampaignKey(p.campaignName), p] as const)
   );
   const overviewPhoneBanks = buildOverviewPhoneBankRowsForSelectedDate(
     filteredSlices,
     callerMetricsBySlice,
-    phoneBanksByCampaignKey,
-    isoDate
+    phoneBanksByCampaignKey
   );
 
   const extraWideColumnOrder = headerOrders

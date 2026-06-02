@@ -215,7 +215,7 @@ function secToTime(totalSec: number): string {
 }
 
 function pct(num: number, den: number): string {
-  if (!den) return "—";
+  if (!den) return "0.0%";
   return `${((num / den) * 100).toFixed(1)}%`;
 }
 
@@ -290,11 +290,11 @@ function buildQuestionResponsesPivotTsv(
     }
     const rowCells: (string | number)[] = [
       phonebankerName,
-      m ? secToTime(m.totalDialerSeconds) : "—",
-      m ? secToTime(m.totalCallSeconds) : "—",
-      m ? m.callsAnswered : "—",
-      m ? m.talkingToCorrectPerson : "—",
-      m ? m.surveyed : "—",
+      m ? secToTime(m.totalDialerSeconds) : "0:00:00",
+      m ? secToTime(m.totalCallSeconds) : "0:00:00",
+      m ? m.callsAnswered : 0,
+      m ? m.talkingToCorrectPerson : 0,
+      m ? m.surveyed : 0,
     ];
     if (hasPivot) {
       for (const col of renderedColumns) {
@@ -971,19 +971,19 @@ export default function PbDashboardStack({
                                 {phonebankerName}
                               </td>
                               <td className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center font-mono">
-                                {m ? secToTime(m.totalDialerSeconds) : "—"}
+                                {m ? secToTime(m.totalDialerSeconds) : "0:00:00"}
                               </td>
                               <td className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center font-mono">
-                                {m ? secToTime(m.totalCallSeconds) : "—"}
+                                {m ? secToTime(m.totalCallSeconds) : "0:00:00"}
                               </td>
                               <td className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center">
-                                {m ? m.callsAnswered.toLocaleString() : "—"}
+                                {m ? m.callsAnswered.toLocaleString() : "0"}
                               </td>
                               <td className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center">
-                                {m ? m.talkingToCorrectPerson.toLocaleString() : "—"}
+                                {m ? m.talkingToCorrectPerson.toLocaleString() : "0"}
                               </td>
                               <td className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center">
-                                {m ? m.surveyed.toLocaleString() : "—"}
+                                {m ? m.surveyed.toLocaleString() : "0"}
                               </td>
                               {hasPivot &&
                                 renderedColumns.map((col) => (

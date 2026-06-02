@@ -8,7 +8,7 @@ type Props = {
 };
 
 function fmtHours(h: number) {
-  if (h === 0) return "—";
+  if (h === 0) return "0.00h";
   return `${h.toFixed(2)}h`;
 }
 

@@ -42,7 +42,7 @@ export default function AppShell({ sidebar, children }: Props) {
               <button
                 type="button"
                 aria-label="Close navigation menu"
-                className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+                className="fixed inset-0 z-40 bg-black/50 transition-colors hover:bg-black/60 active:bg-black/70 lg:hidden"
                 onClick={closeSidebar}
               />
               <div className="fixed inset-y-0 left-0 z-50 w-[min(18rem,88vw)] max-h-[100dvh] overflow-y-auto lg:hidden shadow-xl">

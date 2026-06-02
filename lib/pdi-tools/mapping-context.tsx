@@ -167,7 +167,12 @@ function reducer(state: AppState, action: Action): AppState {
 
       for (const ans of answers) {
         const ak = aKey(surveyName, questionName, ans);
-        if (newAnswerMappings[ak] && newAnswerMappings[ak].confidence === "auto") {
+        const existing = newAnswerMappings[ak];
+        if (existing && existing.pdiQuestionId !== pdiQuestionId) {
+          delete newAnswerMappings[ak];
+          continue;
+        }
+        if (existing && existing.confidence === "auto") {
           delete newAnswerMappings[ak];
         }
       }

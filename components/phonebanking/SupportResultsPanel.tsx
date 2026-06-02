@@ -18,7 +18,7 @@ function funnelRow(label: string, value: number | string, opts: Partial<FunnelSt
 }
 
 function pct(num: number, den: number): string {
-  if (!den) return "—";
+  if (!den) return "0.0%";
   return `${((num / den) * 100).toFixed(1)}%`;
 }
 

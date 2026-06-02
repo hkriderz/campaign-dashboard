@@ -3,7 +3,7 @@ import * as path from "path";
 import { ACQUISITION_TYPE_ID } from "./constants";
 import { ensurePdiSyncExportsDir } from "../sync-working-dir";
 import { ledgerKey } from "./ledger";
-import { getFlag, getQuestionId, type MappingMaps } from "./mapping";
+import { getFlagStrict, getQuestionId, type MappingMaps } from "./mapping";
 import type { SyncLogger } from "./logger";
 import type { PdiFlagPayloadItem, SurveyResultRow } from "./types";
 import { extractFlagDate } from "./transform";
@@ -106,9 +106,9 @@ export function buildMappingReport(
       continue;
     }
 
-    const flagId = getFlag(maps, survey, question, answer);
+    const flagId = getFlagStrict(maps, survey, question, answer);
     if (!flagId) {
-      reportRow.mapping_status = "UNMAPPED: Answer/flag not in mapping";
+      reportRow.mapping_status = "UNMAPPED_ANSWER: Answer is not explicitly mapped";
       rowsSkipped += 1;
       report.push(reportRow);
       continue;
@@ -229,8 +229,11 @@ export function writeSyncCsvReports(
         "campaign_name",
         "pdi_id",
         "final_result_question",
+        "source_question",
         "synthesized_answer",
         "fill_source_question",
+        "explicit_final_result_mapping",
+        "final_result_flag_id",
         "call_time",
         "flag_entry_date",
       ],
@@ -242,8 +245,11 @@ export function writeSyncCsvReports(
         campaign_name: norm(r.campaign_name),
         pdi_id: norm(r.pdi_id || r.callee_id || r.caller_id),
         final_result_question: norm(r.question_name),
+        source_question: norm(r._fill_source_question),
         synthesized_answer: norm(r.answer_value),
         fill_source_question: norm(r._fill_source_question),
+        explicit_final_result_mapping: r._final_result_has_explicit_mapping ? "true" : "false",
+        final_result_flag_id: norm(r._final_result_flag_id),
         call_time: norm(r.call_time),
         flag_entry_date: extractFlagDate(r.call_time),
       }))

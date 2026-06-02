@@ -6,7 +6,7 @@ type Props = {
 };
 
 function pct(num: number, den: number): string {
-  if (!den) return "—";
+  if (!den) return "0.0%";
   return `${((num / den) * 100).toFixed(1)}%`;
 }
 

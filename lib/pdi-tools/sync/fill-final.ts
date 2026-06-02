@@ -64,10 +64,13 @@ export function fillFinalResults(
       .sort((a, b) => norm(a.question_name).localeCompare(norm(b.question_name)));
 
     let fillRow: SurveyResultRow | null = null;
+    let finalResultFlagId = "";
     for (let i = otherRows.length - 1; i >= 0; i--) {
       const r = otherRows[i]!;
-      if (getFlagStrict(maps, campaign, frQname, norm(r.answer_value))) {
+      const flagId = getFlagStrict(maps, campaign, frQname, norm(r.answer_value));
+      if (flagId) {
         fillRow = r;
+        finalResultFlagId = flagId;
         break;
       }
     }
@@ -77,6 +80,8 @@ export function fillFinalResults(
     row._fill_source_question = norm(fillRow.question_name);
     row.question_name = frQname;
     row._synthetic_final_result = true;
+    row._final_result_has_explicit_mapping = true;
+    row._final_result_flag_id = finalResultFlagId;
     synthetic.push(row);
   }
 

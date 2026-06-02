@@ -180,19 +180,19 @@ const COL_GROUPS: ColGroup[] = [
 
 function getCellValue(row: PhoneBankCsvRow, key: ColKey): string {
   const val = row[key];
-  if (val === undefined || val === null || val === 0) return "—";
+  if (val === undefined || val === null) return "0";
   return String(val);
 }
 
 function highlightClass(col: ColDef, val: string): string {
-  if (val === "—" || val === "0") return "";
+  if (val === "0") return "";
   if (col.highlight === "green") return "text-emerald-700 font-semibold";
   if (col.highlight === "red") return "text-rose-600 font-medium";
   return "";
 }
 
 function ssRateLabel(row: PhoneBankCsvRow): string {
-  if (!row.surveyed) return "—";
+  if (!row.surveyed) return "0.0%";
   return `${((row.finalSS / row.surveyed) * 100).toFixed(1)}%`;
 }
 
@@ -216,19 +216,6 @@ type Props = {
 export default function AggregateTable({ rows, campaignLabel }: Props) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [collapsedColGroups, setCollapsedColGroups] = useState<Set<string>>(new Set());
-
-  // Determine which column groups have any nonzero data (hide if all zero)
-  const activeColGroups = useMemo(() => {
-    return COL_GROUPS.filter((grp) => {
-      if (["session", "contact", "final"].includes(grp.id)) return true;
-      return grp.cols.some((col) =>
-        rows.some((r) => {
-          const v = r[col.key];
-          return typeof v === "number" ? v > 0 : Boolean(v);
-        })
-      );
-    });
-  }, [rows]);
 
   // Group rows by phone bank
   const groups = useMemo(() => {
@@ -279,7 +266,7 @@ export default function AggregateTable({ rows, campaignLabel }: Props) {
   }
 
   // Build the flat list of visible columns
-  const visibleColGroups = activeColGroups.map((grp) => ({
+  const visibleColGroups = COL_GROUPS.map((grp) => ({
     ...grp,
     collapsed: collapsedColGroups.has(grp.id),
     visibleCols: collapsedColGroups.has(grp.id) ? [] : grp.cols,
@@ -490,7 +477,7 @@ function DataRow({
               key={`${grp.id}-sum`}
               className="px-2 py-1.5 border border-gray-100 text-center text-gray-500 font-medium"
             >
-              {colSum > 0 ? colSum : "—"}
+              {colSum}
             </td>,
           ];
         }
@@ -545,7 +532,7 @@ function TotalRow({
           }, 0);
           return [
             <td key={`${grp.id}-sum`} className="px-2 py-2 border border-gray-600 text-center">
-              {colSum > 0 ? colSum : "—"}
+              {colSum}
             </td>,
           ];
         }

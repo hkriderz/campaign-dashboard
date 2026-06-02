@@ -10,6 +10,8 @@ export type SurveyResultRow = {
   pdi_id?: string;
   _fill_source_question?: string;
   _synthetic_final_result?: boolean;
+  _final_result_has_explicit_mapping?: boolean;
+  _final_result_flag_id?: string;
 };
 
 export type PdiFlagPayloadItem = {
