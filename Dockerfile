@@ -21,6 +21,7 @@ ENV HOSTNAME=0.0.0.0
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
+    gosu \
     python3 \
     python3-pandas \
     python3-requests \
@@ -36,10 +37,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/district-engine ./district-engine
 COPY --from=builder --chown=nextjs:nodejs /app/geodata ./geodata
 COPY --from=builder --chown=nextjs:nodejs /app/geomodule ./geomodule
+COPY --chown=root:root docker-entrypoint.sh ./docker-entrypoint.sh
 
 # Must run as root: /app is root-owned; nextjs cannot mkdir here after USER nextjs.
 # install -d sets owner in one step (avoids separate chown -R that failed on some builders).
 RUN install -d -o nextjs -g nodejs -m 0755 \
+    data \
+    data/district-classifier \
     credentials \
     data/bq-snapshots \
     data/district-classifier/jobs \
@@ -47,8 +51,9 @@ RUN install -d -o nextjs -g nodejs -m 0755 \
     data/district-classifier/exports \
     data/district-sort-cache \
     pdi-mappings \
-    pdi-sync-exports
+    pdi-sync-exports \
+  && chmod 0755 ./docker-entrypoint.sh
 
-USER nextjs
 EXPOSE 3000
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "server.js"]

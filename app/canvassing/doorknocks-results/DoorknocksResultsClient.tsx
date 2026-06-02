@@ -11,6 +11,7 @@ import {
   type SavedDoorknockResultsListItem,
   type SavedDoorknockResultsReport,
 } from "@/lib/canvassing/doorknocks-results/types";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 type ApiResponse<T> = {
   ok: boolean;
@@ -1059,7 +1060,7 @@ export default function DoorknocksResultsClient() {
     }
 
     try {
-      await navigator.clipboard.writeText(reportTsv(currentReport, currentName, showSummaryDetails));
+      await writeTextToClipboard(reportTsv(currentReport, currentName, showSummaryDetails));
       setMessage("Report copied for Sheets.");
     } catch {
       setError("Unable to copy CSV. Your browser may be blocking clipboard access.");
@@ -1070,7 +1071,7 @@ export default function DoorknocksResultsClient() {
     setError("");
     setMessage("");
     try {
-      await navigator.clipboard.writeText(text);
+      await writeTextToClipboard(text);
       setMessage(successMessage);
     } catch {
       setError("Unable to copy to clipboard. Your browser may be blocking clipboard access.");

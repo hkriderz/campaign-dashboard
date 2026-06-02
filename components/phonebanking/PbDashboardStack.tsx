@@ -24,6 +24,7 @@ import {
   pivotExportFilename,
   pivotTsvToCsv,
 } from "@/lib/pivot-csv-export";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 type PendingSliceUndo = {
   sliceKey: string;
@@ -755,7 +756,7 @@ export default function PbDashboardStack({
                         className="dash-action-btn dash-action-btn-sm dash-action-btn-copy"
                         onClick={async () => {
                           try {
-                            await navigator.clipboard.writeText(pivotTsv);
+                            await writeTextToClipboard(pivotTsv);
                             setActionMsg("Pivot table copied to clipboard (TSV).");
                           } catch {
                             setActionMsg("Clipboard failed — try Download CSV.");

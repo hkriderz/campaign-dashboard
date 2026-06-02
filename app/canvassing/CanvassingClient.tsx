@@ -9,6 +9,7 @@ import type {
   SavedCanvassingReport,
   SavedCanvassingReportListItem,
 } from "@/lib/canvassing/types";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 type ApiResponse<T> = {
   ok: boolean;
@@ -898,7 +899,7 @@ export default function CanvassingClient() {
     }
 
     try {
-      await navigator.clipboard.writeText(reportCsv(currentResult, currentReportTitle, currentReportDate));
+      await writeTextToClipboard(reportCsv(currentResult, currentReportTitle, currentReportDate));
       setMessage("Report CSV copied to clipboard.");
     } catch {
       setError("Unable to copy CSV. Your browser may be blocking clipboard access.");
@@ -909,7 +910,7 @@ export default function CanvassingClient() {
     setError("");
     setMessage("");
     try {
-      await navigator.clipboard.writeText(text);
+      await writeTextToClipboard(text);
       setMessage(successMessage);
     } catch {
       setError("Unable to copy to clipboard. Your browser may be blocking clipboard access.");

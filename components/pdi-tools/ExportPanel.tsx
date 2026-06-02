@@ -7,6 +7,7 @@ import {
   downloadMappingJson,
   saveMappingExportToApp,
 } from "@/lib/pdi-tools/export-mapping";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 export default function ExportPanel() {
   const { state } = useApp();
@@ -27,7 +28,7 @@ export default function ExportPanel() {
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(output, null, 2));
+      await writeTextToClipboard(JSON.stringify(output, null, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
