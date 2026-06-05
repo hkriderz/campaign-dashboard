@@ -62,19 +62,22 @@ export default function CandidateGrid({ candidates }: Props) {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
               {[
-                { val: fmt(c.totalCalls), label: "Total Calls" },
+                { val: fmt(c.totalCalls), label: "Total Calls", wide: true },
+                { val: fmt(c.totalDials), label: "Dials" },
                 { val: fmt(c.totalSurveyed), label: "Surveyed" },
                 { val: fmtHours(c.totalHours), label: "Call Time" },
                 { val: fmt(c.uniqueCallers), label: "Callers" },
               ].map((stat) => (
                 <div
                   key={stat.label}
-                  className="rounded-xl border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 p-3"
+                  className={`flex min-h-[72px] flex-col items-center justify-center rounded-xl border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-3 text-center ${
+                    stat.wide ? "col-span-2 sm:col-span-2" : ""
+                  }`}
                 >
-                  <p className="text-xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+                  <p className="w-full text-center text-lg sm:text-xl font-bold leading-tight tracking-tight tabular-nums text-gray-900 dark:text-gray-50">
                     {stat.val}
                   </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  <p className="w-full text-center text-xs leading-snug text-gray-500 dark:text-gray-400 mt-1">
                     {stat.label}
                   </p>
                 </div>

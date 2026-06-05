@@ -80,13 +80,19 @@ export function buildCandidateStatsFromDailyCallerStats(
   const phoneBanks = buildPhoneBankSummariesFromDailyCallerStats(rows, hiddenSliceKeys);
   const dates = phoneBanks.flatMap((p) => [p.firstCallDate, p.lastCallDate]).filter(Boolean) as string[];
   const sortedDates = [...dates].sort();
+  const callerKeys = new Set<string>();
+  for (const row of rows) {
+    if (hiddenSliceKeys.has(makeSliceKey(row.campaignName, row.callDate))) continue;
+    const key = canonicalizePhonebankerKey(row.phonebankerName);
+    if (key) callerKeys.add(key);
+  }
 
   return {
     tag,
     totalCalls: phoneBanks.reduce((s, p) => s + p.totalCalls, 0),
     totalDials: phoneBanks.reduce((s, p) => s + p.totalDials, 0),
     totalSurveyed: phoneBanks.reduce((s, p) => s + p.totalSurveyed, 0),
-    uniqueCallers: phoneBanks.reduce((s, p) => s + p.uniqueCallers, 0),
+    uniqueCallers: callerKeys.size,
     totalHours: Math.round(phoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100,
     phoneBankCount: phoneBanks.length,
     firstCallDate: sortedDates[0] ?? null,

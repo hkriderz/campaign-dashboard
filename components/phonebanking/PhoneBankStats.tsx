@@ -11,11 +11,15 @@ function fmtHours(h: number) {
 
 export default function PhoneBankStats({ campaign }: Props) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
       <StatCard
         label="Total Calls"
         value={campaign.totalCalls.toLocaleString()}
         accent
+      />
+      <StatCard
+        label="Dials"
+        value={campaign.totalDials.toLocaleString()}
       />
       {campaign.totalSurveyed > 0 ? (
         <StatCard

@@ -47,6 +47,7 @@ export default function PhoneBankTable({
           <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Campaign Name</th>
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Total Calls</th>
+            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Dials</th>
             {showSurveyed ? (
               <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Surveyed</th>
             ) : null}
@@ -75,6 +76,9 @@ export default function PhoneBankTable({
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
                 {fmt(pb.totalCalls)}
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
+                {fmt(pb.totalDials)}
               </td>
               {showSurveyed ? (
                 <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">

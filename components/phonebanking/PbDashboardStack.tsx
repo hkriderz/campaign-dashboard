@@ -778,6 +778,7 @@ export default function PbDashboardStack({
                 <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-2">
                   <div className="flex justify-between"><span>PBers</span><strong>{slice.pbers}</strong></div>
                   <div className="flex justify-between mt-1"><span>Total calls</span><strong>{slice.totalCalls.toLocaleString()}</strong></div>
+                  <div className="flex justify-between"><span>Dials</span><strong>{slice.numDials.toLocaleString()}</strong></div>
                   <div className="flex justify-between"><span>Time logged in</span><strong>{secToTime(slice.loggedInSeconds)}</strong></div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">({hrsPerPber} hrs/pber)</div>
                   <div className="flex justify-between mt-1"><span>Time in calls</span><strong>{secToTime(slice.callSeconds)}</strong></div>

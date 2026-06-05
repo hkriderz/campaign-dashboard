@@ -199,12 +199,13 @@ export default function DailyAggregateSection({
       acc.phoneBanks += 1;
       acc.pbers += s.pbers;
       acc.totalCalls += s.totalCalls;
+      acc.numDials += s.numDials;
       acc.callsAnswered += s.callsAnswered;
       acc.loggedInSeconds += s.loggedInSeconds;
       acc.callSeconds += s.callSeconds;
       return acc;
     },
-    { phoneBanks: 0, pbers: 0, totalCalls: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
+    { phoneBanks: 0, pbers: 0, totalCalls: 0, numDials: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
   );
 
   const pberCount = uniquePhonebankers > 0 ? uniquePhonebankers : totals.pbers;
@@ -436,6 +437,7 @@ export default function DailyAggregateSection({
           <div>{totals.phoneBanks} Phone Banks</div>
           <div>{pberCount} PBers</div>
           <div>{totals.totalCalls.toLocaleString()} Total Calls</div>
+          <div>{totals.numDials.toLocaleString()} Dials</div>
           <div className="sm:col-span-2 xl:col-span-1">
             {secToTime(totals.loggedInSeconds)} Time logged in{" "}
             <span className="text-gray-600 dark:text-gray-400">({hrsPerPber} hrs/pber)</span>

@@ -577,6 +577,7 @@ export async function fetchPhoneBankDetail(
   const phonebankerAggregates = Array.from(aggMap.values()).sort(
     (a, b) => b.totalDials - a.totalDials
   );
+  campaign.uniqueCallers = phonebankerAggregates.length;
 
   const availableDates = [
     ...new Set(dailyStats.map((d) => d.callDate).filter(Boolean)),
