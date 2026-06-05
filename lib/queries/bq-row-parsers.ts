@@ -26,7 +26,9 @@ export function rowToPhoneBankSummary(r: Record<string, unknown>): PhoneBankSumm
   return {
     campaignId: toStr(r.campaign_id),
     campaignName: toStr(r.campaign_name),
+    totalCalls: toNum(r.total_calls),
     totalDials: toNum(r.total_dials),
+    totalSurveyed: toNum(r.total_surveyed),
     uniqueCallers: toNum(r.unique_callers),
     totalHours: Math.round((toNum(r.total_seconds) / 3600) * 100) / 100,
     totalSeconds: toNum(r.total_seconds),

@@ -5,7 +5,9 @@ import { makeSliceKey, normalizeCampaignKey } from "./slice-key";
 type Accumulator = {
   campaignId: string;
   campaignName: string;
+  totalCalls: number;
   totalDials: number;
+  totalSurveyed: number;
   totalSeconds: number;
   callerKeys: Set<string>;
   firstCallDate: string | null;
@@ -28,14 +30,18 @@ export function buildPhoneBankSummariesFromDailyCallerStats(
       {
         campaignId: row.campaignId,
         campaignName: row.campaignName,
+        totalCalls: 0,
         totalDials: 0,
+        totalSurveyed: 0,
         totalSeconds: 0,
         callerKeys: new Set<string>(),
         firstCallDate: null,
         lastCallDate: null,
       };
 
+    acc.totalCalls += row.totalCalls ?? row.numDials;
     acc.totalDials += row.numDials;
+    acc.totalSurveyed += row.surveyed;
     acc.totalSeconds += row.totalCallSeconds;
     acc.callerKeys.add(canonicalizePhonebankerKey(row.phonebankerName));
     if (!acc.campaignId && row.campaignId) acc.campaignId = row.campaignId;
@@ -49,7 +55,9 @@ export function buildPhoneBankSummariesFromDailyCallerStats(
     .map((acc) => ({
       campaignId: acc.campaignId,
       campaignName: acc.campaignName,
+      totalCalls: acc.totalCalls,
       totalDials: acc.totalDials,
+      totalSurveyed: acc.totalSurveyed,
       uniqueCallers: acc.callerKeys.size,
       totalHours: Math.round((acc.totalSeconds / 3600) * 100) / 100,
       totalSeconds: acc.totalSeconds,
@@ -75,7 +83,9 @@ export function buildCandidateStatsFromDailyCallerStats(
 
   return {
     tag,
+    totalCalls: phoneBanks.reduce((s, p) => s + p.totalCalls, 0),
     totalDials: phoneBanks.reduce((s, p) => s + p.totalDials, 0),
+    totalSurveyed: phoneBanks.reduce((s, p) => s + p.totalSurveyed, 0),
     uniqueCallers: phoneBanks.reduce((s, p) => s + p.uniqueCallers, 0),
     totalHours: Math.round(phoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100,
     phoneBankCount: phoneBanks.length,

@@ -129,26 +129,34 @@ function buildOverviewPhoneBankRowsForSelectedDate(
     const ck = normalizeCampaignKey(slice.campaignName);
     const base = phoneBanksByCampaignKey.get(ck);
     const dm = callerMetricsBySlice[slice.sliceKey] ?? [];
+    let totalCalls = 0;
     let totalDials = 0;
+    let totalSurveyed = 0;
     let totalSeconds = 0;
     const bankerNames = new Set<string>();
     let campaignId = base?.campaignId ?? "";
     for (const r of dm) {
+      totalCalls += r.totalCalls ?? r.numDials;
       totalDials += r.numDials;
+      totalSurveyed += r.surveyed;
       totalSeconds += r.totalCallSeconds;
       bankerNames.add(canonicalizePhonebankerName(r.phonebankerName));
       if (!campaignId && r.campaignId) campaignId = r.campaignId;
     }
     let uniqueCallers = bankerNames.size;
     if (dm.length === 0) {
+      totalCalls = slice.totalCalls;
       totalDials = slice.numDials;
+      totalSurveyed = slice.surveyed;
       totalSeconds = slice.callSeconds;
       uniqueCallers = slice.pbers;
     }
     out.push({
       campaignId,
       campaignName: slice.campaignName,
+      totalCalls,
       totalDials,
+      totalSurveyed,
       uniqueCallers,
       totalHours: Math.round((totalSeconds / 3600) * 100) / 100,
       totalSeconds,
@@ -175,7 +183,9 @@ function buildOverviewPhoneBankRowsFromSlices(
   type Acc = {
     campaignId: string;
     campaignName: string;
+    totalCalls: number;
     totalDials: number;
+    totalSurveyed: number;
     totalSeconds: number;
     callerKeys: Set<string>;
     firstCallDate: string | null;
@@ -193,7 +203,9 @@ function buildOverviewPhoneBankRowsFromSlices(
       {
         campaignId: base?.campaignId ?? "",
         campaignName: slice.campaignName,
+        totalCalls: 0,
         totalDials: 0,
+        totalSurveyed: 0,
         totalSeconds: 0,
         callerKeys: new Set<string>(),
         firstCallDate: null,
@@ -204,13 +216,17 @@ function buildOverviewPhoneBankRowsFromSlices(
     const callerRows = callerMetricsBySlice[slice.sliceKey] ?? [];
     if (callerRows.length > 0) {
       for (const row of callerRows) {
+        acc.totalCalls += row.totalCalls ?? row.numDials;
         acc.totalDials += row.numDials;
+        acc.totalSurveyed += row.surveyed;
         acc.totalSeconds += row.totalCallSeconds;
         acc.callerKeys.add(canonicalizePhonebankerKey(row.phonebankerName));
         if (!acc.campaignId && row.campaignId) acc.campaignId = row.campaignId;
       }
     } else {
+      acc.totalCalls += slice.totalCalls;
       acc.totalDials += slice.numDials;
+      acc.totalSurveyed += slice.surveyed;
       acc.totalSeconds += slice.callSeconds;
       for (let i = 0; i < slice.pbers; i += 1) {
         acc.callerKeys.add(`${slice.sliceKey}:${i}`);
@@ -226,7 +242,9 @@ function buildOverviewPhoneBankRowsFromSlices(
     .map((acc) => ({
       campaignId: acc.campaignId,
       campaignName: acc.campaignName,
+      totalCalls: acc.totalCalls,
       totalDials: acc.totalDials,
+      totalSurveyed: acc.totalSurveyed,
       uniqueCallers: acc.callerKeys.size,
       totalHours: Math.round((acc.totalSeconds / 3600) * 100) / 100,
       totalSeconds: acc.totalSeconds,
@@ -357,6 +375,7 @@ export default async function TagPage({ params, searchParams }: Props) {
         sliceKey,
         campaignName: row.campaignName,
         callDate: row.callDate,
+        totalCalls: 0,
         numDials: 0,
         pbers: 0,
         callsAnswered: 0,
@@ -383,6 +402,7 @@ export default async function TagPage({ params, searchParams }: Props) {
       });
     }
     const agg = bqSliceMap.get(sliceKey)!;
+    agg.totalCalls += row.totalCalls ?? row.numDials;
     agg.numDials += row.numDials;
     agg.pbers += 1;
     agg.callsAnswered += row.callsAnswered;
@@ -429,6 +449,7 @@ export default async function TagPage({ params, searchParams }: Props) {
         sliceKey,
         campaignName: row.phoneBankName,
         callDate: isoDate,
+        totalCalls: 0,
         numDials: 0,
         pbers: 0,
         callsAnswered: 0,
@@ -461,6 +482,7 @@ export default async function TagPage({ params, searchParams }: Props) {
       agg.talkingToCorrectPerson += row.correctPerson;
       agg.loggedInSeconds += parseTimeToSec(row.hoursLoggedIn);
       agg.callSeconds += parseTimeToSec(row.timeInCalls);
+      agg.totalCalls += row.callsAnswered;
       agg.numDials += row.callsAnswered;
       const ck = canonicalizePhonebankerKey(canonicalCaller);
       let set = csvOnlyCallerKeysBySlice.get(sliceKey);
@@ -609,6 +631,7 @@ export default async function TagPage({ params, searchParams }: Props) {
       campaignName: row.phoneBankName,
       callDate: isoDate,
       phonebankerName: displayName,
+      totalCalls: row.callsAnswered,
       callsAnswered: row.callsAnswered,
       talkingToCorrectPerson: row.correctPerson,
       surveyed: row.surveyed,
@@ -703,9 +726,15 @@ export default async function TagPage({ params, searchParams }: Props) {
   const phoneBankCountBox = headerStatsForSelectedRange
     ? filteredSlices.length
     : overviewPhoneBanks.length;
+  const totalCalls = headerStatsForSelectedRange
+    ? filteredSlices.reduce((s, x) => s + x.totalCalls, 0)
+    : overviewPhoneBanks.reduce((s, p) => s + p.totalCalls, 0);
   const totalDials = headerStatsForSelectedRange
     ? filteredSlices.reduce((s, x) => s + x.numDials, 0)
     : overviewPhoneBanks.reduce((s, p) => s + p.totalDials, 0);
+  const totalSurveyed = headerStatsForSelectedRange
+    ? filteredSlices.reduce((s, x) => s + x.surveyed, 0)
+    : overviewPhoneBanks.reduce((s, p) => s + p.totalSurveyed, 0);
   const totalHours = headerStatsForSelectedRange
     ? Math.round((filteredSlices.reduce((s, x) => s + x.callSeconds, 0) / 3600) * 100) / 100
     : Math.round(overviewPhoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100;
@@ -765,14 +794,22 @@ export default async function TagPage({ params, searchParams }: Props) {
             ) : null}
           </div>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 min-w-0 lg:w-auto">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 min-w-0 lg:w-auto">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Phone Banks</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{phoneBankCountBox}</div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">Total Calls</div>
+            <div className="font-semibold text-gray-900 dark:text-gray-100">{totalCalls.toLocaleString()}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Total Dials</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{totalDials.toLocaleString()}</div>
+          </div>
+          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+            <div className="text-gray-500 dark:text-gray-400">Surveyed</div>
+            <div className="font-semibold text-gray-900 dark:text-gray-100">{totalSurveyed.toLocaleString()}</div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Call Time</div>

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCallsPerLoggedInHour } from "@/lib/calls-rate";
-import { formatShortUsDate } from "@/lib/slice-key";
+import { formatShortUsDate, normalizeCampaignKey } from "@/lib/slice-key";
 import { canonicalizePhonebankerName } from "@/lib/phonebanker-name";
 import { isTraciViolationQuestion } from "@/lib/traci-violation-bq";
 import { formatSurveyColumnHeader, isSpanishPhonebankSlice } from "@/lib/survey-i18n/column-label-gloss";
@@ -35,6 +35,8 @@ export type PbDashboardSlice = {
   sliceKey: string;
   campaignName: string;
   callDate: string;
+  /** Raw call rows from Scale to Win's `calls` table for this campaign×day. */
+  totalCalls: number;
   /** Sum of dial counts for this campaign×day (from daily caller rows). */
   numDials: number;
   pbers: number;
@@ -333,10 +335,41 @@ type SliceRenderModel = {
   pivotTsv: string;
 };
 
+function buildObservedPivotColumnsByCampaign(
+  slices: readonly PbDashboardSlice[],
+  questionRowsBySlice: Record<string, PbQuestionAnswerRow[]>
+): Map<string, PivotColumn[]> {
+  const campaignKeyBySlice = new Map(
+    slices.map((slice) => [slice.sliceKey, normalizeCampaignKey(slice.campaignName)] as const)
+  );
+  const colsByCampaign = new Map<string, Map<string, PivotColumn>>();
+
+  for (const [sliceKey, rows] of Object.entries(questionRowsBySlice)) {
+    const campaignKey = campaignKeyBySlice.get(sliceKey);
+    if (!campaignKey) continue;
+    let cols = colsByCampaign.get(campaignKey);
+    if (!cols) {
+      cols = new Map<string, PivotColumn>();
+      colsByCampaign.set(campaignKey, cols);
+    }
+
+    for (const row of rows) {
+      if (questionLooksLikeDisclaimer(row.questionName)) continue;
+      const key = `${row.questionName}::${row.answerValue}`;
+      if (!cols.has(key)) {
+        cols.set(key, { key, questionName: row.questionName, answerValue: row.answerValue });
+      }
+    }
+  }
+
+  return new Map([...colsByCampaign.entries()].map(([campaignKey, cols]) => [campaignKey, [...cols.values()]]));
+}
+
 function computeSliceRenderModel(
   slice: PbDashboardSlice,
   questionRowsBySlice: Record<string, PbQuestionAnswerRow[]>,
   callerMetricsBySlice: Record<string, TagDailyCallerStat[]>,
+  observedColumnsForCampaign: readonly PivotColumn[],
   surveyScriptProfile: SurveyScriptProfile,
   syntheticPivotAllowlistByQuestion: Readonly<Record<string, readonly string[]>> | undefined,
   widePivotHeaderOrderHint: readonly string[] | undefined,
@@ -370,6 +403,12 @@ function computeSliceRenderModel(
         questionName: row.questionName,
         answerValue: row.answerValue,
       });
+    }
+  }
+
+  for (const col of observedColumnsForCampaign) {
+    if (!colByKey.has(col.key)) {
+      colByKey.set(col.key, col);
     }
   }
 
@@ -426,10 +465,11 @@ function computeSliceRenderModel(
     const key = canonicalizePhonebankerName(r.phonebankerName);
     const prev = metricsByBanker.get(key);
     if (!prev) {
-      metricsByBanker.set(key, { ...r, phonebankerName: key });
+      metricsByBanker.set(key, { ...r, phonebankerName: key, totalCalls: r.totalCalls ?? r.numDials });
     } else {
       metricsByBanker.set(key, {
         ...prev,
+        totalCalls: (prev.totalCalls ?? prev.numDials) + (r.totalCalls ?? r.numDials),
         callsAnswered: prev.callsAnswered + r.callsAnswered,
         talkingToCorrectPerson: prev.talkingToCorrectPerson + r.talkingToCorrectPerson,
         surveyed: prev.surveyed + r.surveyed,
@@ -552,6 +592,10 @@ export default function PbDashboardStack({
   const [pendingUndo, setPendingUndo] = useState<PendingSliceUndo | null>(null);
   const [undoBusy, setUndoBusy] = useState(false);
   const csvKeySet = useMemo(() => new Set(csvSliceKeys ?? []), [csvSliceKeys]);
+  const observedPivotColumnsByCampaign = useMemo(
+    () => buildObservedPivotColumnsByCampaign(slices, questionRowsBySlice),
+    [slices, questionRowsBySlice]
+  );
 
   const sliceModels = useMemo(
     () =>
@@ -560,6 +604,7 @@ export default function PbDashboardStack({
           slice,
           questionRowsBySlice,
           callerMetricsBySlice,
+          observedPivotColumnsByCampaign.get(normalizeCampaignKey(slice.campaignName)) ?? [],
           surveyScriptProfile,
           syntheticPivotAllowlistByQuestion,
           widePivotHeaderOrderHint,
@@ -570,6 +615,7 @@ export default function PbDashboardStack({
       slices,
       questionRowsBySlice,
       callerMetricsBySlice,
+      observedPivotColumnsByCampaign,
       surveyScriptProfile,
       syntheticPivotAllowlistByQuestion,
       widePivotHeaderOrderHint,
@@ -731,6 +777,8 @@ export default function PbDashboardStack({
               <div className="text-sm">
                 <div className="rounded-lg border border-gray-100 dark:border-gray-700 p-2">
                   <div className="flex justify-between"><span>PBers</span><strong>{slice.pbers}</strong></div>
+                  <div className="flex justify-between mt-1"><span>Total calls</span><strong>{slice.totalCalls.toLocaleString()}</strong></div>
+                  <div className="flex justify-between"><span>Dials</span><strong>{slice.numDials.toLocaleString()}</strong></div>
                   <div className="flex justify-between"><span>Time logged in</span><strong>{secToTime(slice.loggedInSeconds)}</strong></div>
                   <div className="text-xs text-gray-500 dark:text-gray-400">({hrsPerPber} hrs/pber)</div>
                   <div className="flex justify-between mt-1"><span>Time in calls</span><strong>{secToTime(slice.callSeconds)}</strong></div>

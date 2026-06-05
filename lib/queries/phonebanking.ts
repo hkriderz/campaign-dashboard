@@ -41,6 +41,21 @@ function requireDashboardDataAccess(): void {
   assertDataAccessAllowed({ gcp: true });
 }
 
+function withPhoneBankMetricDefaults(row: PhoneBankSummary): PhoneBankSummary {
+  return {
+    ...row,
+    totalCalls: row.totalCalls ?? row.totalDials,
+    totalSurveyed: row.totalSurveyed ?? 0,
+  };
+}
+
+function withDailyCallerMetricDefaults(row: TagDailyCallerStat): TagDailyCallerStat {
+  return {
+    ...row,
+    totalCalls: row.totalCalls ?? row.numDials,
+  };
+}
+
 type CampaignLifecycleColumnSet = {
   status: boolean;
   state: boolean;
@@ -113,7 +128,7 @@ export async function fetchPhoneBanksByTag(
   if (!snapshotsDisabled()) {
     const snap = loadPhoneBanksSnapshot(tagId);
     if (snap) {
-      return snap.rows;
+      return snap.rows.map(withPhoneBankMetricDefaults);
     }
     const live = await fetchPhoneBanksByTagUncached(tagId);
     savePhoneBanksSnapshot(tagId, live);
@@ -138,6 +153,7 @@ async function fetchPhoneBanksByTagUncached(tagId: string): Promise<PhoneBankSum
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
+        COUNT(calls.id)                 AS total_calls,
         COUNT(DISTINCT calls.id)        AS total_dials,
         COUNT(DISTINCT calls.caller_id) AS unique_callers,
         SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
@@ -180,6 +196,7 @@ async function fetchAllActivePhoneBankSummariesUncached(): Promise<PhoneBankSumm
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
+        COUNT(calls.id)                 AS total_calls,
         COUNT(DISTINCT calls.id)        AS total_dials,
         COUNT(DISTINCT calls.caller_id) AS unique_callers,
         SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
@@ -231,6 +248,7 @@ async function fetchAllPhoneBankSummariesForDateUncached(isoDate: string): Promi
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
+        COUNT(calls.id)                 AS total_calls,
         COUNT(DISTINCT calls.id)        AS total_dials,
         COUNT(DISTINCT calls.caller_id) AS unique_callers,
         SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
@@ -376,6 +394,7 @@ export async function fetchPhoneBankDetail(
       campaigns.id          AS campaign_id,
       campaigns.name        AS campaign_name,
       campaigns.created_at  AS campaign_created_date,
+      COUNT(calls.id)                 AS total_calls,
       COUNT(DISTINCT calls.id)        AS total_dials,
       COUNT(DISTINCT calls.caller_id) AS unique_callers,
       SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
@@ -396,7 +415,9 @@ export async function fetchPhoneBankDetail(
   const campaign: PhoneBankSummary = {
     campaignId: toStr(cr.campaign_id),
     campaignName: toStr(cr.campaign_name),
+    totalCalls: toNum(cr.total_calls),
     totalDials: toNum(cr.total_dials),
+    totalSurveyed: 0,
     uniqueCallers: toNum(cr.unique_callers),
     totalHours: Math.round((toNum(cr.total_seconds) / 3600) * 100) / 100,
     totalSeconds: toNum(cr.total_seconds),
@@ -673,7 +694,10 @@ export async function fetchTagDailyCallerStats(
   const snap = loadDailyCallerSnapshot(tagId);
   if (snap) {
     if (!snap.rows.length) return [];
-    return snap.rows.filter(tagDailyCallerHasWorkBeyondLoggedHours).sort(sortTagDailyCallerStats);
+    return snap.rows
+      .map(withDailyCallerMetricDefaults)
+      .filter(tagDailyCallerHasWorkBeyondLoggedHours)
+      .sort(sortTagDailyCallerStats);
   }
   const full = await fetchTagDailyCallerStatsUncached(tagId);
   const rows = full.filter(tagDailyCallerHasWorkBeyondLoggedHours).sort(sortTagDailyCallerStats);
@@ -929,6 +953,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
         campaigns.name AS campaign_name,
         callers.name AS phonebanker_name,
         CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
+        COUNT(calls.id) AS total_calls,
         COUNT(DISTINCT calls.id) AS num_dials
       FROM \`${P}.${D}.callers\` callers
       JOIN \`${P}.${D}.campaigns\` campaigns
@@ -947,12 +972,15 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM correct_person_counts
       UNION DISTINCT
       SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM surveyed_counts
+      UNION DISTINCT
+      SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM call_counts
     )
     SELECT
       mg.campaign_id,
       mg.campaign_name,
       mg.call_date,
       mg.phonebanker_name,
+      COALESCE(dc.total_calls, 0) AS total_calls,
       COALESCE(cc.calls_answered, 0) AS calls_answered,
       COALESCE(cp.talking_to_correct_person, 0) AS talking_to_correct_person,
       COALESCE(sc.surveyed, 0) AS surveyed,
@@ -997,6 +1025,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
         campaignName,
         callDate,
         phonebankerName,
+        totalCalls: 0,
         callsAnswered: 0,
         talkingToCorrectPerson: 0,
         surveyed: 0,
@@ -1006,6 +1035,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       });
     }
     const row = merged.get(key)!;
+    row.totalCalls += toNum(r.total_calls);
     row.callsAnswered += toNum(r.calls_answered);
     row.talkingToCorrectPerson += toNum(r.talking_to_correct_person);
     row.surveyed += toNum(r.surveyed);
@@ -1024,6 +1054,7 @@ export function tagDailyCallerHasWorkBeyondLoggedHours(row: TagDailyCallerStat):
     row.talkingToCorrectPerson > 0 ||
     row.surveyed > 0 ||
     row.totalCallSeconds > 0 ||
+    row.totalCalls > 0 ||
     row.numDials > 0
   );
 }

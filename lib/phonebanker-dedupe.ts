@@ -198,8 +198,9 @@ export function mergeTagDailyCallerStats(rows: TagDailyCallerStat[]): TagDailyCa
     const key = `${r.campaignId}::${r.callDate}::${r.phonebankerName}`;
     const prev = map.get(key);
     if (!prev) {
-      map.set(key, { ...r });
+      map.set(key, { ...r, totalCalls: r.totalCalls ?? r.numDials });
     } else {
+      prev.totalCalls = (prev.totalCalls ?? prev.numDials) + (r.totalCalls ?? r.numDials);
       prev.callsAnswered += r.callsAnswered;
       prev.talkingToCorrectPerson += r.talkingToCorrectPerson;
       prev.surveyed += r.surveyed;

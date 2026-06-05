@@ -51,7 +51,11 @@ export type CampaignTag = {
 export type PhoneBankSummary = {
   campaignId: string;
   campaignName: string;
+  /** Raw call rows from Scale to Win's `calls` table. */
+  totalCalls: number;
   totalDials: number;
+  /** Distinct calls that reached the correct person and answered the first structured survey question. */
+  totalSurveyed: number;
   uniqueCallers: number;
   totalHours: number;
   totalSeconds: number;
@@ -62,7 +66,11 @@ export type PhoneBankSummary = {
 
 export type CandidateStats = {
   tag: CampaignTag;
+  /** Raw call rows from Scale to Win's `calls` table. */
+  totalCalls: number;
   totalDials: number;
+  /** Distinct calls that reached the correct person and answered the first structured survey question. */
+  totalSurveyed: number;
   uniqueCallers: number;
   totalHours: number;
   phoneBankCount: number;
@@ -98,6 +106,8 @@ export type TagDailyCallerStat = {
   campaignName: string;
   callDate: string;
   phonebankerName: string;
+  /** Raw call rows from Scale to Win's `calls` table at campaign/day/caller grain. */
+  totalCalls: number;
   callsAnswered: number;
   talkingToCorrectPerson: number;
   surveyed: number;
