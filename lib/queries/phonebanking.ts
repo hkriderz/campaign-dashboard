@@ -153,16 +153,19 @@ async function fetchPhoneBanksByTagUncached(tagId: string): Promise<PhoneBankSum
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
-        COUNT(calls.id)                 AS total_calls,
-        COUNT(DISTINCT calls.id)        AS total_dials,
-        COUNT(DISTINCT calls.caller_id) AS unique_callers,
-        SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
-        MIN(calls.connected_at) AS first_call_date,
-        MAX(calls.connected_at) AS last_call_date
+        COUNTIF(DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}') AS total_calls,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.id, NULL)) AS total_dials,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.caller_id, NULL)) AS unique_callers,
+        SUM(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', CAST(calls.duration AS FLOAT64), 0)) AS total_seconds,
+        MIN(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.connected_at, NULL)) AS first_call_date,
+        MAX(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.connected_at, NULL)) AS last_call_date
       FROM \`${P}.${D}.campaigns\` AS campaigns
       LEFT JOIN \`${P}.${D}.calls\` AS calls
         ON campaigns.id = calls.campaign_id
-      WHERE DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+      WHERE (
+          DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+          OR DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+        )
         AND ${lifecycleFilter}
         AND ${whereClause}
       GROUP BY campaigns.id, campaigns.name, campaigns.created_at
@@ -196,16 +199,19 @@ async function fetchAllActivePhoneBankSummariesUncached(): Promise<PhoneBankSumm
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
-        COUNT(calls.id)                 AS total_calls,
-        COUNT(DISTINCT calls.id)        AS total_dials,
-        COUNT(DISTINCT calls.caller_id) AS unique_callers,
-        SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
-        MIN(calls.connected_at) AS first_call_date,
-        MAX(calls.connected_at) AS last_call_date
+        COUNTIF(DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}') AS total_calls,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.id, NULL)) AS total_dials,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.caller_id, NULL)) AS unique_callers,
+        SUM(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', CAST(calls.duration AS FLOAT64), 0)) AS total_seconds,
+        MIN(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.connected_at, NULL)) AS first_call_date,
+        MAX(IF(DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}', calls.connected_at, NULL)) AS last_call_date
       FROM \`${P}.${D}.campaigns\` AS campaigns
       LEFT JOIN \`${P}.${D}.calls\` AS calls
         ON campaigns.id = calls.campaign_id
-      WHERE DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+      WHERE (
+          DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+          OR DATE(calls.connected_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+        )
         AND ${lifecycleFilter}
       GROUP BY campaigns.id, campaigns.name, campaigns.created_at
     )
@@ -248,19 +254,23 @@ async function fetchAllPhoneBankSummariesForDateUncached(isoDate: string): Promi
         campaigns.id          AS campaign_id,
         campaigns.name        AS campaign_name,
         campaigns.created_at  AS campaign_created_date,
-        COUNT(calls.id)                 AS total_calls,
-        COUNT(DISTINCT calls.id)        AS total_dials,
-        COUNT(DISTINCT calls.caller_id) AS unique_callers,
-        SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
-        MIN(calls.connected_at) AS first_call_date,
-        MAX(calls.connected_at) AS last_call_date
+        COUNTIF(DATE(calls.created_at, 'America/Los_Angeles') = '${isoDate}') AS total_calls,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', calls.id, NULL)) AS total_dials,
+        COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', calls.caller_id, NULL)) AS unique_callers,
+        SUM(IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', CAST(calls.duration AS FLOAT64), 0)) AS total_seconds,
+        MIN(IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', calls.connected_at, NULL)) AS first_call_date,
+        MAX(IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', calls.connected_at, NULL)) AS last_call_date
       FROM \`${P}.${D}.campaigns\` AS campaigns
       INNER JOIN \`${P}.${D}.calls\` AS calls
         ON campaigns.id = calls.campaign_id
-        AND DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}'
       WHERE ${lifecycleFilter}
+        AND (
+          DATE(calls.created_at, 'America/Los_Angeles') = '${isoDate}'
+          OR DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}'
+        )
       GROUP BY campaigns.id, campaigns.name, campaigns.created_at
-      HAVING COUNT(DISTINCT calls.id) > 0
+      HAVING COUNTIF(DATE(calls.created_at, 'America/Los_Angeles') = '${isoDate}') > 0
+        OR COUNT(DISTINCT IF(DATE(calls.connected_at, 'America/Los_Angeles') = '${isoDate}', calls.id, NULL)) > 0
     )
     SELECT *
     FROM campaign_calls
@@ -947,13 +957,25 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       FROM caller_data
       GROUP BY campaign_id, campaign_name, phonebanker_name, call_date
     ),
-    call_counts AS (
+    raw_call_counts AS (
+      SELECT
+        campaigns.id AS campaign_id,
+        campaigns.name AS campaign_name,
+        CAST(DATETIME(calls.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
+        COUNT(*) AS total_calls
+      FROM \`${P}.${D}.calls\` calls
+      JOIN \`${P}.${D}.campaigns\` campaigns
+        ON calls.campaign_id = campaigns.id
+      WHERE ${whereClause}
+        AND DATE(calls.created_at, 'America/Los_Angeles') >= '2025-12-01'
+      GROUP BY campaigns.id, campaigns.name, CAST(DATETIME(calls.created_at, 'America/Los_Angeles') AS DATE)
+    ),
+    dial_counts AS (
       SELECT
         campaigns.id AS campaign_id,
         campaigns.name AS campaign_name,
         callers.name AS phonebanker_name,
         CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
-        COUNT(calls.id) AS total_calls,
         COUNT(DISTINCT calls.id) AS num_dials
       FROM \`${P}.${D}.callers\` callers
       JOIN \`${P}.${D}.campaigns\` campaigns
@@ -973,14 +995,20 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       UNION DISTINCT
       SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM surveyed_counts
       UNION DISTINCT
-      SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM call_counts
+      SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM dial_counts
     )
     SELECT
       mg.campaign_id,
       mg.campaign_name,
       mg.call_date,
       mg.phonebanker_name,
-      COALESCE(dc.total_calls, 0) AS total_calls,
+      CASE
+        WHEN ROW_NUMBER() OVER (
+          PARTITION BY mg.campaign_id, mg.call_date
+          ORDER BY mg.phonebanker_name
+        ) = 1 THEN COALESCE(rc.total_calls, 0)
+        ELSE 0
+      END AS total_calls,
       COALESCE(cc.calls_answered, 0) AS calls_answered,
       COALESCE(cp.talking_to_correct_person, 0) AS talking_to_correct_person,
       COALESCE(sc.surveyed, 0) AS surveyed,
@@ -992,7 +1020,10 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       ON mg.campaign_id = ds.campaign_id
       AND mg.phonebanker_name = ds.phonebanker_name
       AND mg.call_date = ds.call_date
-    LEFT JOIN call_counts dc
+    LEFT JOIN raw_call_counts rc
+      ON mg.campaign_id = rc.campaign_id
+      AND mg.call_date = rc.call_date
+    LEFT JOIN dial_counts dc
       ON mg.campaign_id = dc.campaign_id
       AND mg.phonebanker_name = dc.phonebanker_name
       AND mg.call_date = dc.call_date

@@ -63,7 +63,6 @@ export default function CandidateGrid({ candidates }: Props) {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
               {[
                 { val: fmt(c.totalCalls), label: "Total Calls" },
-                { val: fmt(c.totalDials), label: "Dials" },
                 { val: fmt(c.totalSurveyed), label: "Surveyed" },
                 { val: fmtHours(c.totalHours), label: "Call Time" },
                 { val: fmt(c.uniqueCallers), label: "Callers" },

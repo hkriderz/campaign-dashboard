@@ -729,9 +729,6 @@ export default async function TagPage({ params, searchParams }: Props) {
   const totalCalls = headerStatsForSelectedRange
     ? filteredSlices.reduce((s, x) => s + x.totalCalls, 0)
     : overviewPhoneBanks.reduce((s, p) => s + p.totalCalls, 0);
-  const totalDials = headerStatsForSelectedRange
-    ? filteredSlices.reduce((s, x) => s + x.numDials, 0)
-    : overviewPhoneBanks.reduce((s, p) => s + p.totalDials, 0);
   const totalSurveyed = headerStatsForSelectedRange
     ? filteredSlices.reduce((s, x) => s + x.surveyed, 0)
     : overviewPhoneBanks.reduce((s, p) => s + p.totalSurveyed, 0);
@@ -794,7 +791,7 @@ export default async function TagPage({ params, searchParams }: Props) {
             ) : null}
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 min-w-0 lg:w-auto">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 min-w-0 lg:w-auto">
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Phone Banks</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{phoneBankCountBox}</div>
@@ -802,10 +799,6 @@ export default async function TagPage({ params, searchParams }: Props) {
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Total Calls</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{totalCalls.toLocaleString()}</div>
-          </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
-            <div className="text-gray-500 dark:text-gray-400">Total Dials</div>
-            <div className="font-semibold text-gray-900 dark:text-gray-100">{totalDials.toLocaleString()}</div>
           </div>
           <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Surveyed</div>
