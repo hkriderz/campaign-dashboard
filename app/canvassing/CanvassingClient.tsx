@@ -1,15 +1,33 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
+import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
+import {
+  buildShiftFlagRows,
+  currentLaTimeHm,
+  defaultShiftSettings,
+  excludedLeadRows,
+  filterCanvasserStatsForFlags,
+  filterKnockResultForReports,
+  parseExcludedCanvassers,
+  resolveReportDate,
+  sortGaps,
+  LATE_FIRST_KNOCK_GRACE_MINUTES,
+  STOPPED_EARLY_MINUTES,
+  type KnockShiftSettings,
+  type ShiftFlagRow,
+} from "@/lib/canvassing/knock-report-view";
 import type {
   CampaignResultSummary,
   CanvasserGapStats,
   CanvassingFileRole,
+  CanvassingGapDetail,
   CanvassingReportResult,
+  KnockAnalysisReportMode,
   SavedCanvassingReport,
   SavedCanvassingReportListItem,
 } from "@/lib/canvassing/types";
-import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 type ApiResponse<T> = {
   ok: boolean;
@@ -24,7 +42,9 @@ const ROLE_LABELS: Record<CanvassingFileRole, string> = {
   campaign_results: "Campaign results",
   unknown: "Unknown",
 };
-const SESSION_STATE_KEY = "canvassing.knockAnalysis.v1";
+const SESSION_STATE_KEY = "canvassing.knockAnalysis.v3";
+
+type ResultsTab = "pivot" | "gaps" | "shift";
 
 type PersistedKnockAnalysisState = {
   reportName: string;
@@ -32,7 +52,13 @@ type PersistedKnockAnalysisState = {
   previewResult: CanvassingReportResult | null;
   activeReport: SavedCanvassingReport | null;
   excludedCanvassersRaw: string;
-  activeResultsTab: "pivot" | "gaps";
+  activeResultsTab: ResultsTab;
+  reportMode: KnockAnalysisReportMode;
+  startTime: string;
+  lunchClockOutTime: string;
+  lunchReturnTime: string;
+  endTime: string;
+  asOfTime: string;
 };
 
 function formatNumber(value: number): string {
@@ -48,6 +74,17 @@ function formatDuration(value: number | null | undefined): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Short duration for notes/chats (e.g. 1h 20m, 45m). */
+function formatDurationReadable(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "n/a";
+  const totalMinutes = Math.max(0, Math.round(value));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
+}
+
 function formatTime(value: string | null): string {
   if (!value) return "n/a";
   const date = new Date(value);
@@ -57,6 +94,17 @@ function formatTime(value: string | null): string {
         hour: "numeric",
         minute: "2-digit",
         second: "2-digit",
+      });
+}
+
+function formatTimeShort(value: string | null): string {
+  if (!value) return "n/a";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleTimeString(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
       });
 }
 
@@ -107,8 +155,8 @@ type CopyTextHandler = (text: string, successMessage: string) => void;
 const KNOCK_PIVOT_HEADERS = [
   "Canvasser",
   "Longest Gap",
-  "Start Time",
-  "End Time",
+  "Longest gap start",
+  "Longest gap end",
   "First Knock",
   "Most recent knock",
   "Gap length total",
@@ -157,35 +205,14 @@ function knockPivotTsv(stats: CanvasserGapStats[]): string {
   return rows.join("\n");
 }
 
-function largestGapsCsv(result: CanvassingReportResult): string {
-  const rows = [
-    csvLine(["Canvasser", "Start Time", "End Time", "Gap Length", "End Voter", "End Response"]),
-  ];
-
-  for (const gap of result.bigGapDetails) {
-    rows.push(
-      csvLine([
-        gap.canvasserName,
-        formatTime(gap.startAt),
-        formatTime(gap.endAt),
-        formatDuration(gap.gapMinutes),
-        gap.endVoter || "n/a",
-        gap.endResponse || "n/a",
-      ])
-    );
-  }
-
-  return rows.join("\r\n");
-}
-
-function largestGapsTsv(result: CanvassingReportResult, includeDetails: boolean): string {
+function gapsListTsv(gaps: CanvassingGapDetail[], includeDetails: boolean): string {
   const rows = [
     includeDetails
       ? tsvLine(["Canvasser", "Gap Length", "Start Time", "End Time", "End Voter", "End Response"])
       : tsvLine(["Canvasser", "Gap Length"]),
   ];
 
-  for (const gap of result.bigGapDetails) {
+  for (const gap of sortGaps(gaps)) {
     rows.push(
       includeDetails
         ? tsvLine([
@@ -201,6 +228,115 @@ function largestGapsTsv(result: CanvassingReportResult, includeDetails: boolean)
   }
 
   return rows.join("\n");
+}
+
+function gapsListText(title: string, gaps: CanvassingGapDetail[], includeDetails: boolean): string {
+  const sorted = sortGaps(gaps);
+  const lines = [`${title} (${sorted.length})`, ""];
+  if (!sorted.length) {
+    lines.push("None.");
+    return lines.join("\n");
+  }
+  for (const gap of sorted) {
+    if (includeDetails) {
+      lines.push(
+        `- ${gap.canvasserName} — ${formatDurationReadable(gap.gapMinutes)} (${formatTimeShort(gap.startAt)} to ${formatTimeShort(gap.endAt)}; end voter ${gap.endVoter || "n/a"} / ${gap.endResponse || "n/a"})`
+      );
+    } else {
+      lines.push(`- ${gap.canvasserName} — ${formatDurationReadable(gap.gapMinutes)}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function shiftFlagsTsv(rows: ShiftFlagRow[], kind: "late" | "lunch" | "early"): string {
+  if (kind === "late") {
+    return [
+      tsvLine(["Canvasser", "First Knock", "Minutes after start", "Knocks"]),
+      ...rows.map((row) =>
+        tsvLine([
+          row.canvasserName,
+          formatTime(row.firstKnockAt),
+          row.minutesLateAfterStart ?? "",
+          row.knockCount,
+        ])
+      ),
+    ].join("\n");
+  }
+  if (kind === "lunch") {
+    return [
+      tsvLine(["Canvasser", "Last Knock", "Minutes before as-of", "Knocks"]),
+      ...rows.map((row) =>
+        tsvLine([
+          row.canvasserName,
+          formatTime(row.mostRecentKnockAt),
+          row.minutesBeforeAsOf ?? "",
+          row.knockCount,
+        ])
+      ),
+    ].join("\n");
+  }
+  return [
+    tsvLine(["Canvasser", "Last Knock", "Minutes before end", "Knocks"]),
+    ...rows.map((row) =>
+      tsvLine([
+        row.canvasserName,
+        formatTime(row.mostRecentKnockAt),
+        row.minutesEarlyBeforeEnd ?? "",
+        row.knockCount,
+      ])
+    ),
+  ].join("\n");
+}
+
+function shiftFlagsListText(
+  title: string,
+  rows: ShiftFlagRow[],
+  kind: "late" | "lunch" | "early",
+  includeDetails: boolean
+): string {
+  const lines = [`${title} (${rows.length})`, ""];
+  if (!rows.length) {
+    lines.push("None.");
+    return lines.join("\n");
+  }
+  for (const row of rows) {
+    if (kind === "late") {
+      const base = `- ${row.canvasserName} — first knock ${formatTimeShort(row.firstKnockAt)}`;
+      lines.push(
+        includeDetails
+          ? `${base} (${formatDurationReadable(row.minutesLateAfterStart)} after start) · ${formatNumber(row.knockCount)} knocks`
+          : base
+      );
+    } else if (kind === "lunch") {
+      const base = `- ${row.canvasserName} — last knock ${formatTimeShort(row.mostRecentKnockAt)}`;
+      lines.push(
+        includeDetails
+          ? `${base} (${formatDurationReadable(row.minutesBeforeAsOf)} before as-of) · ${formatNumber(row.knockCount)} knocks`
+          : base
+      );
+    } else {
+      const base = `- ${row.canvasserName} — last knock ${formatTimeShort(row.mostRecentKnockAt)}`;
+      lines.push(
+        includeDetails
+          ? `${base} (${formatDurationReadable(row.minutesEarlyBeforeEnd)} before end) · ${formatNumber(row.knockCount)} knocks`
+          : base
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+function excludedLeadsListText(leads: CanvasserGapStats[]): string {
+  const lines = [`Excluded from gap report (leads) (${leads.length})`, ""];
+  if (!leads.length) {
+    lines.push("None.");
+    return lines.join("\n");
+  }
+  for (const lead of leads) {
+    lines.push(`- ${lead.canvasserName} — ${formatNumber(lead.knockCount)} knocks`);
+  }
+  return lines.join("\n");
 }
 
 function summaryBoxCsv(label: string, value: string, help?: string): string {
@@ -284,65 +420,6 @@ function compareCanvasserStats(a: CanvasserGapStats, b: CanvasserGapStats): numb
   return canvasserLastNameSortKey(a.canvasserName).localeCompare(canvasserLastNameSortKey(b.canvasserName));
 }
 
-function normalizeCanvasserName(value: string): string {
-  return value.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-function parseExcludedCanvassers(raw: string): Set<string> {
-  return new Set(
-    raw
-      .split(/[,\n]/)
-      .map(normalizeCanvasserName)
-      .filter(Boolean)
-  );
-}
-
-function filterCampaignResult(campaign: CampaignResultSummary, keepName: (name: string) => boolean): CampaignResultSummary {
-  const canvassers = campaign.canvassers.filter((row) => keepName(row.canvasserName));
-  const totals = campaign.resultColumns.reduce<Record<string, number>>((nextTotals, column) => {
-    nextTotals[column] = canvassers.reduce((sum, row) => sum + (row.totals[column] ?? 0), 0);
-    return nextTotals;
-  }, {});
-
-  return {
-    ...campaign,
-    canvasserCount: canvassers.length,
-    totals,
-    canvassers,
-  };
-}
-
-function filterKnockResult(
-  result: CanvassingReportResult | null,
-  excludedCanvassers: Set<string>
-): CanvassingReportResult | null {
-  if (!result || excludedCanvassers.size === 0) return result;
-
-  const keepName = (name: string) => !excludedCanvassers.has(normalizeCanvasserName(name));
-  const canvasserStats = result.canvasserStats.filter((row) => keepName(row.canvasserName));
-  const gapDetails = result.gapDetails.filter((row) => keepName(row.canvasserName));
-  const bigGapDetails = result.bigGapDetails.filter((row) => keepName(row.canvasserName));
-  const campaignResults = result.campaignResults.map((campaign) => filterCampaignResult(campaign, keepName));
-  const totalGapMinutesOver10 = canvasserStats.reduce((sum, row) => sum + row.totalGapMinutesOver10, 0);
-  const largestGapMinutes = canvasserStats.reduce((max, row) => Math.max(max, row.largestGapMinutes), 0);
-
-  return {
-    ...result,
-    canvasserStats,
-    gapDetails,
-    bigGapDetails,
-    campaignResults,
-    summary: {
-      ...result.summary,
-      totalCanvassers: canvasserStats.length,
-      gapsOver10: gapDetails.length,
-      bigGapsOver30: bigGapDetails.length,
-      totalGapMinutesOver10: Math.round(totalGapMinutesOver10 * 10) / 10,
-      largestGapMinutes: Math.round(largestGapMinutes * 10) / 10,
-    },
-  };
-}
-
 function resultIssueTone(severity: string): string {
   if (severity === "error") return "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200";
   if (severity === "warning") return "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200";
@@ -350,29 +427,32 @@ function resultIssueTone(severity: string): string {
 }
 
 function readPersistedState(): PersistedKnockAnalysisState {
-  if (typeof window === "undefined") {
-    return {
-      reportName: "",
-      reportDate: "",
-      previewResult: null,
-      activeReport: null,
-      excludedCanvassersRaw: "",
-      activeResultsTab: "pivot",
-    };
-  }
+  const lunchDefaults = defaultShiftSettings("lunch");
+  const fallback: PersistedKnockAnalysisState = {
+    reportName: "",
+    reportDate: "",
+    previewResult: null,
+    activeReport: null,
+    excludedCanvassersRaw: "",
+    activeResultsTab: "pivot",
+    reportMode: "lunch",
+    startTime: lunchDefaults.startTime,
+    lunchClockOutTime: lunchDefaults.lunchClockOutTime,
+    lunchReturnTime: lunchDefaults.lunchReturnTime,
+    endTime: lunchDefaults.endTime,
+    asOfTime: lunchDefaults.asOfTime,
+  };
+  if (typeof window === "undefined") return fallback;
   try {
     const raw = window.sessionStorage.getItem(SESSION_STATE_KEY);
-    if (!raw) {
-      return {
-        reportName: "",
-        reportDate: "",
-        previewResult: null,
-        activeReport: null,
-        excludedCanvassersRaw: "",
-        activeResultsTab: "pivot",
-      };
-    }
+    if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<PersistedKnockAnalysisState>;
+    const mode: KnockAnalysisReportMode = parsed.reportMode === "final" ? "final" : "lunch";
+    const modeDefaults = defaultShiftSettings(mode);
+    const tab =
+      parsed.activeResultsTab === "gaps" || parsed.activeResultsTab === "shift"
+        ? parsed.activeResultsTab
+        : "pivot";
     return {
       reportName: typeof parsed.reportName === "string" ? parsed.reportName : "",
       reportDate: typeof parsed.reportDate === "string" ? parsed.reportDate : "",
@@ -380,17 +460,22 @@ function readPersistedState(): PersistedKnockAnalysisState {
       activeReport: parsed.activeReport ?? null,
       excludedCanvassersRaw:
         typeof parsed.excludedCanvassersRaw === "string" ? parsed.excludedCanvassersRaw : "",
-      activeResultsTab: parsed.activeResultsTab === "gaps" ? "gaps" : "pivot",
+      activeResultsTab: tab,
+      reportMode: mode,
+      startTime: typeof parsed.startTime === "string" ? parsed.startTime : modeDefaults.startTime,
+      lunchClockOutTime:
+        typeof parsed.lunchClockOutTime === "string"
+          ? parsed.lunchClockOutTime
+          : modeDefaults.lunchClockOutTime,
+      lunchReturnTime:
+        typeof parsed.lunchReturnTime === "string"
+          ? parsed.lunchReturnTime
+          : modeDefaults.lunchReturnTime,
+      endTime: typeof parsed.endTime === "string" ? parsed.endTime : modeDefaults.endTime,
+      asOfTime: typeof parsed.asOfTime === "string" ? parsed.asOfTime : currentLaTimeHm(),
     };
   } catch {
-    return {
-      reportName: "",
-      reportDate: "",
-      previewResult: null,
-      activeReport: null,
-      excludedCanvassersRaw: "",
-      activeResultsTab: "pivot",
-    };
+    return fallback;
   }
 }
 
@@ -508,6 +593,7 @@ function CanvasserStatsTable({
 }) {
   if (!stats.length) return null;
   const sortedStats = [...stats].sort(compareCanvasserStats);
+  const displayNames = buildDisplayNameMap(sortedStats.map((row) => row.canvasserName));
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -517,24 +603,29 @@ function CanvasserStatsTable({
           onClick={() => onCopyText(knockPivotTsv(stats), "Knock analysis pivot copied for Sheets.")}
         />
       </div>
-      <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-white/10">
-          <thead>
+      <div className="mt-4 max-h-[70vh] overflow-auto">
+        <table className="min-w-full border-collapse text-sm">
+          <thead className="sticky top-0 z-20 bg-white shadow-sm dark:bg-gray-900">
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              <th className="py-2 pr-4">Canvasser</th>
-              <th className="py-2 pr-4">Longest Gap</th>
-              <th className="py-2 pr-4">Start Time</th>
-              <th className="py-2 pr-4">End Time</th>
-              <th className="py-2 pr-4">First Knock</th>
-              <th className="py-2 pr-4">Most recent</th>
-              <th className="py-2 pr-4">Gap length total</th>
-              <th className="py-2 pr-4">Average non zero gap</th>
+              <th className="sticky left-0 z-30 bg-white py-2 pr-4 dark:bg-gray-900">Canvasser</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Longest Gap</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Longest gap start</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Longest gap end</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">First Knock</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Most recent</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Gap length total</th>
+              <th className="bg-white py-2 pr-4 dark:bg-gray-900">Average non zero gap</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-white/10">
-            {sortedStats.slice(0, 50).map((row) => (
+            {sortedStats.map((row) => (
               <tr key={row.canvasserName} className="text-gray-700 dark:text-gray-300">
-                <td className="py-3 pr-4 font-medium text-gray-900 dark:text-gray-100">{row.canvasserName}</td>
+                <td
+                  className="sticky left-0 z-10 bg-inherit py-3 pr-4 font-medium text-gray-900 dark:text-gray-100"
+                  title={row.canvasserName}
+                >
+                  {displayNameFor(row.canvasserName, displayNames)}
+                </td>
                 <td className="py-3 pr-4 tabular-nums">{formatDuration(row.largestGapMinutes)}</td>
                 <td className="py-3 pr-4 tabular-nums">{formatTime(row.largestGapStartAt)}</td>
                 <td className="py-3 pr-4 tabular-nums">{formatTime(row.largestGapEndAt)}</td>
@@ -590,25 +681,190 @@ function CampaignResultCard({
   );
 }
 
+function GapCards({
+  title,
+  emptyLabel,
+  gaps,
+  onCopyText,
+}: {
+  title: string;
+  emptyLabel: string;
+  gaps: CanvassingGapDetail[];
+  onCopyText: CopyTextHandler;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  const sorted = sortGaps(gaps);
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">{title}</h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{sorted.length} gaps</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 transition-all hover:bg-gray-50 active:scale-[0.98] dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5">
+            <input
+              type="checkbox"
+              checked={showDetails}
+              onChange={(event) => setShowDetails(event.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+            />
+            Show full details
+          </label>
+          <CopyMiniButton
+            label="Copy as list"
+            onClick={() => onCopyText(gapsListText(title, sorted, showDetails), `${title} list copied.`)}
+          />
+          <CopyMiniButton
+            label="Copy Table"
+            onClick={() => onCopyText(gapsListTsv(sorted, showDetails), `${title} copied for Sheets.`)}
+          />
+        </div>
+      </div>
+      {sorted.length ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {sorted.slice(0, 50).map((gap, index) => (
+            <div key={`${gap.canvasserName}-${gap.startAt}-${index}`} className="rounded-xl bg-gray-50 p-4 dark:bg-white/5">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold text-gray-900 dark:text-gray-50">{gap.canvasserName}</p>
+                <p className="shrink-0 text-sm font-semibold tabular-nums text-violet-700 dark:text-violet-200">
+                  {formatDuration(gap.gapMinutes)}
+                </p>
+              </div>
+              {showDetails ? (
+                <>
+                  <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                    {formatTime(gap.startAt)} to {formatTime(gap.endAt)}
+                  </p>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    End voter: {gap.endVoter || "n/a"} / Response: {gap.endResponse || "n/a"}
+                  </p>
+                </>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{emptyLabel}</p>
+      )}
+    </div>
+  );
+}
+
+function ShiftFlagCards({
+  title,
+  help,
+  rows,
+  kind,
+  onCopyText,
+}: {
+  title: string;
+  help: string;
+  rows: ShiftFlagRow[];
+  kind: "late" | "lunch" | "early";
+  onCopyText: CopyTextHandler;
+}) {
+  const [showDetails, setShowDetails] = useState(false);
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">{title}</h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{help}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 transition-all hover:bg-gray-50 active:scale-[0.98] dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5">
+            <input
+              type="checkbox"
+              checked={showDetails}
+              onChange={(event) => setShowDetails(event.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+            />
+            Show full details
+          </label>
+          <CopyMiniButton
+            label="Copy as list"
+            onClick={() =>
+              onCopyText(shiftFlagsListText(title, rows, kind, showDetails), `${title} list copied.`)
+            }
+          />
+          <CopyMiniButton
+            label="Copy Table"
+            onClick={() => onCopyText(shiftFlagsTsv(rows, kind), `${title} copied for Sheets.`)}
+          />
+        </div>
+      </div>
+      {rows.length ? (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {rows.slice(0, 50).map((row) => (
+            <div key={`${kind}-${row.canvasserName}`} className="rounded-xl bg-gray-50 p-4 dark:bg-white/5">
+              <div className="flex items-start justify-between gap-3">
+                <p className="font-semibold text-gray-900 dark:text-gray-50">{row.canvasserName}</p>
+                {showDetails ? (
+                  <p className="shrink-0 text-sm font-semibold tabular-nums text-violet-700 dark:text-violet-200">
+                    {kind === "late"
+                      ? formatDuration(row.minutesLateAfterStart ?? 0)
+                      : kind === "lunch"
+                        ? formatDuration(row.minutesBeforeAsOf ?? 0)
+                        : formatDuration(row.minutesEarlyBeforeEnd ?? 0)}
+                  </p>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                {kind === "late"
+                  ? `First knock ${formatTime(row.firstKnockAt)}`
+                  : `Last knock ${formatTime(row.mostRecentKnockAt)}`}
+                {showDetails ? ` · ${formatNumber(row.knockCount)} knocks` : ""}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">No canvassers matched this section.</p>
+      )}
+    </div>
+  );
+}
+
 function ReportResults({
   result,
   title,
   reportDate,
   activeTab,
   onTabChange,
-  excludedCount,
+  reportMode,
+  shiftSettings,
+  excludedLeads,
+  excludedCanvassers,
   onCopyText,
 }: {
   result: CanvassingReportResult;
   title: string;
   reportDate?: string;
-  activeTab: "pivot" | "gaps";
-  onTabChange: (tab: "pivot" | "gaps") => void;
-  excludedCount: number;
+  activeTab: ResultsTab;
+  onTabChange: (tab: ResultsTab) => void;
+  reportMode: KnockAnalysisReportMode;
+  shiftSettings: KnockShiftSettings;
+  excludedLeads: CanvasserGapStats[];
+  excludedCanvassers: Set<string>;
   onCopyText: CopyTextHandler;
 }) {
   const displayDate = reportDate || result.summary.detectedReportDate;
-  const [showLargestGapDetails, setShowLargestGapDetails] = useState(false);
+  const isoDate = resolveReportDate(result, reportDate);
+  const flagStats = filterCanvasserStatsForFlags(result.canvasserStats, excludedCanvassers);
+  const shiftRows = buildShiftFlagRows(flagStats, shiftSettings, isoDate);
+  const lateFirst = shiftRows.filter((row) => row.isLateFirstKnock).sort(
+    (a, b) => (b.minutesLateAfterStart ?? 0) - (a.minutesLateAfterStart ?? 0)
+  );
+  const stillOnLunch = shiftRows.filter((row) => row.isStillOnLunch).sort(
+    (a, b) => (b.minutesBeforeAsOf ?? 0) - (a.minutesBeforeAsOf ?? 0)
+  );
+  const stoppedEarly = shiftRows.filter((row) => row.isStoppedEarly).sort(
+    (a, b) => (b.minutesEarlyBeforeEnd ?? 0) - (a.minutesEarlyBeforeEnd ?? 0)
+  );
+  const hourGaps = result.hourGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes >= 60);
+  const outlierGaps = result.outlierGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes >= 120);
+  const modeLabel = reportMode === "lunch" ? "First / Lunch Gap Report" : "Last Knocks / Final Gap Report";
   const summaryTiles = [
     {
       label: "Valid knock events",
@@ -616,33 +872,43 @@ function ReportResults({
       help: `${formatNumber(result.summary.invalidKnockRows)} invalid rows`,
     },
     {
-      label: "Canvassers",
+      label: "Canvassers in report",
       value: formatNumber(result.summary.totalCanvassers),
-      help: "From knock details",
+      help: excludedLeads.length ? `${excludedLeads.length} leads excluded from gap report` : "From knock details",
     },
     {
-      label: "Gaps over 10 min",
-      value: formatNumber(result.summary.gapsOver10),
-      help: `${formatNumber(result.summary.bigGapsOver30)} over 30 min`,
+      label: "Gaps over 1 hour",
+      value: formatNumber(result.summary.gapsOver60 ?? hourGaps.length),
+      help: `${formatNumber(result.summary.outlierGapsOver120 ?? outlierGaps.length)} outliers (2h+)`,
     },
     {
-      label: "Total gap time",
+      label: "Total gap time (>10m)",
       value: formatDuration(result.summary.totalGapMinutesOver10),
       help: `Largest ${formatDuration(result.summary.largestGapMinutes)}`,
     },
   ];
+
+  const tabClass = (tab: ResultsTab) =>
+    `rounded-xl px-4 py-2 text-sm font-semibold transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 ${
+      activeTab === tab
+        ? "bg-violet-600 text-white shadow-sm"
+        : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5"
+    }`;
+
   return (
     <section className="space-y-6">
       <div>
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-500 dark:text-violet-300">{title}</p>
         <h2 className="mt-2 text-2xl font-bold text-gray-900 dark:text-gray-50">
-          Knock analysis for {formatReportDate(displayDate)}
+          {modeLabel} · {formatReportDate(displayDate)}
         </h2>
-        {excludedCount > 0 ? (
-          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
-            Filtered view: {excludedCount} canvasser exception{excludedCount === 1 ? "" : "s"} excluded.
-          </p>
-        ) : null}
+        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+          Shift {shiftSettings.startTime}–{shiftSettings.endTime} LA
+          {reportMode === "lunch"
+            ? ` · lunch ${shiftSettings.lunchClockOutTime}–${shiftSettings.lunchReturnTime} · as-of ${shiftSettings.asOfTime}`
+            : ""}
+          .
+        </p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {summaryTiles.map((tile) => (
@@ -655,86 +921,108 @@ function ReportResults({
           />
         ))}
       </div>
+
+      {excludedLeads.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+                Excluded from gap report (leads)
+              </h3>
+              <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                Still in the saved data, campaign workbooks, and the knock analysis pivot; omitted from gap/shift
+                flags only.
+              </p>
+            </div>
+            <CopyMiniButton
+              label="Copy as list"
+              onClick={() =>
+                onCopyText(excludedLeadsListText(excludedLeads), "Excluded leads list copied.")
+              }
+            />
+          </div>
+          <ul className="mt-3 flex flex-wrap gap-2">
+            {excludedLeads.map((lead) => (
+              <li
+                key={lead.canvasserName}
+                className="rounded-full bg-white px-3 py-1 text-xs font-medium text-amber-900 shadow-sm dark:bg-amber-950/40 dark:text-amber-100"
+              >
+                {lead.canvasserName} · {formatNumber(lead.knockCount)} knocks
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <ValidationIssues result={result} />
       <SourceFileList result={result} />
 
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => onTabChange("pivot")}
-          className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 ${
-            activeTab === "pivot"
-              ? "bg-violet-600 text-white shadow-sm"
-              : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5"
-          }`}
-        >
-          Pivot
+        <button type="button" onClick={() => onTabChange("shift")} className={tabClass("shift")}>
+          {reportMode === "lunch" ? "Lunch flags" : "Final flags"}
         </button>
-        <button
-          type="button"
-          onClick={() => onTabChange("gaps")}
-          className={`rounded-xl px-4 py-2 text-sm font-semibold transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 ${
-            activeTab === "gaps"
-              ? "bg-violet-600 text-white shadow-sm"
-              : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5"
-          }`}
-        >
-          Largest Gaps
+        <button type="button" onClick={() => onTabChange("gaps")} className={tabClass("gaps")}>
+          Gaps 1h / 2h+
+        </button>
+        <button type="button" onClick={() => onTabChange("pivot")} className={tabClass("pivot")}>
+          Pivot
         </button>
       </div>
 
-      {activeTab === "pivot" ? <CanvasserStatsTable stats={result.canvasserStats} onCopyText={onCopyText} /> : null}
-      {activeTab === "gaps" ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Largest gaps</h2>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1 text-xs font-semibold text-gray-700 transition-all hover:bg-gray-50 active:scale-[0.98] dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5">
-                <input
-                  type="checkbox"
-                  checked={showLargestGapDetails}
-                  onChange={(event) => setShowLargestGapDetails(event.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
-                />
-                Show full details
-              </label>
-              <CopyMiniButton
-                label="Copy Table"
-                onClick={() => onCopyText(largestGapsTsv(result, showLargestGapDetails), "Largest gaps copied for Sheets.")}
-              />
-            </div>
-          </div>
-          {result.bigGapDetails.length ? (
-            <div className="mt-4 grid gap-3 lg:grid-cols-2">
-              {result.bigGapDetails.slice(0, 50).map((gap, index) => (
-                <div key={`${gap.canvasserName}-${gap.startAt}-${index}`} className="rounded-xl bg-gray-50 p-4 dark:bg-white/5">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="font-semibold text-gray-900 dark:text-gray-50">{gap.canvasserName}</p>
-                    <p className="shrink-0 text-sm font-semibold tabular-nums text-violet-700 dark:text-violet-200">
-                      {formatDuration(gap.gapMinutes)}
-                    </p>
-                  </div>
-                  {showLargestGapDetails ? (
-                    <>
-                      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                        {formatTime(gap.startAt)} to {formatTime(gap.endAt)}
-                      </p>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        End voter: {gap.endVoter || "n/a"} / Response: {gap.endResponse || "n/a"}
-                      </p>
-                    </>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">No big gaps found for this report.</p>
-          )}
+      {activeTab === "shift" && reportMode === "lunch" ? (
+        <div className="space-y-4">
+          <ShiftFlagCards
+            title="Late first knocks"
+            help={`First knock at least ${LATE_FIRST_KNOCK_GRACE_MINUTES} minutes after the configured start time (e.g. 12:30 start flags from 1:00).`}
+            rows={lateFirst}
+            kind="late"
+            onCopyText={onCopyText}
+          />
+          <ShiftFlagCards
+            title="Still on lunch"
+            help={`No knock at or after lunch return (${shiftSettings.lunchReturnTime}) while as-of is ${shiftSettings.asOfTime} or later. Lunch window ${shiftSettings.lunchClockOutTime}–${shiftSettings.lunchReturnTime}.`}
+            rows={stillOnLunch}
+            kind="lunch"
+            onCopyText={onCopyText}
+          />
         </div>
       ) : null}
+
+      {activeTab === "shift" && reportMode === "final" ? (
+        <ShiftFlagCards
+          title="Stopped knocking early"
+          help={`Last knock at least ${STOPPED_EARLY_MINUTES} minutes before the configured end time.`}
+          rows={stoppedEarly}
+          kind="early"
+          onCopyText={onCopyText}
+        />
+      ) : null}
+
+      {activeTab === "gaps" ? (
+        <div className="space-y-4">
+          <GapCards
+            title="Gaps over 1 hour"
+            emptyLabel="No gaps of 1 hour or more for this report."
+            gaps={hourGaps}
+            onCopyText={onCopyText}
+          />
+          <GapCards
+            title="Outliers (2 hours and over)"
+            emptyLabel="No outlier gaps of 2 hours or more for this report."
+            gaps={outlierGaps}
+            onCopyText={onCopyText}
+          />
+        </div>
+      ) : null}
+
+      {activeTab === "pivot" ? <CanvasserStatsTable stats={result.canvasserStats} onCopyText={onCopyText} /> : null}
+
       {result.campaignResults.length ? (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Campaign result workbooks</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Productivity totals keep all canvassers, including excluded leads.
+          </p>
           {result.campaignResults.map((campaign) => (
             <CampaignResultCard
               key={`${campaign.fileName}-${campaign.sheetName ?? ""}`}
@@ -757,7 +1045,13 @@ export default function CanvassingClient() {
   const [savedReports, setSavedReports] = useState<SavedCanvassingReportListItem[]>([]);
   const [activeReport, setActiveReport] = useState<SavedCanvassingReport | null>(initialState.activeReport);
   const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState(initialState.excludedCanvassersRaw);
-  const [activeResultsTab, setActiveResultsTab] = useState<"pivot" | "gaps">(initialState.activeResultsTab);
+  const [activeResultsTab, setActiveResultsTab] = useState<ResultsTab>(initialState.activeResultsTab);
+  const [reportMode, setReportMode] = useState<KnockAnalysisReportMode>(initialState.reportMode);
+  const [startTime, setStartTime] = useState(initialState.startTime);
+  const [lunchClockOutTime, setLunchClockOutTime] = useState(initialState.lunchClockOutTime);
+  const [lunchReturnTime, setLunchReturnTime] = useState(initialState.lunchReturnTime);
+  const [endTime, setEndTime] = useState(initialState.endTime);
+  const [asOfTime, setAsOfTime] = useState(initialState.asOfTime);
   const [loadingReports, setLoadingReports] = useState(true);
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -769,16 +1063,28 @@ export default function CanvassingClient() {
   const rawCurrentResult = activeReport ?? previewResult;
   const excludedCanvassers = useMemo(() => parseExcludedCanvassers(excludedCanvassersRaw), [excludedCanvassersRaw]);
   const currentResult = useMemo(
-    () => filterKnockResult(rawCurrentResult, excludedCanvassers),
+    () => filterKnockResultForReports(rawCurrentResult, excludedCanvassers),
     [excludedCanvassers, rawCurrentResult]
+  );
+  const excludedLeads = useMemo(
+    () => excludedLeadRows(rawCurrentResult, excludedCanvassers),
+    [excludedCanvassers, rawCurrentResult]
+  );
+  const shiftSettings = useMemo<KnockShiftSettings>(
+    () => ({
+      mode: reportMode,
+      startTime,
+      lunchClockOutTime,
+      lunchReturnTime,
+      endTime,
+      asOfTime,
+    }),
+    [asOfTime, endTime, lunchClockOutTime, lunchReturnTime, reportMode, startTime]
   );
   const currentReportDate = activeReport?.reportDate || reportDate || currentResult?.summary.detectedReportDate || "";
   const currentReportTitle = currentResult
     ? activeReport?.name || reportTitleFor(currentResult, currentReportDate)
     : "";
-  const excludedVisibleCount = rawCurrentResult
-    ? rawCurrentResult.canvasserStats.filter((row) => excludedCanvassers.has(normalizeCanvasserName(row.canvasserName))).length
-    : 0;
 
   const loadReports = useCallback(async () => {
     try {
@@ -805,9 +1111,39 @@ export default function CanvassingClient() {
       activeReport,
       excludedCanvassersRaw,
       activeResultsTab,
+      reportMode,
+      startTime,
+      lunchClockOutTime,
+      lunchReturnTime,
+      endTime,
+      asOfTime,
     };
     window.sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(state));
-  }, [activeReport, activeResultsTab, excludedCanvassersRaw, previewResult, reportDate, reportName]);
+  }, [
+    activeReport,
+    activeResultsTab,
+    asOfTime,
+    endTime,
+    excludedCanvassersRaw,
+    lunchClockOutTime,
+    lunchReturnTime,
+    previewResult,
+    reportDate,
+    reportMode,
+    reportName,
+    startTime,
+  ]);
+
+  function applyReportMode(mode: KnockAnalysisReportMode) {
+    const defaults = defaultShiftSettings(mode);
+    setReportMode(mode);
+    setStartTime(defaults.startTime);
+    setLunchClockOutTime(defaults.lunchClockOutTime);
+    setLunchReturnTime(defaults.lunchReturnTime);
+    setEndTime(defaults.endTime);
+    setAsOfTime(currentLaTimeHm());
+    setActiveResultsTab("shift");
+  }
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -857,7 +1193,8 @@ export default function CanvassingClient() {
       const nextReportDate = result.summary.detectedReportDate || reportDate;
       setPreviewResult(result);
       setActiveReport(null);
-      setActiveResultsTab("pivot");
+      setActiveResultsTab("shift");
+      setAsOfTime(currentLaTimeHm());
       if (nextReportDate) {
         setReportDate(nextReportDate);
       }
@@ -933,7 +1270,7 @@ export default function CanvassingClient() {
       if (!json.ok || !json.data) throw new Error(json.error || "Unable to save canvassing report.");
       setActiveReport(json.data.report);
       setPreviewResult(null);
-      setActiveResultsTab("pivot");
+      setActiveResultsTab("shift");
       setMessage("Report saved. It is now available without reuploading the source files.");
       await loadReports();
     } catch (err) {
@@ -952,7 +1289,7 @@ export default function CanvassingClient() {
       if (!json.ok || !json.data) throw new Error(json.error || "Unable to open saved report.");
       setActiveReport(json.data.report);
       setPreviewResult(null);
-      setActiveResultsTab("pivot");
+      setActiveResultsTab("shift");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -980,13 +1317,27 @@ export default function CanvassingClient() {
           Canvassing
         </p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
-          Canvassing uploads and saved reports
+          Knock Analysis
         </h1>
         <p className="mt-3 max-w-3xl text-gray-600 dark:text-gray-400">
-          Upload the raw PDI Canvasser Details CSV used for knock analysis, plus any campaign result
-          workbooks. The app applies the old sheet's time correction and gap calculations directly,
-          then saves a report snapshot so the stats can be reopened without reuploading.
+          Upload PDI Canvasser Details (knock timeline) plus optional campaign result workbooks.
+          Choose a Lunch or Final gap report, set shift times, and exclude leads from schedule
+          sections while keeping them in the saved data.
         </p>
+        <ul className="mt-3 max-w-3xl list-disc space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-400">
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Lunch report</span> — late
+            first knocks, gaps ≥ 1 hour / 2 hour outliers, and still-on-lunch vs lunch return + as-of.
+          </li>
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Final report</span> — stopped
+            early vs last-door-knock end time, plus the same 1h / 2h+ gap lists and pivot.
+          </li>
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude leads</span> — omit
+            irregular lead schedules from gap/shift flags only; the pivot and campaign workbooks still include them.
+          </li>
+        </ul>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -1013,11 +1364,119 @@ export default function CanvassingClient() {
             </label>
           </div>
 
+          <fieldset className="rounded-2xl border border-gray-200 p-4 dark:border-white/10">
+            <legend className="px-1 text-sm font-semibold text-gray-900 dark:text-gray-50">Report type</legend>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Defaults (LA): start 12:30, lunch 3:30–4:00, last door knock 7:30. Edit any time below.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition-all ${reportMode === "lunch" ? "border-violet-400 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30" : "border-gray-200 dark:border-white/10"}`}>
+                <input
+                  type="radio"
+                  name="reportMode"
+                  checked={reportMode === "lunch"}
+                  onChange={() => applyReportMode("lunch")}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-50">First / Lunch Gap Report</span>
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                    Late starts, long midday gaps, and people with no knock after lunch return.
+                  </span>
+                </span>
+              </label>
+              <label className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition-all ${reportMode === "final" ? "border-violet-400 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30" : "border-gray-200 dark:border-white/10"}`}>
+                <input
+                  type="radio"
+                  name="reportMode"
+                  checked={reportMode === "final"}
+                  onChange={() => applyReportMode("final")}
+                  className="mt-1"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-gray-900 dark:text-gray-50">Last Knocks / Final Gap Report</span>
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                    Total long gaps and canvassers who stopped well before the last-door-knock time.
+                  </span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Canvasser start (LA)</span>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(event) => setStartTime(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Late first knocks use a {LATE_FIRST_KNOCK_GRACE_MINUTES}-minute grace (default start 12:30 → flag from 1:00).
+              </span>
+            </label>
+            {reportMode === "lunch" ? (
+              <>
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Lunch clock-out (LA)</span>
+                  <input
+                    type="time"
+                    value={lunchClockOutTime}
+                    onChange={(event) => setLunchClockOutTime(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+                  />
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                    Expected leave for lunch (default 3:30).
+                  </span>
+                </label>
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Lunch return (LA)</span>
+                  <input
+                    type="time"
+                    value={lunchReturnTime}
+                    onChange={(event) => setLunchReturnTime(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+                  />
+                  <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                    Expected back knocking (default 4:00). Still-on-lunch uses this.
+                  </span>
+                </label>
+              </>
+            ) : null}
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Last door knock (LA)</span>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(event) => setEndTime(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Stopped-early end time (default 7:30).
+              </span>
+            </label>
+            {reportMode === "lunch" ? (
+              <label className="block">
+                <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Report as-of (LA)</span>
+                <input
+                  type="time"
+                  value={asOfTime}
+                  onChange={(event) => setAsOfTime(event.target.value)}
+                  className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+                />
+                <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                  Must be at/after lunch return to flag “still on lunch” (defaults to now when you run).
+                </span>
+              </label>
+            ) : null}
+          </div>
+
           <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-5 dark:border-violet-800 dark:bg-violet-950/20">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Upload files</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              Include the raw PDI export with columns CANVASSERNAME through RESPONSE and any campaign
-              result XLSX workbooks. Folder upload will live in Doorknocks and Results.
+              Primary file: PDI Canvasser Details CSV/XLSX (CANVASSERNAME … RESPONSE). Optional: campaign
+              result workbooks. Use Doorknocks and Results for folder contact-report CSVs.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               <label className="inline-flex cursor-pointer items-center rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-violet-700 active:scale-[0.98] focus-within:ring-2 focus-within:ring-violet-400/60">
@@ -1062,18 +1521,21 @@ export default function CanvassingClient() {
 
           <label className="block">
             <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Exclude canvasser exceptions
+              Exclude leads from gap report
             </span>
             <textarea
               value={excludedCanvassersRaw}
               onChange={(event) => setExcludedCanvassersRaw(event.target.value)}
               rows={3}
-              placeholder={"One exact canvasser name per line or comma-separated, e.g.\nLead, Canvasser\nSupervisor Name"}
+              placeholder={"One name per line, e.g.\nJane Smith\nSmith, Jane\nLead Name"}
               className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 dark:border-white/10 dark:bg-gray-950 dark:text-gray-100"
             />
             <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-              Exact normalized name match only. This filters the view and exports, not the saved source report.
-              {excludedVisibleCount > 0 ? ` ${excludedVisibleCount} matching canvasser${excludedVisibleCount === 1 ? "" : "s"} currently excluded.` : ""}
+              Accepts First Last or Last, First. Omits irregular lead schedules from gap/shift flags only — not
+              the knock analysis pivot. Keeps them in saved source data and campaign workbooks.
+              {excludedLeads.length
+                ? ` ${excludedLeads.length} matching lead${excludedLeads.length === 1 ? "" : "s"} currently excluded from gap/shift flags.`
+                : ""}
             </span>
           </label>
 
@@ -1148,7 +1610,8 @@ export default function CanvassingClient() {
                 >
                   <p className="font-semibold text-gray-900 dark:text-gray-50">{report.name}</p>
                   <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                    {report.reportDate || "No date"} / {formatNumber(report.summary.validKnockEvents)} events / {formatNumber(report.summary.bigGapsOver30)} big gaps
+                    {report.reportDate || "No date"} / {formatNumber(report.summary.validKnockEvents)} events /{" "}
+                    {formatNumber(report.summary.gapsOver60 ?? report.summary.bigGapsOver30)} gaps ≥1h
                   </p>
                 </button>
                 <button
@@ -1171,7 +1634,10 @@ export default function CanvassingClient() {
           reportDate={activeReport?.reportDate ?? reportDate}
           activeTab={activeResultsTab}
           onTabChange={setActiveResultsTab}
-          excludedCount={excludedVisibleCount}
+          reportMode={reportMode}
+          shiftSettings={shiftSettings}
+          excludedLeads={excludedLeads}
+          excludedCanvassers={excludedCanvassers}
           onCopyText={(text, successMessage) => void copyTextToClipboard(text, successMessage)}
         />
       ) : null}

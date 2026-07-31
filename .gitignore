@@ -40,6 +40,17 @@ data/bq-snapshots/
 data/district-classifier/
 data/district-sort-cache/
 
+# Non-contact pattern reports (voter PII + canvasser scores)
+data/canvassing-non-contact-patterns/
+data/regression/
+output/
+
+# Local reference exports (may contain voter/canvasser PII)
+canvassref/
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo
+
 # Sync export artifacts
 pdi-sync-exports/*
 !pdi-sync-exports/.gitkeep

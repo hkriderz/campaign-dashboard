@@ -4,6 +4,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import type {
+  CanvassingGapDetail,
   CanvassingReportResult,
   SavedCanvassingReport,
   SavedCanvassingReportListItem,
@@ -28,9 +29,43 @@ function reportPath(reportId: string): string {
   return path.join(REPORTS_DIR, `${safeReportId(reportId)}.json`);
 }
 
+function hydrateGapDetail(
+  gap: Partial<CanvassingGapDetail> &
+    Pick<CanvassingGapDetail, "canvasserName" | "startAt" | "endAt" | "gapMinutes">
+): CanvassingGapDetail {
+  return {
+    canvasserName: gap.canvasserName,
+    startAt: gap.startAt,
+    endAt: gap.endAt,
+    gapMinutes: gap.gapMinutes,
+    isBigGap: gap.isBigGap ?? gap.gapMinutes > 30,
+    isHourGap: gap.isHourGap ?? gap.gapMinutes >= 60,
+    isOutlierGap: gap.isOutlierGap ?? gap.gapMinutes >= 120,
+    startVoter: gap.startVoter ?? "",
+    endVoter: gap.endVoter ?? "",
+    endResponse: gap.endResponse ?? "",
+    sourceFileName: gap.sourceFileName ?? "",
+  };
+}
+
 function hydrateReport(raw: Partial<SavedCanvassingReport>): SavedCanvassingReport | null {
   if (!raw.id || !raw.name || !raw.createdAt || !raw.updatedAt || !raw.summary) return null;
   const detectedReportDate = raw.summary.detectedReportDate ?? raw.reportDate ?? null;
+  const gapDetails = (raw.gapDetails ?? []).map((gap) => hydrateGapDetail(gap));
+  const bigGapDetails = (raw.bigGapDetails ?? []).map((gap) => hydrateGapDetail(gap));
+  const hourGapDetails = (raw.hourGapDetails ?? gapDetails.filter((gap) => gap.gapMinutes >= 60)).map(
+    (gap) => hydrateGapDetail(gap)
+  );
+  const outlierGapDetails = (
+    raw.outlierGapDetails ?? gapDetails.filter((gap) => gap.gapMinutes >= 120)
+  ).map((gap) => hydrateGapDetail(gap));
+  const canvasserStats = (raw.canvasserStats ?? []).map((stat) => ({
+    ...stat,
+    hourGapCount: stat.hourGapCount ?? hourGapDetails.filter((g) => g.canvasserName === stat.canvasserName).length,
+    outlierGapCount:
+      stat.outlierGapCount ?? outlierGapDetails.filter((g) => g.canvasserName === stat.canvasserName).length,
+  }));
+
   return {
     id: raw.id,
     name: raw.name,
@@ -38,10 +73,17 @@ function hydrateReport(raw: Partial<SavedCanvassingReport>): SavedCanvassingRepo
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
     sourceFiles: raw.sourceFiles ?? [],
-    summary: { ...raw.summary, detectedReportDate },
-    canvasserStats: raw.canvasserStats ?? [],
-    gapDetails: raw.gapDetails ?? [],
-    bigGapDetails: raw.bigGapDetails ?? [],
+    summary: {
+      ...raw.summary,
+      detectedReportDate,
+      gapsOver60: raw.summary.gapsOver60 ?? hourGapDetails.length,
+      outlierGapsOver120: raw.summary.outlierGapsOver120 ?? outlierGapDetails.length,
+    },
+    canvasserStats,
+    gapDetails,
+    bigGapDetails,
+    hourGapDetails,
+    outlierGapDetails,
     campaignResults: raw.campaignResults ?? [],
     validationIssues: raw.validationIssues ?? [],
   };

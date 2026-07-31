@@ -53,6 +53,14 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 shadow-[0_0_8px_rgba(16,185,129,0.55)]" />
                 Doorknocks and Results
               </Link>
+              <Link
+                href="/canvassing/non-contact-patterns"
+                onClick={onNavClick}
+                className={navLinkClass(pathname.startsWith("/canvassing/non-contact-patterns"))}
+              >
+                <span className="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0 shadow-[0_0_8px_rgba(249,115,22,0.55)]" />
+                Non-Contact Patterns
+              </Link>
             </>
           ) : (
             <Link
@@ -89,42 +97,44 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
           ) : null}
         </div>
 
-        {tags.length ? (
-          <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
-            Candidates
-          </p>
+        {basePath !== "/canvassing" && tags.length ? (
+          <>
+            <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
+              Candidates
+            </p>
+            {tags.map((tag, i) => {
+              const href = `${basePath}/${tag.id}`;
+              const isActive = pathname.startsWith(href);
+              const showGroupHeader =
+                Boolean(tag.navGroup) && tags[i - 1]?.navGroup !== tag.navGroup;
+              return (
+                <Fragment key={tag.id}>
+                  {showGroupHeader ? (
+                    <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500 first:pt-0">
+                      {tag.navGroup}
+                    </p>
+                  ) : null}
+                  <Link
+                    href={href}
+                    onClick={onNavClick}
+                    className={[
+                      navLinkClass(isActive),
+                      tag.navGroup ? "pl-7 pr-3" : "",
+                    ].join(" ")}
+                    aria-current={isActive ? "page" : undefined}
+                  >
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0 ring-2 ring-white/10"
+                      style={{ backgroundColor: tag.color }}
+                      aria-hidden="true"
+                    />
+                    {tag.label}
+                  </Link>
+                </Fragment>
+              );
+            })}
+          </>
         ) : null}
-        {tags.map((tag, i) => {
-          const href = `${basePath}/${tag.id}`;
-          const isActive = pathname.startsWith(href);
-          const showGroupHeader =
-            Boolean(tag.navGroup) && tags[i - 1]?.navGroup !== tag.navGroup;
-          return (
-            <Fragment key={tag.id}>
-              {showGroupHeader ? (
-                <p className="px-3 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500 first:pt-0">
-                  {tag.navGroup}
-                </p>
-              ) : null}
-              <Link
-                href={href}
-                onClick={onNavClick}
-                className={[
-                  navLinkClass(isActive),
-                  tag.navGroup ? "pl-7 pr-3" : "",
-                ].join(" ")}
-                aria-current={isActive ? "page" : undefined}
-              >
-                <span
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0 ring-2 ring-white/10"
-                  style={{ backgroundColor: tag.color }}
-                  aria-hidden="true"
-                />
-                {tag.label}
-              </Link>
-            </Fragment>
-          );
-        })}
       </nav>
     </aside>
   );

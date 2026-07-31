@@ -55,6 +55,10 @@ export type CanvassingGapDetail = {
   endAt: string;
   gapMinutes: number;
   isBigGap: boolean;
+  /** Gap is at least 60 minutes. */
+  isHourGap: boolean;
+  /** Gap is at least 120 minutes. */
+  isOutlierGap: boolean;
   startVoter: string;
   endVoter: string;
   endResponse: string;
@@ -74,7 +78,11 @@ export type CanvasserGapStats = {
   averageGapEndingInContactMinutes: number | null;
   gapCountOver10: number;
   bigGapCountOver30: number;
+  hourGapCount: number;
+  outlierGapCount: number;
 };
+
+export type KnockAnalysisReportMode = "lunch" | "final";
 
 export type CampaignResultCanvasser = {
   canvasserName: string;
@@ -104,6 +112,8 @@ export type CanvassingReportSummary = {
   totalCanvassers: number;
   gapsOver10: number;
   bigGapsOver30: number;
+  gapsOver60: number;
+  outlierGapsOver120: number;
   totalGapMinutesOver10: number;
   largestGapMinutes: number;
 };
@@ -113,7 +123,12 @@ export type CanvassingReportResult = {
   summary: CanvassingReportSummary;
   canvasserStats: CanvasserGapStats[];
   gapDetails: CanvassingGapDetail[];
+  /** Gaps over 30 minutes (legacy / regression). */
   bigGapDetails: CanvassingGapDetail[];
+  /** Gaps of 60 minutes or more. */
+  hourGapDetails: CanvassingGapDetail[];
+  /** Gaps of 120 minutes or more. */
+  outlierGapDetails: CanvassingGapDetail[];
   campaignResults: CampaignResultSummary[];
   validationIssues: CanvassingValidationIssue[];
 };

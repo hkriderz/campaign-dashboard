@@ -26,6 +26,11 @@ export function addIsoDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** Subtract calendar days from an ISO date (YYYY-MM-DD). */
+export function subtractIsoDays(isoDate: string, days: number): string {
+  return addIsoDays(isoDate, -days);
+}
+
 export function enumerateIsoDateRange(startDate: string, endDate: string): string[] {
   if (!isValidIsoDate(startDate) || !isValidIsoDate(endDate)) return [];
   if (compareIsoDates(startDate, endDate) > 0) return [];

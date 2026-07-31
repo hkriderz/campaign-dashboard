@@ -9,6 +9,7 @@ import {
   type DoorknockSummaryFlagKind,
   type DoorknockSummarySettings,
 } from "./types";
+import { answerMatches, canonical, fixedNonContactThreshold, isHostileNonContactLabel } from "./helpers";
 import { normalizeDoorknockSettings, parseDoorknockCsvReport } from "./parser";
 
 type UploadFileInput = {
@@ -16,15 +17,6 @@ type UploadFileInput = {
   relativePath?: string;
   buffer: Buffer;
 };
-
-function canonical(value: string): string {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function answerMatches(answer: string, labels: string[]): boolean {
-  const value = canonical(answer);
-  return labels.some((label) => value === canonical(label));
-}
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
@@ -157,24 +149,33 @@ function buildNonContactFlags(campaign: DoorknockCampaignReport, settings: Doork
     const label = canonical(col.label);
     if (ignored.some((needle) => label.includes(needle))) continue;
 
+    const hostileColumn = isHostileNonContactLabel(col.label);
+    const fixedThreshold = fixedNonContactThreshold(col.label);
     const values = campaign.rows.map((row) => row.nonContacts[col.key] ?? 0);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-    const threshold = Math.max(settings.nonContactMinCount, average * settings.nonContactOutlierMultiplier);
+    const threshold =
+      fixedThreshold ?? Math.max(settings.nonContactMinCount, average * settings.nonContactOutlierMultiplier);
+    const usesFixedThreshold = fixedThreshold !== null;
 
     for (const row of campaign.rows) {
       const value = row.nonContacts[col.key] ?? 0;
-      if (value < threshold || value <= 0) continue;
+      if (value <= 0) continue;
+      if (value < threshold) continue;
       flags.push({
         kind: "non_contact_outlier",
         campaignId: campaign.campaignId,
         campaignName: campaign.campaignName,
         canvasserName: row.canvasserName,
-        message: `${row.canvasserName} - ${value} ${col.label} (${campaign.campaignName}, avg ${average.toFixed(1)})`,
+        message: usesFixedThreshold
+          ? `${row.canvasserName} - ${value} ${col.label} (${campaign.campaignName})`
+          : `${row.canvasserName} - ${value} ${col.label} (${campaign.campaignName}, avg ${average.toFixed(1)})`,
         metrics: {
           value,
           column: col.label,
           average: Number(average.toFixed(2)),
           threshold: Number(threshold.toFixed(2)),
+          hostile: hostileColumn ? 1 : 0,
+          fixedThreshold: usesFixedThreshold ? 1 : 0,
         },
       });
     }

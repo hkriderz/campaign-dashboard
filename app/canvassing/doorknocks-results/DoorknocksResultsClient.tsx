@@ -1,6 +1,8 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
+import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
 import {
   DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
   type DoorknockCampaignReport,
@@ -11,7 +13,6 @@ import {
   type SavedDoorknockResultsListItem,
   type SavedDoorknockResultsReport,
 } from "@/lib/canvassing/doorknocks-results/types";
-import { writeTextToClipboard } from "@/lib/browser-clipboard";
 
 type ApiResponse<T> = {
   ok: boolean;
@@ -34,6 +35,16 @@ const SUMMARY_LABELS: Record<DoorknockSummaryFlagKind, string> = {
   low_contact_rate: "People with low contact rate",
   survey_support_struggle: "People who struggled on survey support",
   non_contact_outlier: "People with non-contact information that stood out",
+};
+
+const SUMMARY_HELP: Record<DoorknockSummaryFlagKind, string> = {
+  low_doors_low_support:
+    "Flags canvassers below the doors target who also have few Strong Support answers on the first survey question.",
+  low_contact_rate: "Flags canvassers whose contacts ÷ doors knocked falls below the contact-rate threshold.",
+  survey_support_struggle:
+    "Flags canvassers whose support answers ÷ contacts is below the survey threshold. Bilingual labels like Strong Support/Fuerte Apoyo are matched automatically.",
+  non_contact_outlier:
+    "Flags unusual non-contact totals (about 2× the team average, min 5). Hostile/DNC always flags at 1+; Gated at 25+; Language Barrier at 10+.",
 };
 
 const SESSION_KEY = "canvassing.doorknocksResults.v1";
@@ -475,27 +486,21 @@ function filterDoorknockReport(
   };
 }
 
+function emptyPersistedState(): PersistedDoorknockResultsState {
+  return {
+    reportName: "",
+    result: null,
+    activeReport: null,
+    settings: DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
+    excludedCanvassersRaw: "",
+  };
+}
+
 function readPersistedState(): PersistedDoorknockResultsState {
-  if (typeof window === "undefined") {
-    return {
-      reportName: "",
-      result: null,
-      activeReport: null,
-      settings: DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
-      excludedCanvassersRaw: "",
-    };
-  }
+  if (typeof window === "undefined") return emptyPersistedState();
   try {
     const raw = window.sessionStorage.getItem(SESSION_KEY);
-    if (!raw) {
-      return {
-        reportName: "",
-        result: null,
-        activeReport: null,
-        settings: DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
-        excludedCanvassersRaw: "",
-      };
-    }
+    if (!raw) return emptyPersistedState();
     const parsed = JSON.parse(raw) as Partial<PersistedDoorknockResultsState>;
     return {
       reportName: typeof parsed.reportName === "string" ? parsed.reportName : "",
@@ -506,13 +511,7 @@ function readPersistedState(): PersistedDoorknockResultsState {
         typeof parsed.excludedCanvassersRaw === "string" ? parsed.excludedCanvassersRaw : "",
     };
   } catch {
-    return {
-      reportName: "",
-      result: null,
-      activeReport: null,
-      settings: DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
-      excludedCanvassersRaw: "",
-    };
+    return emptyPersistedState();
   }
 }
 
@@ -553,11 +552,13 @@ function StatTile({
 
 function SummaryFlagList({
   title,
+  help,
   flags,
   onCopyText,
   showDetails,
 }: {
   title: string;
+  help?: string;
   flags: DoorknockSummaryFlag[];
   onCopyText: CopyTextHandler;
   showDetails: boolean;
@@ -565,13 +566,17 @@ function SummaryFlagList({
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-50">{title}</h3>
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-50">{title}</h3>
+          {help ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{help}</p> : null}
+        </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600 dark:bg-white/10 dark:text-gray-300">
             {flags.length}
           </span>
           <CopyMiniButton
-            onClick={() => onCopyText(summaryFlagsDisplayText(title, flags, showDetails), `${title} copied.`)}
+            label="Copy as list"
+            onClick={() => onCopyText(summaryFlagsDisplayText(title, flags, showDetails), `${title} list copied.`)}
           />
         </div>
       </div>
@@ -619,22 +624,29 @@ function SettingsPanel({
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Summary thresholds</h2>
+      <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+        These controls shape the Summary tab flags after you run a report. Defaults match daily QC review.
+      </p>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Low doors threshold</span>
           <input type="number" value={settings.lowDoorsThreshold} onChange={(e) => updateNumber("lowDoorsThreshold", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Flag when doors knocked are below this number.</span>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Low doors max SS</span>
           <input type="number" value={settings.lowDoorsMaxStrongSupport} onChange={(e) => updateNumber("lowDoorsMaxStrongSupport", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">With low doors, flag only if Strong Support is also below this count.</span>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Low contact rate %</span>
           <input type="number" value={settings.lowContactRatePct} onChange={(e) => updateNumber("lowContactRatePct", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Flag when contact rate is under this percent.</span>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Survey support threshold %</span>
           <input type="number" value={settings.surveySupportThresholdPct} onChange={(e) => updateNumber("surveySupportThresholdPct", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Flag when support answers ÷ contacts is below this percent.</span>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Survey scope</span>
@@ -642,18 +654,22 @@ function SettingsPanel({
             <option value="first">First survey question</option>
             <option value="all">All survey questions</option>
           </select>
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Which survey question(s) feed the support-struggle flags.</span>
         </label>
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Non-contact outlier multiplier</span>
           <input type="number" step="0.1" value={settings.nonContactOutlierMultiplier} onChange={(e) => updateNumber("nonContactOutlierMultiplier", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Flag non-contact totals at or above team average × this value (min 5). Hostile/DNC always at 1+; Gated at 25+; Language Barrier at 10+.</span>
         </label>
         <label className="block md:col-span-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Support answer labels</span>
           <input value={settings.supportAnswerLabels.join(", ")} onChange={(e) => updateCsvList("supportAnswerLabels", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Comma-separated English labels. Bilingual headers (e.g. Strong Support/Fuerte Apoyo) match automatically.</span>
         </label>
         <label className="block md:col-span-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Ignored non-contact labels</span>
           <input value={settings.ignoredNonContactLabels.join(", ")} onChange={(e) => updateCsvList("ignoredNonContactLabels", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Skip these non-contact columns in outlier review (default: Not Home).</span>
         </label>
       </div>
     </div>
@@ -668,7 +684,23 @@ function CampaignTable({
   onCopyText: CopyTextHandler;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set());
+  const [headerRow1Height, setHeaderRow1Height] = useState(0);
+  const headerRow1Ref = useRef<HTMLTableRowElement>(null);
   const nonContactGroupId = "__non_contacts__";
+  const displayNames = useMemo(
+    () => buildDisplayNameMap(campaign.rows.map((row) => row.canvasserName)),
+    [campaign.rows]
+  );
+
+  useEffect(() => {
+    const row = headerRow1Ref.current;
+    if (!row) return;
+    const update = () => setHeaderRow1Height(Math.ceil(row.getBoundingClientRect().height));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [campaign.campaignName, collapsedGroups]);
 
   function toggleGroup(groupId: string) {
     setCollapsedGroups((current) => {
@@ -686,6 +718,9 @@ function CampaignTable({
   function expandAllGroups() {
     setCollapsedGroups(new Set());
   }
+
+  const stickyRow1 = "sticky top-0 z-30";
+  const stickyRow2Style = { top: headerRow1Height || undefined };
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
@@ -720,11 +755,11 @@ function CampaignTable({
       <div className="mt-4 max-h-[72vh] overflow-auto">
         <table className="w-max border-collapse table-fixed text-[11px]">
           <thead>
-            <tr>
-              <th rowSpan={2} className="sticky left-0 top-0 z-30 w-44 min-w-44 border border-gray-200 bg-gray-900 px-3 py-2 text-left font-semibold text-white dark:border-gray-700">Canvasser name</th>
-              <th rowSpan={2} className="sticky top-0 z-20 w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700">Doors</th>
-              <th rowSpan={2} className="sticky top-0 z-20 w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700">Contacts</th>
-              <th rowSpan={2} className="sticky top-0 z-20 w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700">Rate</th>
+            <tr ref={headerRow1Ref}>
+              <th rowSpan={2} className={`${stickyRow1} sticky left-0 z-40 w-36 min-w-36 border border-gray-200 bg-gray-900 px-3 py-2 text-left font-semibold text-white dark:border-gray-700`}>Canvasser name</th>
+              <th rowSpan={2} className={`${stickyRow1} w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700`}>Doors</th>
+              <th rowSpan={2} className={`${stickyRow1} w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700`}>Contacts</th>
+              <th rowSpan={2} className={`${stickyRow1} w-20 min-w-20 border border-gray-200 bg-sky-700 px-2 py-2 text-white dark:border-gray-700`}>Rate</th>
               {campaign.surveyGroups.map((group) => {
                 const collapsed = collapsedGroups.has(group.question);
                 return (
@@ -732,7 +767,7 @@ function CampaignTable({
                   key={group.question}
                   colSpan={collapsed ? 1 : group.columns.length}
                   onClick={() => toggleGroup(group.question)}
-                  className="sticky top-0 z-20 cursor-pointer select-none border border-gray-200 bg-violet-700 px-2 py-2 text-white transition hover:brightness-110 active:brightness-90 dark:border-gray-700"
+                  className={`${stickyRow1} cursor-pointer select-none border border-gray-200 bg-violet-700 px-2 py-2 text-white transition hover:brightness-110 active:brightness-90 dark:border-gray-700`}
                   title={collapsed ? "Click to expand" : "Click to collapse"}
                 >
                   <span className="mx-auto block max-w-64 truncate" title={group.question}>
@@ -745,7 +780,7 @@ function CampaignTable({
                 <th
                   colSpan={collapsedGroups.has(nonContactGroupId) ? 1 : campaign.nonContactColumns.length}
                   onClick={() => toggleGroup(nonContactGroupId)}
-                  className="sticky top-0 z-20 cursor-pointer select-none border border-gray-200 bg-rose-700 px-2 py-2 text-white transition hover:brightness-110 active:brightness-90 dark:border-gray-700"
+                  className={`${stickyRow1} cursor-pointer select-none border border-gray-200 bg-rose-700 px-2 py-2 text-white transition hover:brightness-110 active:brightness-90 dark:border-gray-700`}
                   title={collapsedGroups.has(nonContactGroupId) ? "Click to expand" : "Click to collapse"}
                 >
                   Non Contact <span className="opacity-75">{collapsedGroups.has(nonContactGroupId) ? "▶" : "▾"}</span>
@@ -756,13 +791,21 @@ function CampaignTable({
               {campaign.surveyGroups.flatMap((group) => {
                 if (collapsedGroups.has(group.question)) {
                   return [
-                    <th key={`${group.question}-sum`} className="sticky top-[2.1rem] z-20 w-16 min-w-16 border border-gray-200 bg-violet-100 px-2 py-2 text-violet-900 dark:border-gray-700 dark:bg-violet-950/50 dark:text-violet-100">
+                    <th
+                      key={`${group.question}-sum`}
+                      style={stickyRow2Style}
+                      className="sticky z-20 w-16 min-w-16 border border-gray-200 bg-violet-100 px-2 py-2 text-violet-900 dark:border-gray-700 dark:bg-violet-950 dark:text-violet-100"
+                    >
                       Total
                     </th>,
                   ];
                 }
                 return group.columns.map((col) => (
-                    <th key={col.key} className="sticky top-[2.1rem] z-20 w-20 min-w-20 border border-gray-200 bg-violet-100 px-1.5 py-1.5 text-violet-900 dark:border-gray-700 dark:bg-violet-950/50 dark:text-violet-100">
+                    <th
+                      key={col.key}
+                      style={stickyRow2Style}
+                      className="sticky z-20 w-20 min-w-20 border border-gray-200 bg-violet-100 px-1.5 py-1.5 text-violet-900 dark:border-gray-700 dark:bg-violet-950 dark:text-violet-100"
+                    >
                       <span className="line-clamp-2 block leading-tight" title={col.answer}>
                         {col.answer}
                       </span>
@@ -770,12 +813,19 @@ function CampaignTable({
                   ));
               })}
               {collapsedGroups.has(nonContactGroupId) ? (
-                <th className="sticky top-[2.1rem] z-20 w-16 min-w-16 border border-gray-200 bg-rose-100 px-2 py-2 text-rose-900 dark:border-gray-700 dark:bg-rose-950/50 dark:text-rose-100">
+                <th
+                  style={stickyRow2Style}
+                  className="sticky z-20 w-16 min-w-16 border border-gray-200 bg-rose-100 px-2 py-2 text-rose-900 dark:border-gray-700 dark:bg-rose-950 dark:text-rose-100"
+                >
                   Total
                 </th>
               ) : (
                 campaign.nonContactColumns.map((col) => (
-                  <th key={col.key} className="sticky top-[2.1rem] z-20 w-20 min-w-20 border border-gray-200 bg-rose-100 px-1.5 py-1.5 text-rose-900 dark:border-gray-700 dark:bg-rose-950/50 dark:text-rose-100">
+                  <th
+                    key={col.key}
+                    style={stickyRow2Style}
+                    className="sticky z-20 w-20 min-w-20 border border-gray-200 bg-rose-100 px-1.5 py-1.5 text-rose-900 dark:border-gray-700 dark:bg-rose-950 dark:text-rose-100"
+                  >
                     <span className="line-clamp-2 block leading-tight" title={col.label}>
                       {col.label}
                     </span>
@@ -785,9 +835,16 @@ function CampaignTable({
             </tr>
           </thead>
           <tbody>
-            {campaign.rows.map((row, rowIndex) => (
-              <tr key={row.canvasserName} className={rowIndex % 2 ? "bg-gray-50 dark:bg-white/5" : "bg-white dark:bg-gray-900"}>
-                <td className="sticky left-0 z-10 border border-gray-200 bg-inherit px-3 py-2 font-semibold text-gray-900 dark:border-gray-700 dark:text-gray-100">{row.canvasserName}</td>
+            {campaign.rows.map((row, rowIndex) => {
+              const rowKey = `${row.canvasserName}::${rowIndex}`;
+              return (
+              <tr key={rowKey} className={rowIndex % 2 ? "bg-gray-50 dark:bg-gray-950" : "bg-white dark:bg-gray-900"}>
+                <td
+                  className="sticky left-0 z-10 border border-gray-200 bg-inherit px-3 py-2 font-semibold text-gray-900 dark:border-gray-700 dark:text-gray-100"
+                  title={row.canvasserName}
+                >
+                  {displayNameFor(row.canvasserName, displayNames)}
+                </td>
                 <td className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">{row.doorsKnocked}</td>
                 <td className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">{row.contacts}</td>
                 <td className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">{formatPercent(row.contactRate)}</td>
@@ -795,13 +852,13 @@ function CampaignTable({
                   if (collapsedGroups.has(group.question)) {
                     const total = group.columns.reduce((sum, col) => sum + (row.surveyAnswers[col.key] ?? 0), 0);
                     return [
-                      <td key={`${row.canvasserName}-${group.question}-sum`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
+                      <td key={`${rowKey}-${group.question}-sum`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
                         {total}
                       </td>,
                     ];
                   }
                   return group.columns.map((col) => (
-                    <td key={`${row.canvasserName}-${col.key}`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
+                    <td key={`${rowKey}-${col.key}`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
                       {row.surveyAnswers[col.key] ?? 0}
                     </td>
                   ));
@@ -811,12 +868,13 @@ function CampaignTable({
                     {campaign.nonContactColumns.reduce((sum, col) => sum + (row.nonContacts[col.key] ?? 0), 0)}
                   </td>
                 ) : campaign.nonContactColumns.map((col) => (
-                  <td key={`${row.canvasserName}-${col.key}`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
+                  <td key={`${rowKey}-${col.key}`} className="border border-gray-200 px-2 py-2 text-center tabular-nums dark:border-gray-700">
                     {row.nonContacts[col.key] ?? 0}
                   </td>
                 ))}
               </tr>
-            ))}
+              );
+            })}
             <tr className="bg-gray-900 font-bold text-white">
               <td className="sticky left-0 z-10 border border-gray-700 bg-gray-900 px-3 py-2">Total</td>
               <td className="border border-gray-700 px-2 py-2 text-center">{campaign.totals.doorsKnocked}</td>
@@ -856,21 +914,21 @@ function CampaignTable({
 
 export default function DoorknocksResultsClient() {
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const initial = useMemo(() => readPersistedState(), []);
   const [files, setFiles] = useState<FolderFile[]>([]);
-  const [settings, setSettings] = useState<DoorknockSummarySettings>(initial.settings);
-  const [reportName, setReportName] = useState(initial.reportName);
-  const [result, setResult] = useState<DoorknockResultsReport | null>(initial.result);
-  const [activeReport, setActiveReport] = useState<SavedDoorknockResultsReport | null>(initial.activeReport);
+  const [settings, setSettings] = useState<DoorknockSummarySettings>(DEFAULT_DOORKNOCK_SUMMARY_SETTINGS);
+  const [reportName, setReportName] = useState("");
+  const [result, setResult] = useState<DoorknockResultsReport | null>(null);
+  const [activeReport, setActiveReport] = useState<SavedDoorknockResultsReport | null>(null);
   const [savedReports, setSavedReports] = useState<SavedDoorknockResultsListItem[]>([]);
-  const [activeTab, setActiveTab] = useState(() => initial.activeReport?.campaigns[0]?.id ?? initial.result?.campaigns[0]?.id ?? "summary");
-  const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState(initial.excludedCanvassersRaw);
+  const [activeTab, setActiveTab] = useState("summary");
+  const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState("");
   const [showSummaryDetails, setShowSummaryDetails] = useState(false);
   const [loadingReports, setLoadingReports] = useState(true);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [hasHydratedSession, setHasHydratedSession] = useState(false);
 
   const rawCurrentReport = activeReport ?? result;
   const excludedCanvassers = useMemo(() => parseExcludedCanvassers(excludedCanvassersRaw), [excludedCanvassersRaw]);
@@ -886,6 +944,19 @@ export default function DoorknocksResultsClient() {
         0
       )
     : 0;
+
+  useEffect(() => {
+    const persisted = readPersistedState();
+    setSettings(persisted.settings);
+    setReportName(persisted.reportName);
+    setResult(persisted.result);
+    setActiveReport(persisted.activeReport);
+    setExcludedCanvassersRaw(persisted.excludedCanvassersRaw);
+    setActiveTab(
+      persisted.activeReport?.campaigns[0]?.id ?? persisted.result?.campaigns[0]?.id ?? "summary"
+    );
+    setHasHydratedSession(true);
+  }, []);
 
   useEffect(() => {
     const input = folderInputRef.current;
@@ -913,11 +984,12 @@ export default function DoorknocksResultsClient() {
   }, [loadReports]);
 
   useEffect(() => {
+    if (!hasHydratedSession) return;
     window.sessionStorage.setItem(
       SESSION_KEY,
       JSON.stringify({ reportName, result, activeReport, settings, excludedCanvassersRaw })
     );
-  }, [activeReport, excludedCanvassersRaw, reportName, result, settings]);
+  }, [activeReport, excludedCanvassersRaw, hasHydratedSession, reportName, result, settings]);
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -1088,9 +1160,23 @@ export default function DoorknocksResultsClient() {
           Doorknocks and Results
         </h1>
         <p className="mt-3 max-w-3xl text-gray-600 dark:text-gray-400">
-          Upload a folder of PDI contact-report CSVs. Each file is inspected individually, survey
-          questions are learned from its headers, and each campaign gets its own By Canvasser pivot.
+          Build per-campaign By Canvasser pivots and a QC Summary from PDI contact-report CSVs
+          (doors knocked, contacts, survey answer columns, and non-contact mobile columns).
         </p>
+        <ul className="mt-3 max-w-3xl list-disc space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-400">
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Upload</span> — one CSV per
+            campaign/turf, or a folder of those files. Headers must include DOORS KNOCKED and CONTACTED | TOTAL.
+          </li>
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Summary thresholds</span> — tune
+            which canvassers appear in the Summary flag boxes before you run the report.
+          </li>
+          <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude exceptions</span> — hide
+            leads/supervisors from pivots and flags when their schedules are irregular (names stay in the saved file).
+          </li>
+        </ul>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -1103,7 +1189,9 @@ export default function DoorknocksResultsClient() {
           <div className="rounded-2xl border border-dashed border-emerald-300 bg-emerald-50/60 p-5 dark:border-emerald-800 dark:bg-emerald-950/20">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Upload folder or CSV files</h2>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              The folder can contain one or more PDI contact report CSVs. Non-CSV files are ignored by the picker.
+              Use PDI contact-report CSVs (wide format with Canvassers as the first column). Survey and
+              non-contact columns are detected from headers that use a Question | Answer shape. Non-CSV
+              files in a folder are ignored.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
               <label className="inline-flex cursor-pointer items-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] focus-within:ring-2 focus-within:ring-emerald-400/60">
@@ -1275,10 +1363,15 @@ export default function DoorknocksResultsClient() {
                 </label>
                 <button
                   type="button"
-                  onClick={() => void copyTextToClipboard(summaryTabDisplayText(currentReport, showSummaryDetails), "Summary tab copied.")}
+                  onClick={() =>
+                    void copyTextToClipboard(
+                      summaryTabDisplayText(currentReport, showSummaryDetails),
+                      "Summary list copied."
+                    )
+                  }
                   className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60 dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5"
                 >
-                  Copy Summary
+                  Copy as list
                 </button>
               </div>
               <div className="grid gap-4 xl:grid-cols-2">
@@ -1286,6 +1379,7 @@ export default function DoorknocksResultsClient() {
                   <SummaryFlagList
                     key={kind}
                     title={label}
+                    help={SUMMARY_HELP[kind]}
                     flags={currentReport.summary.flags[kind]}
                     onCopyText={(text, successMessage) => void copyTextToClipboard(text, successMessage)}
                   showDetails={showSummaryDetails}

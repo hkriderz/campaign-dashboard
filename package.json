@@ -6,7 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "analyze:non-contact": "tsx scripts/analyze-non-contact-patterns.ts",
+    "test:non-contact": "tsx --test lib/canvassing/non-contact-patterns/analyzer.test.ts",
+    "test:doorknocks": "tsx --require ./scripts/stub-server-only.cjs --test lib/canvassing/doorknocks-results/helpers.test.ts lib/canvassing/display-names.test.ts lib/canvassing/knock-report-view.test.ts",
+    "seed:non-contact-history": "tsx --require ./scripts/stub-server-only.cjs scripts/seed-non-contact-history.ts",
+    "regression:knock": "tsx --require ./scripts/stub-server-only.cjs scripts/capture-knock-regression.ts",
+    "regression:knock:compare": "tsx --require ./scripts/stub-server-only.cjs scripts/capture-knock-regression.ts --compare"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^8.3.0",
@@ -27,6 +33,7 @@
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.3",
     "tailwindcss": "^4.1.6",
+    "tsx": "^4.23.1",
     "typescript": "^5.8.3"
   }
 }
