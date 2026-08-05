@@ -8,14 +8,16 @@ import {
 import type { CanvassingKnockEvent, CanvassingParsedFile, CanvassingValidationIssue } from "../types";
 import {
   addToHistogram,
+  classifyHouseholdMatch,
   deriveStratumTag,
+  dominantResponseShare,
   emptyGapHistogram,
   eventIsoDate,
   gapSecondsBetween,
   isNonContactMobile,
-  isSameHousehold,
   knocksPerHourFromSpan,
   modeStratumTag,
+  shouldSuppressAsHousehold,
   voterLastName,
 } from "./helpers";
 import {
@@ -110,10 +112,62 @@ export function detectTimestampResolution(events: CanvassingKnockEvent[]): {
   return { resolution: "second", warning: null, shareWithNonZeroSeconds };
 }
 
+/**
+ * Mark rows that participate in any alerting NC burst window.
+ * Burst candidates: Non-Contact Mobile rows that are distinct-household from the
+ * previous NC candidate with a strictly positive gap (gap === 0 is a same-timestamp
+ * artifact, not a real PDI app rapid-mark step).
+ */
+function applyBurstFlags(
+  rows: EnrichedKnockRow[],
+  settings: NonContactPatternSettings
+): { maxBurstCount: number; burstAlert: boolean } {
+  const candidates: EnrichedKnockRow[] = [];
+  for (const row of rows) {
+    if (!isNonContactMobile(row.question)) continue;
+    const prev = candidates[candidates.length - 1];
+    if (prev) {
+      const matchKind = classifyHouseholdMatch(prev, row);
+      const gap = gapSecondsBetween(prev.occurredAt, row.occurredAt);
+      if (gap === null || gap <= 0) continue;
+      if (shouldSuppressAsHousehold(matchKind, gap)) continue;
+      if (prev.voter === row.voter) continue;
+    }
+    candidates.push(row);
+  }
+
+  let maxBurstCount = 0;
+  const alertingIndices = new Set<number>();
+
+  for (let i = 0; i < candidates.length; i++) {
+    const startAt = candidates[i]!.occurredAt;
+    let j = i;
+    while (j < candidates.length) {
+      const gapFromStart = gapSecondsBetween(startAt, candidates[j]!.occurredAt);
+      if (gapFromStart === null || gapFromStart > settings.burstWindowSeconds) break;
+      j++;
+    }
+    const count = j - i;
+    if (count > maxBurstCount) maxBurstCount = count;
+    if (count >= settings.burstMinMarks) {
+      for (let k = i; k < j; k++) alertingIndices.add(k);
+    }
+  }
+
+  for (const idx of alertingIndices) {
+    candidates[idx]!.inBurstFlag = true;
+  }
+
+  return {
+    maxBurstCount,
+    burstAlert: maxBurstCount >= settings.burstMinMarks,
+  };
+}
+
 function enrichRows(
   events: CanvassingKnockEvent[],
   settings: NonContactPatternSettings
-): EnrichedKnockRow[] {
+): { enriched: EnrichedKnockRow[]; burstByCanvasser: Map<string, { maxBurstCount: number; burstAlert: boolean }> } {
   const byCanvasser = new Map<string, CanvassingKnockEvent[]>();
   for (const event of events) {
     const group = byCanvasser.get(event.canvasserName) ?? [];
@@ -122,29 +176,39 @@ function enrichRows(
   }
 
   const enriched: EnrichedKnockRow[] = [];
+  const burstByCanvasser = new Map<string, { maxBurstCount: number; burstAlert: boolean }>();
 
-  for (const [, group] of byCanvasser.entries()) {
+  for (const [canvasserName, group] of byCanvasser.entries()) {
     const sorted = [...group].sort(
       (a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.sourceRowNumber - b.sourceRowNumber
     );
 
+    const canvasserRows: EnrichedKnockRow[] = [];
     let prevStreak = 0;
     for (let i = 0; i < sorted.length; i++) {
       const current = sorted[i]!;
       const next = i < sorted.length - 1 ? sorted[i + 1]! : null;
       const lastName = voterLastName(current.voter);
       const gapToNextSeconds = next ? gapSecondsBetween(current.occurredAt, next.occurredAt) : null;
-      const sameHouseholdAsNext = next
-        ? isSameHousehold(
+      const householdMatchKind = next
+        ? classifyHouseholdMatch(
             { ...current, lastName },
             { ...next, lastName: voterLastName(next.voter) }
           )
+        : "none";
+      const sameHouseholdAsNext = next
+        ? shouldSuppressAsHousehold(householdMatchKind, gapToNextSeconds)
         : false;
 
       let rapidNonContactFlag = false;
       let rapidContactFlag = false;
 
-      if (next && gapToNextSeconds !== null && gapToNextSeconds > 0) {
+      if (
+        next &&
+        gapToNextSeconds !== null &&
+        gapToNextSeconds > 0 &&
+        gapToNextSeconds <= Math.max(settings.rapidNonContactMaxSeconds, settings.rapidContactMaxSeconds)
+      ) {
         const differentVoters = current.voter !== next.voter;
         if (
           isNonContactMobile(current.question) &&
@@ -170,17 +234,23 @@ function enrichRows(
       const streakLength = rapidNonContactFlag ? (prevStreak > 0 ? prevStreak + 1 : 1) : 0;
       prevStreak = streakLength;
 
-      enriched.push({
+      canvasserRows.push({
         ...current,
         lastName,
         gapToNextSeconds,
+        householdMatchKind,
         sameHouseholdAsNext,
         rapidNonContactFlag,
         streakLength,
         rapidContactFlag,
+        inBurstFlag: false,
         isoDate: eventIsoDate(current.occurredAt),
       });
     }
+
+    const burst = applyBurstFlags(canvasserRows, settings);
+    burstByCanvasser.set(canvasserName, burst);
+    enriched.push(...canvasserRows);
   }
 
   enriched.sort(
@@ -190,12 +260,13 @@ function enrichRows(
       a.sourceRowNumber - b.sourceRowNumber
   );
 
-  return enriched;
+  return { enriched, burstByCanvasser };
 }
 
 function buildCanvasserSummaries(
   enriched: EnrichedKnockRow[],
-  settings: NonContactPatternSettings
+  settings: NonContactPatternSettings,
+  burstByCanvasser: Map<string, { maxBurstCount: number; burstAlert: boolean }>
 ): CanvasserPatternSummary[] {
   const byCanvasser = new Map<string, EnrichedKnockRow[]>();
   for (const row of enriched) {
@@ -237,9 +308,16 @@ function buildCanvasserSummaries(
         ? rapidNonContactCount / nonContactGapCount
         : 0;
 
+    const rapidOrBurstRows = rows.filter(
+      (r) => isNonContactMobile(r.question) && (r.rapidNonContactFlag || r.inBurstFlag)
+    );
+    const rapidOrBurstResponses = rapidOrBurstRows.map((r) => r.response);
+    const dominantRapidResponseShare = dominantResponseShare(rapidOrBurstResponses);
+
     const firstKnockAt = rows[0]?.occurredAt ?? null;
     const lastKnockAt = rows[rows.length - 1]?.occurredAt ?? null;
     const stratumTag = modeStratumTag(rows.map((r) => deriveStratumTag(r.assignmentName)));
+    const burst = burstByCanvasser.get(canvasserName) ?? { maxBurstCount: 0, burstAlert: false };
 
     summaries.push({
       canvasserName,
@@ -253,6 +331,10 @@ function buildCanvasserSummaries(
       longestRapidNonContactStreak,
       rapidContactCount,
       streakAlert: longestRapidNonContactStreak >= settings.streakAlertMin,
+      maxBurstCount: burst.maxBurstCount,
+      burstAlert: burst.burstAlert,
+      dominantRapidResponseShare,
+      rapidOrBurstResponseSample: rapidOrBurstResponses.length,
       firstKnockAt,
       lastKnockAt,
       knocksPerHour: knocksPerHourFromSpan(firstKnockAt, lastKnockAt, rows.length),
@@ -285,12 +367,15 @@ function buildMetricsSnapshot(params: {
     }
     return {
       canvasserName: s.canvasserName,
+      totalRows: s.totalRows,
       nonContactRowCount: s.nonContactRowCount,
+      nonContactRate: s.nonContactRate,
       nonContactGapCount: s.nonContactGapCount,
       rapidNonContactCount: s.rapidNonContactCount,
       rapidNonContactRate: s.rapidNonContactRate,
       longestStreak: s.longestRapidNonContactStreak,
       rapidContactCount: s.rapidContactCount,
+      maxBurstCount: s.maxBurstCount,
       gapHistogram: { ...s.gapHistogram },
       knocksPerHour: s.knocksPerHour,
       stratumTag: s.stratumTag,
@@ -335,33 +420,23 @@ export function analyzeNonContactPatternEvents(
     });
   }
 
-  const enrichedRows =
-    resolution.resolution === "second" ? enrichRows(events, settings) : enrichRows(events, settings);
-  // Always enrich for inspection, but flag resolution in summary so UI can warn.
+  const { enriched: enrichedRows, burstByCanvasser } = enrichRows(events, settings);
 
-  const canvasserSummaries = buildCanvasserSummaries(enrichedRows, settings);
-  const flaggedNonContactRows = enrichedRows.filter((r) => r.rapidNonContactFlag);
+  const canvasserSummaries = buildCanvasserSummaries(enrichedRows, settings, burstByCanvasser);
+  const flaggedNonContactRows = enrichedRows.filter((r) => r.rapidNonContactFlag || r.inBurstFlag);
   const flaggedContactRows = enrichedRows.filter((r) => r.rapidContactFlag);
   const distinctDates = detectDistinctReportDates(events);
   const detectedReportDate =
     options?.forceReportDate ?? detectReportDate(events) ?? distinctDates[0] ?? null;
 
-  const metricsSnapshot =
-    detectedReportDate && resolution.resolution === "second"
-      ? buildMetricsSnapshot({
-          reportDate: detectedReportDate,
-          timestampResolution: resolution.resolution,
-          sourceChecksum,
-          summaries: canvasserSummaries,
-        })
-      : detectedReportDate
-        ? buildMetricsSnapshot({
-            reportDate: detectedReportDate,
-            timestampResolution: resolution.resolution,
-            sourceChecksum,
-            summaries: canvasserSummaries,
-          })
-        : null;
+  const metricsSnapshot = detectedReportDate
+    ? buildMetricsSnapshot({
+        reportDate: detectedReportDate,
+        timestampResolution: resolution.resolution,
+        sourceChecksum,
+        summaries: canvasserSummaries,
+      })
+    : null;
 
   return {
     sourceFiles,
@@ -372,9 +447,10 @@ export function analyzeNonContactPatternEvents(
       resolutionWarning: resolution.warning,
       totalRows: enrichedRows.length,
       totalCanvassers: canvasserSummaries.length,
-      rapidNonContactFlagCount: flaggedNonContactRows.length,
+      rapidNonContactFlagCount: enrichedRows.filter((r) => r.rapidNonContactFlag).length,
       rapidContactFlagCount: flaggedContactRows.length,
       streakAlertCanvasserCount: canvasserSummaries.filter((s) => s.streakAlert).length,
+      burstAlertCanvasserCount: canvasserSummaries.filter((s) => s.burstAlert).length,
       settings,
     },
     canvasserSummaries,

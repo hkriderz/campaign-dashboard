@@ -10,6 +10,8 @@ import {
 import type { HistoricalReportDay } from "./historical";
 import {
   MIN_NON_CONTACT_GAP_SAMPLE,
+  MIN_UNIFORMITY_SAMPLE,
+  UNIFORMITY_TIER2_SHARE,
   type BaselineComparison,
   type CanvasserAnomalyScore,
   type CanvasserMetricsSnapshot,
@@ -85,12 +87,8 @@ export function computeTeamBaseline(
     .map((c) => c.knocksPerHour)
     .filter((v): v is number => v !== null);
   const nonContactRates = canvasserDays
-    .filter((c) => c.nonContactRowCount > 0)
-    .map((c) => {
-      // Approximate non-contact rate from gap metrics is imperfect; use row ratio if available via gaps.
-      return c.nonContactGapCount > 0 ? c.rapidNonContactCount /* placeholder unused */ : 0;
-    });
-  void nonContactRates;
+    .map((c) => c.nonContactRate)
+    .filter((r): r is number => typeof r === "number" && Number.isFinite(r));
 
   const bucketShares = canvasserDays
     .map((c) => rapidBucketShare0to15(c.gapHistogram))
@@ -100,10 +98,6 @@ export function computeTeamBaseline(
   const sortedStreaks = [...streaks].sort((a, b) => a - b);
   const sortedBucketShares = [...bucketShares].sort((a, b) => a - b);
   const sortedKph = [...knocksPerHour].sort((a, b) => a - b);
-
-  // Median non-contact rate from current-file summaries isn't in snapshot; leave null for now
-  // unless we store it — snapshot has nonContactRowCount but not totalRows. Skip.
-  const medianNonContactRate = null;
 
   return {
     daysInWindow: reportDates.length,
@@ -121,7 +115,7 @@ export function computeTeamBaseline(
     p95RapidBucketShare0to15: percentile(sortedBucketShares, 0.95),
     iqrRapidCount: computeIqrBounds(rapidCounts),
     p90KnocksPerHour: percentile(sortedKph, 0.9),
-    medianNonContactRate,
+    medianNonContactRate: median(nonContactRates),
   };
 }
 
@@ -181,8 +175,8 @@ export function scoreCanvassersAgainstBaseline(params: {
   history: HistoricalReportDay[];
   percentileHistory?: HistoricalReportDay[];
 }): CanvasserAnomalyScore[] {
-  const { summaries, baseline, history } = params;
-  const percentileHistory = params.percentileHistory ?? history;
+  const { summaries, baseline } = params;
+  const percentileHistory = params.percentileHistory ?? params.history;
 
   return summaries.map((s) => {
     const signals: string[] = [];
@@ -197,6 +191,10 @@ export function scoreCanvassersAgainstBaseline(params: {
     }
     if (s.streakAlert) {
       signals.push(`Streak ≥ ${s.longestRapidNonContactStreak}`);
+      tier = 1;
+    }
+    if (s.burstAlert) {
+      signals.push(`Burst alert: ${s.maxBurstCount} NC marks in window`);
       tier = 1;
     }
     if (
@@ -266,6 +264,17 @@ export function scoreCanvassersAgainstBaseline(params: {
       tier2 = true;
     }
 
+    if (
+      s.dominantRapidResponseShare !== null &&
+      s.rapidOrBurstResponseSample >= MIN_UNIFORMITY_SAMPLE &&
+      s.dominantRapidResponseShare >= UNIFORMITY_TIER2_SHARE
+    ) {
+      signals.push(
+        `Response uniformity ${(s.dominantRapidResponseShare * 100).toFixed(0)}% on ${s.rapidOrBurstResponseSample} rapid/burst rows`
+      );
+      tier2 = true;
+    }
+
     if (tier === null && tier2) tier = 2;
 
     // Tier 3
@@ -284,12 +293,15 @@ export function scoreCanvassersAgainstBaseline(params: {
         ? normalize(s.rapidNonContactRate / personalMedian, 2)
         : 0;
 
+    const burstNorm = normalize(s.maxBurstCount, Math.max(s.maxBurstCount, 5));
+
     const compositeScore = Math.round(
       Math.min(
         100,
-        40 * normalize(s.rapidNonContactCount, Math.max(countP95Proxy, 1)) +
-          25 * normalize(s.longestRapidNonContactStreak, baseline.p95LongestStreak ?? 4) +
-          25 * normalize(bucketShare ?? 0, baseline.p95RapidBucketShare0to15 ?? 0.5) +
+        35 * normalize(s.rapidNonContactCount, Math.max(countP95Proxy, 1)) +
+          20 * normalize(s.longestRapidNonContactStreak, baseline.p95LongestStreak ?? 4) +
+          20 * normalize(bucketShare ?? 0, baseline.p95RapidBucketShare0to15 ?? 0.5) +
+          15 * burstNorm +
           10 * rateDeltaNorm
       )
     );

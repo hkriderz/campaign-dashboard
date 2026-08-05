@@ -124,9 +124,10 @@ function filterResult(
       ...result.summary,
       totalRows: enrichedRows.length,
       totalCanvassers: canvasserSummaries.length,
-      rapidNonContactFlagCount: flaggedNonContactRows.length,
+      rapidNonContactFlagCount: enrichedRows.filter((r) => r.rapidNonContactFlag).length,
       rapidContactFlagCount: flaggedContactRows.length,
       streakAlertCanvasserCount: canvasserSummaries.filter((s) => s.streakAlert).length,
+      burstAlertCanvasserCount: canvasserSummaries.filter((s) => s.burstAlert).length,
     },
   };
 }
@@ -372,7 +373,10 @@ export default function NonContactPatternsClient() {
       if (!json.ok || !json.data) throw new Error(json.error || "Unable to open report.");
       setActiveReport(json.data.report);
       setResult(null);
-      setSettings(json.data.report.summary.settings);
+      setSettings({
+        ...DEFAULT_NON_CONTACT_PATTERN_SETTINGS,
+        ...json.data.report.summary.settings,
+      });
       setReportName(json.data.report.name);
       setActiveTab("summary");
       await loadBaseline({
@@ -462,7 +466,7 @@ export default function NonContactPatternsClient() {
 
   function summaryTsv(): string {
     if (!currentReport) return "";
-    const lines = [
+      const lines = [
       tsvLine([
         "Canvasser",
         "Total Rows",
@@ -470,6 +474,9 @@ export default function NonContactPatternsClient() {
         "Rapid NC",
         "Rate",
         "Longest Streak",
+        "Burst Max",
+        "Burst Alert",
+        "Response Uniformity",
         "Rapid Contact",
         "Tier",
         "Score",
@@ -485,6 +492,11 @@ export default function NonContactPatternsClient() {
           s.rapidNonContactCount,
           formatPercent(s.rapidNonContactRate, s.rateSampleInsufficient),
           s.longestRapidNonContactStreak,
+          s.maxBurstCount,
+          s.burstAlert,
+          s.dominantRapidResponseShare === null
+            ? ""
+            : formatPercent(s.dominantRapidResponseShare),
           s.rapidContactCount,
           score?.anomalyTier ?? "",
           score?.compositeScore ?? "",
@@ -495,7 +507,9 @@ export default function NonContactPatternsClient() {
   }
 
   function flaggedTsv(rows: EnrichedKnockRow[]): string {
-    const lines = [tsvLine(["Canvasser", "Voter", "Gap (s)", "Streak", "Datetime", "Phone", "Response"])];
+    const lines = [
+      tsvLine(["Canvasser", "Voter", "Gap (s)", "Streak", "In Burst", "Datetime", "Phone", "Response"]),
+    ];
     for (const r of rows) {
       lines.push(
         tsvLine([
@@ -503,6 +517,7 @@ export default function NonContactPatternsClient() {
           r.voter,
           r.gapToNextSeconds,
           r.streakLength,
+          r.inBurstFlag,
           r.dateTimeRaw,
           r.phone,
           r.response,
@@ -526,8 +541,9 @@ export default function NonContactPatternsClient() {
       const tier = score?.anomalyTier ?? "—";
       const scoreVal = score?.compositeScore ?? "—";
       const streakNote = s.streakAlert ? " · streak alert" : "";
+      const burstNote = s.burstAlert ? ` · burst ${s.maxBurstCount}` : "";
       lines.push(
-        `- ${s.canvasserName} — rapid NC ${s.rapidNonContactCount} (${rate}), streak ${s.longestRapidNonContactStreak}, rapid contact ${s.rapidContactCount}, tier ${tier}, score ${scoreVal}${streakNote}`
+        `- ${s.canvasserName} — rapid NC ${s.rapidNonContactCount} (${rate}), streak ${s.longestRapidNonContactStreak}, rapid contact ${s.rapidContactCount}, tier ${tier}, score ${scoreVal}${streakNote}${burstNote}`
       );
     }
     return lines.join("\n");
@@ -545,8 +561,9 @@ export default function NonContactPatternsClient() {
           ? "n/a"
           : `${Math.round(r.gapToNextSeconds)}s`;
       const streakPart = showStreak ? ` · streak ${r.streakLength}` : "";
+      const burstPart = r.inBurstFlag ? " · burst" : "";
       lines.push(
-        `- ${r.canvasserName} — ${r.voter || "unknown voter"} · gap ${gap}${streakPart} · ${r.dateTimeRaw || "n/a"} · ${r.response || "n/a"}`
+        `- ${r.canvasserName} — ${r.voter || "unknown voter"} · gap ${gap}${streakPart}${burstPart} · ${r.dateTimeRaw || "n/a"} · ${r.response || "n/a"}`
       );
     }
     return lines.join("\n");
@@ -607,6 +624,11 @@ export default function NonContactPatternsClient() {
             {settings.streakAlertMin}+ rapid non-contacts.
           </li>
           <li>
+            <span className="font-medium text-gray-800 dark:text-gray-200">Burst</span> — {settings.burstMinMarks}+
+            distinct-household Non-Contact marks inside {settings.burstWindowSeconds}s (catches tap-pause patterns that
+            break pairwise streaks).
+          </li>
+          <li>
             <span className="font-medium text-gray-800 dark:text-gray-200">Baselines</span> — need saved multi-day
             history; anomaly tiers are review prioritization aids only.
           </li>
@@ -662,7 +684,7 @@ export default function NonContactPatternsClient() {
             </p>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
             <label className="block">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Rapid non-contact max (s)</span>
               <input
@@ -701,6 +723,32 @@ export default function NonContactPatternsClient() {
               />
               <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
                 Highlight canvassers whose longest rapid non-contact streak reaches this length.
+              </span>
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Burst window (s)</span>
+              <input
+                type="number"
+                value={settings.burstWindowSeconds}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, burstWindowSeconds: Number(e.target.value) || 90 }))
+                }
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Rolling window length for burst density.
+              </span>
+            </label>
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Burst min marks</span>
+              <input
+                type="number"
+                value={settings.burstMinMarks}
+                onChange={(e) => setSettings((s) => ({ ...s, burstMinMarks: Number(e.target.value) || 5 }))}
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Distinct-household NC marks in the window to raise a burst alert.
               </span>
             </label>
           </div>
@@ -816,11 +864,15 @@ export default function NonContactPatternsClient() {
             </div>
           ) : null}
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
             {[
               { label: "Report date", value: formatDate(currentReport.summary.detectedReportDate) },
               { label: "Rapid non-contact flags", value: formatNumber(currentReport.summary.rapidNonContactFlagCount) },
               { label: "Streak alerts", value: formatNumber(currentReport.summary.streakAlertCanvasserCount) },
+              {
+                label: "Burst alerts",
+                value: formatNumber(currentReport.summary.burstAlertCanvasserCount ?? 0),
+              },
               {
                 label: "Resolution",
                 value: currentReport.summary.timestampResolution,
@@ -886,6 +938,7 @@ export default function NonContactPatternsClient() {
                           ["canvasserName", "Canvasser"],
                           ["rapidNonContactCount", "Rapid NC"],
                           ["longestRapidNonContactStreak", "Streak"],
+                          ["maxBurstCount", "Burst Max"],
                           ["rapidNonContactRate", "Rate"],
                           ["rapidContactCount", "Rapid Contact"],
                           ["anomalyTier", "Tier"],
@@ -906,7 +959,7 @@ export default function NonContactPatternsClient() {
                         <tr
                           key={s.canvasserName}
                           className={`border-b border-gray-100 dark:border-white/5 ${
-                            s.streakAlert ? "bg-red-50 dark:bg-red-950/20" : ""
+                            s.streakAlert || s.burstAlert ? "bg-red-50 dark:bg-red-950/20" : ""
                           } ${selectedCanvasser === s.canvasserName ? "ring-1 ring-orange-400" : ""}`}
                           onClick={() => setSelectedCanvasser(s.canvasserName)}
                         >
@@ -915,6 +968,13 @@ export default function NonContactPatternsClient() {
                           </td>
                           <td className="px-3 py-2 tabular-nums">{s.rapidNonContactCount}</td>
                           <td className="px-3 py-2 tabular-nums">{s.longestRapidNonContactStreak}</td>
+                          <td
+                            className="px-3 py-2 tabular-nums"
+                            title={s.burstAlert ? "Burst alert" : undefined}
+                          >
+                            {s.maxBurstCount ?? 0}
+                            {s.burstAlert ? " !" : ""}
+                          </td>
                           <td className="px-3 py-2 tabular-nums">
                             {formatPercent(s.rapidNonContactRate, s.rateSampleInsufficient)}
                           </td>
@@ -982,8 +1042,10 @@ export default function NonContactPatternsClient() {
                         "HH?",
                         "Rapid NC",
                         "Streak",
+                        "Burst",
                         "Rapid C",
                         "Datetime",
+                        "Response",
                         "Question",
                       ].map((h) => (
                         <th key={h} className="bg-gray-900 px-2 py-2 text-left">
@@ -997,7 +1059,7 @@ export default function NonContactPatternsClient() {
                       <tr
                         key={`${r.canvasserName}-${r.sourceRowNumber}-${r.occurredAt}`}
                         className={`border-b border-gray-100 dark:border-white/5 ${
-                          r.rapidNonContactFlag ? "bg-red-50 dark:bg-red-950/20" : ""
+                          r.rapidNonContactFlag || r.inBurstFlag ? "bg-red-50 dark:bg-red-950/20" : ""
                         }`}
                       >
                         <td className="px-2 py-1" title={r.canvasserName}>
@@ -1007,11 +1069,17 @@ export default function NonContactPatternsClient() {
                         <td className="px-2 py-1 tabular-nums">
                           {r.gapToNextSeconds === null ? "" : r.gapToNextSeconds.toFixed(0)}
                         </td>
-                        <td className="px-2 py-1">{r.sameHouseholdAsNext ? "Y" : ""}</td>
+                        <td className="px-2 py-1" title={r.householdMatchKind}>
+                          {r.sameHouseholdAsNext ? "Y" : ""}
+                        </td>
                         <td className="px-2 py-1">{r.rapidNonContactFlag ? "Y" : ""}</td>
                         <td className="px-2 py-1 tabular-nums">{r.streakLength || ""}</td>
+                        <td className="px-2 py-1">{r.inBurstFlag ? "Y" : ""}</td>
                         <td className="px-2 py-1">{r.rapidContactFlag ? "Y" : ""}</td>
                         <td className="px-2 py-1">{r.dateTimeRaw}</td>
+                        <td className="max-w-[120px] truncate px-2 py-1" title={r.response}>
+                          {r.response}
+                        </td>
                         <td className="max-w-[220px] truncate px-2 py-1" title={r.question}>
                           {r.question}
                         </td>
@@ -1097,6 +1165,7 @@ function FlaggedTable({
               <th className="bg-gray-900 px-3 py-2">Voter</th>
               <th className="bg-gray-900 px-3 py-2">Gap (s)</th>
               {showStreak ? <th className="bg-gray-900 px-3 py-2">Streak</th> : null}
+              <th className="bg-gray-900 px-3 py-2">In Burst</th>
               <th className="bg-gray-900 px-3 py-2">Datetime</th>
               <th className="bg-gray-900 px-3 py-2">Response</th>
             </tr>
@@ -1105,7 +1174,9 @@ function FlaggedTable({
             {rows.map((r) => (
               <tr
                 key={`${r.canvasserName}-${r.sourceRowNumber}-${r.occurredAt}`}
-                className="border-b border-gray-100 dark:border-white/5"
+                className={`border-b border-gray-100 dark:border-white/5 ${
+                  r.inBurstFlag ? "bg-amber-50 dark:bg-amber-950/20" : ""
+                }`}
               >
                 <td className="px-3 py-2" title={r.canvasserName}>
                   {displayNameFor(r.canvasserName, displayNames)}
@@ -1115,6 +1186,7 @@ function FlaggedTable({
                   {r.gapToNextSeconds === null ? "" : r.gapToNextSeconds.toFixed(0)}
                 </td>
                 {showStreak ? <td className="px-3 py-2 tabular-nums">{r.streakLength}</td> : null}
+                <td className="px-3 py-2">{r.inBurstFlag ? "Y" : ""}</td>
                 <td className="px-3 py-2">{r.dateTimeRaw}</td>
                 <td className="px-3 py-2">{r.response}</td>
               </tr>

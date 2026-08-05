@@ -2,7 +2,12 @@ import "server-only";
 
 import { subtractIsoDays } from "@/lib/validation/iso-date";
 import { getNonContactPatternReport, listNonContactPatternReports } from "./store";
-import { METRICS_SCHEMA_VERSION, type ReportMetricsSnapshot, type SavedNonContactPatternReport } from "./types";
+import {
+  METRICS_SCHEMA_VERSION,
+  type CanvasserMetricsSnapshot,
+  type ReportMetricsSnapshot,
+  type SavedNonContactPatternReport,
+} from "./types";
 
 export type HistoricalReportDay = {
   reportId: string;
@@ -13,9 +18,79 @@ export type HistoricalReportDay = {
   flaggedCanvasserCount: number;
 };
 
+const SUPPORTED_SCHEMA_VERSIONS = new Set([1, METRICS_SCHEMA_VERSION]);
+
+type LegacyMetricsSnapshot = {
+  schemaVersion: number;
+  reportDate: string;
+  analyzedAt: string;
+  timestampResolution: ReportMetricsSnapshot["timestampResolution"];
+  stratumTag: string;
+  sourceChecksum: string;
+  teamGapHistogram: ReportMetricsSnapshot["teamGapHistogram"];
+  canvassers: Array<
+    Partial<CanvasserMetricsSnapshot> &
+      Pick<
+        CanvasserMetricsSnapshot,
+        | "canvasserName"
+        | "nonContactRowCount"
+        | "nonContactGapCount"
+        | "rapidNonContactCount"
+        | "rapidNonContactRate"
+        | "longestStreak"
+        | "rapidContactCount"
+        | "gapHistogram"
+        | "knocksPerHour"
+        | "stratumTag"
+      >
+  >;
+};
+
+/**
+ * Normalize older snapshots (v1) so baseline code can read v2 fields.
+ * Missing v2 fields get safe defaults (0 / derived rates).
+ */
+export function normalizeMetricsSnapshot(raw: LegacyMetricsSnapshot | ReportMetricsSnapshot): ReportMetricsSnapshot {
+  const canvassers: CanvasserMetricsSnapshot[] = raw.canvassers.map((c) => {
+    const totalRows = typeof c.totalRows === "number" ? c.totalRows : 0;
+    const nonContactRate =
+      typeof c.nonContactRate === "number"
+        ? c.nonContactRate
+        : totalRows > 0
+          ? c.nonContactRowCount / totalRows
+          : 0;
+    return {
+      canvasserName: c.canvasserName,
+      totalRows,
+      nonContactRowCount: c.nonContactRowCount,
+      nonContactRate,
+      nonContactGapCount: c.nonContactGapCount,
+      rapidNonContactCount: c.rapidNonContactCount,
+      rapidNonContactRate: c.rapidNonContactRate,
+      longestStreak: c.longestStreak,
+      rapidContactCount: c.rapidContactCount,
+      maxBurstCount: typeof c.maxBurstCount === "number" ? c.maxBurstCount : 0,
+      gapHistogram: c.gapHistogram,
+      knocksPerHour: c.knocksPerHour,
+      stratumTag: c.stratumTag,
+    };
+  });
+
+  return {
+    schemaVersion: METRICS_SCHEMA_VERSION,
+    reportDate: raw.reportDate,
+    analyzedAt: raw.analyzedAt,
+    timestampResolution: raw.timestampResolution,
+    stratumTag: raw.stratumTag,
+    sourceChecksum: raw.sourceChecksum,
+    teamGapHistogram: raw.teamGapHistogram,
+    canvassers,
+  };
+}
+
 /**
  * Load saved report metrics for a date window.
- * Only includes snapshots matching METRICS_SCHEMA_VERSION.
+ * Accepts current schema and v1 snapshots (normalized to v2 field shape).
  */
 export function loadHistoricalMetrics(params: {
   /** Inclusive start YYYY-MM-DD */
@@ -24,7 +99,7 @@ export function loadHistoricalMetrics(params: {
   toDateExclusive: string;
   schemaVersion?: number;
 }): HistoricalReportDay[] {
-  const schemaVersion = params.schemaVersion ?? METRICS_SCHEMA_VERSION;
+  const schemaVersion = params.schemaVersion;
   const items = listNonContactPatternReports();
   const out: HistoricalReportDay[] = [];
 
@@ -34,13 +109,18 @@ export function loadHistoricalMetrics(params: {
 
     const report = getNonContactPatternReport(item.id);
     if (!report?.metricsSnapshot) continue;
-    if (report.metricsSnapshot.schemaVersion !== schemaVersion) continue;
+    const snapVersion = report.metricsSnapshot.schemaVersion as number;
+    if (schemaVersion !== undefined) {
+      if (snapVersion !== schemaVersion) continue;
+    } else if (!SUPPORTED_SCHEMA_VERSIONS.has(snapVersion)) {
+      continue;
+    }
 
     out.push({
       reportId: report.id,
       reportDate: report.reportDate,
       name: report.name,
-      metricsSnapshot: report.metricsSnapshot,
+      metricsSnapshot: normalizeMetricsSnapshot(report.metricsSnapshot as LegacyMetricsSnapshot),
       rapidNonContactFlagCount: report.summary.rapidNonContactFlagCount,
       flaggedCanvasserCount: report.canvasserSummaries.filter((c) => c.rapidNonContactCount > 0).length,
     });

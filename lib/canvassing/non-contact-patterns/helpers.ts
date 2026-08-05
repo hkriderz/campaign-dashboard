@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { LA_TIME_ZONE } from "../knock-details-parser";
 import type { CanvassingKnockEvent } from "../types";
-import type { EnrichedKnockRow } from "./types";
+import type { EnrichedKnockRow, HouseholdMatchKind } from "./types";
 
 export {
   emptyGapHistogram,
@@ -30,23 +30,61 @@ export function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, "");
 }
 
+function phonesMatch(
+  current: Pick<CanvassingKnockEvent, "phone">,
+  next: Pick<CanvassingKnockEvent, "phone">
+): boolean {
+  const currentPhone = normalizePhone(current.phone);
+  const nextPhone = normalizePhone(next.phone);
+  return Boolean(currentPhone && nextPhone && currentPhone === nextPhone);
+}
+
+function lastNamesMatch(
+  current: Pick<CanvassingKnockEvent, "voter"> & { lastName?: string },
+  next: Pick<CanvassingKnockEvent, "voter"> & { lastName?: string }
+): boolean {
+  const currentLast = (current.lastName ?? voterLastName(current.voter)).toLowerCase();
+  const nextLast = (next.lastName ?? voterLastName(next.voter)).toLowerCase();
+  return Boolean(currentLast && nextLast && currentLast === nextLast);
+}
+
 /**
- * Same household when phone matches (non-empty) OR last name matches.
- * Mirrors sheet: phone OR lastName.
+ * Classify household relationship for rapid-flag suppression:
+ * - phone: same normalized phone (non-empty)
+ * - last_name: same voter last-name token
+ * - none: eligible for rapid flags
+ *
+ * Both phone and last_name always suppress (sheet: phone OR lastName).
+ */
+export function classifyHouseholdMatch(
+  current: Pick<CanvassingKnockEvent, "phone" | "voter"> & { lastName?: string },
+  next: Pick<CanvassingKnockEvent, "phone" | "voter"> & { lastName?: string }
+): HouseholdMatchKind {
+  if (phonesMatch(current, next)) return "phone";
+  if (lastNamesMatch(current, next)) return "last_name";
+  return "none";
+}
+
+/**
+ * Whether to suppress rapid flags between current→next.
+ * Phone or last-name match always counts as same household.
+ */
+export function shouldSuppressAsHousehold(
+  matchKind: HouseholdMatchKind,
+  _gapSeconds: number | null
+): boolean {
+  return matchKind === "phone" || matchKind === "last_name";
+}
+
+/**
+ * Legacy helper: phone match OR last-name match (ignores gap).
+ * Prefer classifyHouseholdMatch + shouldSuppressAsHousehold for rapid flags.
  */
 export function isSameHousehold(
   current: Pick<CanvassingKnockEvent, "phone" | "voter"> & { lastName?: string },
   next: Pick<CanvassingKnockEvent, "phone" | "voter"> & { lastName?: string }
 ): boolean {
-  const currentPhone = normalizePhone(current.phone);
-  const nextPhone = normalizePhone(next.phone);
-  if (currentPhone && nextPhone && currentPhone === nextPhone) return true;
-
-  const currentLast = (current.lastName ?? voterLastName(current.voter)).toLowerCase();
-  const nextLast = (next.lastName ?? voterLastName(next.voter)).toLowerCase();
-  if (currentLast && nextLast && currentLast === nextLast) return true;
-
-  return false;
+  return classifyHouseholdMatch(current, next) !== "none";
 }
 
 export function gapSecondsBetween(currentIso: string, nextIso: string): number | null {
@@ -165,13 +203,28 @@ export function findNearDuplicateNames(names: string[], maxDistance = 2): string
   return warnings;
 }
 
+/** Eligible NC→NC gap for rate/histogram: different voters, not suppressed HH, gap > 0. */
 export function isEligibleNonContactGap(row: EnrichedKnockRow, next: EnrichedKnockRow): boolean {
   return (
     isNonContactMobile(row.question) &&
     isNonContactMobile(next.question) &&
     row.voter !== next.voter &&
-    !isSameHousehold(row, next) &&
+    !row.sameHouseholdAsNext &&
     row.gapToNextSeconds !== null &&
     row.gapToNextSeconds > 0
   );
+}
+
+export function dominantResponseShare(responses: string[]): number | null {
+  if (!responses.length) return null;
+  const counts = new Map<string, number>();
+  for (const raw of responses) {
+    const key = raw.trim().toLowerCase() || "(empty)";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let max = 0;
+  for (const count of counts.values()) {
+    if (count > max) max = count;
+  }
+  return max / responses.length;
 }

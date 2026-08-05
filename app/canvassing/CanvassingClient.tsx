@@ -42,7 +42,10 @@ const ROLE_LABELS: Record<CanvassingFileRole, string> = {
   campaign_results: "Campaign results",
   unknown: "Unknown",
 };
-const SESSION_STATE_KEY = "canvassing.knockAnalysis.v3";
+const SESSION_STATE_KEY = "canvassing.knockAnalysis.v4";
+/** Engine only stores gaps over 10 minutes; custom threshold must be above that floor. */
+const CUSTOM_GAP_MIN_MINUTES = 11;
+const CUSTOM_GAP_MAX_MINUTES = 180;
 
 type ResultsTab = "pivot" | "gaps" | "shift";
 
@@ -59,7 +62,20 @@ type PersistedKnockAnalysisState = {
   lunchReturnTime: string;
   endTime: string;
   asOfTime: string;
+  /** Empty string = no extra custom gap list (default). */
+  customGapMinutesRaw: string;
 };
+
+/** Parse optional custom gap minutes. Empty/invalid → null (no extra list). */
+function parseOptionalCustomGapMinutes(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  if (rounded < CUSTOM_GAP_MIN_MINUTES || rounded > CUSTOM_GAP_MAX_MINUTES) return null;
+  return rounded;
+}
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
@@ -441,6 +457,7 @@ function readPersistedState(): PersistedKnockAnalysisState {
     lunchReturnTime: lunchDefaults.lunchReturnTime,
     endTime: lunchDefaults.endTime,
     asOfTime: lunchDefaults.asOfTime,
+    customGapMinutesRaw: "",
   };
   if (typeof window === "undefined") return fallback;
   try {
@@ -473,6 +490,8 @@ function readPersistedState(): PersistedKnockAnalysisState {
           : modeDefaults.lunchReturnTime,
       endTime: typeof parsed.endTime === "string" ? parsed.endTime : modeDefaults.endTime,
       asOfTime: typeof parsed.asOfTime === "string" ? parsed.asOfTime : currentLaTimeHm(),
+      customGapMinutesRaw:
+        typeof parsed.customGapMinutesRaw === "string" ? parsed.customGapMinutesRaw : "",
     };
   } catch {
     return fallback;
@@ -834,6 +853,7 @@ function ReportResults({
   onTabChange,
   reportMode,
   shiftSettings,
+  customGapMinutes,
   excludedLeads,
   excludedCanvassers,
   onCopyText,
@@ -845,6 +865,8 @@ function ReportResults({
   onTabChange: (tab: ResultsTab) => void;
   reportMode: KnockAnalysisReportMode;
   shiftSettings: KnockShiftSettings;
+  /** When set, an extra gap list is shown for gaps at or above this many minutes. */
+  customGapMinutes: number | null;
   excludedLeads: CanvasserGapStats[];
   excludedCanvassers: Set<string>;
   onCopyText: CopyTextHandler;
@@ -862,9 +884,15 @@ function ReportResults({
   const stoppedEarly = shiftRows.filter((row) => row.isStoppedEarly).sort(
     (a, b) => (b.minutesEarlyBeforeEnd ?? 0) - (a.minutesEarlyBeforeEnd ?? 0)
   );
+  const customGaps =
+    customGapMinutes === null
+      ? []
+      : result.gapDetails.filter((gap) => gap.gapMinutes >= customGapMinutes);
   const hourGaps = result.hourGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes >= 60);
   const outlierGaps = result.outlierGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes >= 120);
   const modeLabel = reportMode === "lunch" ? "First / Lunch Gap Report" : "Last Knocks / Final Gap Report";
+  const gapsTabLabel =
+    customGapMinutes === null ? "Gaps 1h / 2h+" : `Gaps ${customGapMinutes}m / 1h / 2h+`;
   const summaryTiles = [
     {
       label: "Valid knock events",
@@ -879,7 +907,10 @@ function ReportResults({
     {
       label: "Gaps over 1 hour",
       value: formatNumber(result.summary.gapsOver60 ?? hourGaps.length),
-      help: `${formatNumber(result.summary.outlierGapsOver120 ?? outlierGaps.length)} outliers (2h+)`,
+      help:
+        customGapMinutes === null
+          ? `${formatNumber(result.summary.outlierGapsOver120 ?? outlierGaps.length)} outliers (2h+)`
+          : `${formatNumber(customGaps.length)} ≥ ${customGapMinutes}m · ${formatNumber(result.summary.outlierGapsOver120 ?? outlierGaps.length)} outliers (2h+)`,
     },
     {
       label: "Total gap time (>10m)",
@@ -962,7 +993,7 @@ function ReportResults({
           {reportMode === "lunch" ? "Lunch flags" : "Final flags"}
         </button>
         <button type="button" onClick={() => onTabChange("gaps")} className={tabClass("gaps")}>
-          Gaps 1h / 2h+
+          {gapsTabLabel}
         </button>
         <button type="button" onClick={() => onTabChange("pivot")} className={tabClass("pivot")}>
           Pivot
@@ -1000,6 +1031,14 @@ function ReportResults({
 
       {activeTab === "gaps" ? (
         <div className="space-y-4">
+          {customGapMinutes !== null ? (
+            <GapCards
+              title={`Gaps of ${customGapMinutes}+ minutes`}
+              emptyLabel={`No gaps of ${customGapMinutes} minutes or more for this report.`}
+              gaps={customGaps}
+              onCopyText={onCopyText}
+            />
+          ) : null}
           <GapCards
             title="Gaps over 1 hour"
             emptyLabel="No gaps of 1 hour or more for this report."
@@ -1052,6 +1091,7 @@ export default function CanvassingClient() {
   const [lunchReturnTime, setLunchReturnTime] = useState(initialState.lunchReturnTime);
   const [endTime, setEndTime] = useState(initialState.endTime);
   const [asOfTime, setAsOfTime] = useState(initialState.asOfTime);
+  const [customGapMinutesRaw, setCustomGapMinutesRaw] = useState(initialState.customGapMinutesRaw);
   const [loadingReports, setLoadingReports] = useState(true);
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1080,6 +1120,10 @@ export default function CanvassingClient() {
       asOfTime,
     }),
     [asOfTime, endTime, lunchClockOutTime, lunchReturnTime, reportMode, startTime]
+  );
+  const customGapMinutes = useMemo(
+    () => parseOptionalCustomGapMinutes(customGapMinutesRaw),
+    [customGapMinutesRaw]
   );
   const currentReportDate = activeReport?.reportDate || reportDate || currentResult?.summary.detectedReportDate || "";
   const currentReportTitle = currentResult
@@ -1117,12 +1161,14 @@ export default function CanvassingClient() {
       lunchReturnTime,
       endTime,
       asOfTime,
+      customGapMinutesRaw,
     };
     window.sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(state));
   }, [
     activeReport,
     activeResultsTab,
     asOfTime,
+    customGapMinutesRaw,
     endTime,
     excludedCanvassersRaw,
     lunchClockOutTime,
@@ -1470,6 +1516,27 @@ export default function CanvassingClient() {
                 </span>
               </label>
             ) : null}
+            <label className="block">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Also show gaps of at least (minutes)
+              </span>
+              <input
+                type="number"
+                min={CUSTOM_GAP_MIN_MINUTES}
+                max={CUSTOM_GAP_MAX_MINUTES}
+                value={customGapMinutesRaw}
+                onChange={(event) => setCustomGapMinutesRaw(event.target.value)}
+                placeholder="Optional, e.g. 40"
+                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+              />
+              <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
+                Leave blank for the default 1h / 2h gap lists only. Set a value (
+                {CUSTOM_GAP_MIN_MINUTES}–{CUSTOM_GAP_MAX_MINUTES}) to add an extra list for that threshold.
+                {customGapMinutesRaw.trim() && customGapMinutes === null
+                  ? ` Enter a whole number from ${CUSTOM_GAP_MIN_MINUTES} to ${CUSTOM_GAP_MAX_MINUTES}.`
+                  : ""}
+              </span>
+            </label>
           </div>
 
           <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-5 dark:border-violet-800 dark:bg-violet-950/20">
@@ -1636,6 +1703,7 @@ export default function CanvassingClient() {
           onTabChange={setActiveResultsTab}
           reportMode={reportMode}
           shiftSettings={shiftSettings}
+          customGapMinutes={customGapMinutes}
           excludedLeads={excludedLeads}
           excludedCanvassers={excludedCanvassers}
           onCopyText={(text, successMessage) => void copyTextToClipboard(text, successMessage)}

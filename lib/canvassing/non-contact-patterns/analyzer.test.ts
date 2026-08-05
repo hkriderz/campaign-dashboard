@@ -4,12 +4,19 @@ import fs from "fs";
 import path from "path";
 import type { CanvassingKnockEvent } from "../types";
 import { analyzeNonContactPatternEvents, detectTimestampResolution } from "./analyzer";
+import { computeTeamBaseline, scoreCanvassersAgainstBaseline } from "./baseline";
+import type { HistoricalReportDay } from "./historical";
 import {
+  classifyHouseholdMatch,
+  shouldSuppressAsHousehold,
   isSameHousehold,
   voterLastName,
   deriveStratumTag,
   isNonContactMobile,
+  dominantResponseShare,
 } from "./helpers";
+import { emptyGapHistogram } from "./histogram";
+import { METRICS_SCHEMA_VERSION, type CanvasserMetricsSnapshot } from "./types";
 
 function event(partial: Partial<CanvassingKnockEvent> & Pick<CanvassingKnockEvent, "canvasserName" | "voter" | "occurredAt" | "question">): CanvassingKnockEvent {
   return {
@@ -18,7 +25,7 @@ function event(partial: Partial<CanvassingKnockEvent> & Pick<CanvassingKnockEven
     phone: partial.phone ?? "",
     dateTimeRaw: partial.dateTimeRaw ?? partial.occurredAt,
     parseConfidence: 0.95,
-    response: partial.response ?? "",
+    response: partial.response ?? "Not Home",
     sourceFileId: "test",
     sourceFileName: "test.csv",
     sourceRowNumber: partial.sourceRowNumber ?? 1,
@@ -31,27 +38,45 @@ test("voterLastName takes last whitespace token", () => {
   assert.equal(voterLastName("  BRANDON BERMEO "), "BERMEO");
 });
 
-test("isSameHousehold matches shared phone or last name", () => {
+test("classifyHouseholdMatch: phone, last name, or none", () => {
   assert.equal(
-    isSameHousehold(
+    classifyHouseholdMatch(
       { phone: "714-638-0647", voter: "ALI LANDEROS LOPEZ" },
       { phone: "7146380647", voter: "LUCILA LANDEROS" }
     ),
-    true
+    "phone"
   );
+  assert.equal(
+    classifyHouseholdMatch(
+      { phone: "", voter: "GARY GONG" },
+      { phone: "", voter: "WU GONG" }
+    ),
+    "last_name"
+  );
+  assert.equal(
+    classifyHouseholdMatch(
+      { phone: "", voter: "BRANDON BERMEO" },
+      { phone: "7145346403", voter: "KAREN MILLAN" }
+    ),
+    "none"
+  );
+});
+
+test("shouldSuppressAsHousehold: phone or last_name always suppress", () => {
+  assert.equal(shouldSuppressAsHousehold("phone", 10), true);
+  assert.equal(shouldSuppressAsHousehold("last_name", 0), true);
+  assert.equal(shouldSuppressAsHousehold("last_name", 10), true);
+  assert.equal(shouldSuppressAsHousehold("none", 0), false);
+  assert.equal(shouldSuppressAsHousehold("none", 10), false);
+});
+
+test("isSameHousehold still true for phone or last name (legacy)", () => {
   assert.equal(
     isSameHousehold(
       { phone: "", voter: "GARY GONG" },
       { phone: "", voter: "WU GONG" }
     ),
     true
-  );
-  assert.equal(
-    isSameHousehold(
-      { phone: "", voter: "BRANDON BERMEO" },
-      { phone: "7145346403", voter: "KAREN MILLAN" }
-    ),
-    false
   );
 });
 
@@ -117,14 +142,46 @@ test("streak accumulation and non-contact flags", () => {
 
   const result = analyzeNonContactPatternEvents(events);
   assert.equal(result.summary.timestampResolution, "second");
-  assert.equal(result.flaggedNonContactRows.length, 4);
-  const streaks = result.flaggedNonContactRows.map((r) => r.streakLength);
+  assert.equal(result.flaggedNonContactRows.filter((r) => r.rapidNonContactFlag).length, 4);
+  const streaks = result.flaggedNonContactRows
+    .filter((r) => r.rapidNonContactFlag)
+    .map((r) => r.streakLength);
   assert.deepEqual(streaks, [1, 2, 3, 4]);
   assert.equal(result.canvasserSummaries[0]?.longestRapidNonContactStreak, 4);
   assert.equal(result.canvasserSummaries[0]?.streakAlert, true);
+  assert.equal(result.canvasserSummaries[0]?.burstAlert, true);
+  assert.ok((result.canvasserSummaries[0]?.maxBurstCount ?? 0) >= 5);
 });
 
-test("same-timestamp household batch is not flagged", () => {
+test("same-second different households are not flagged (gap 0 is not a PDI rapid mark)", () => {
+  const ts = "2026-07-21T13:20:52.000-07:00";
+  const events = [
+    event({
+      canvasserName: "Fast, Marker",
+      voter: "ALPHA ONE",
+      phone: "111",
+      occurredAt: ts,
+      question: "Non-Contact Mobile",
+      sourceRowNumber: 1,
+    }),
+    event({
+      canvasserName: "Fast, Marker",
+      voter: "BETA TWO",
+      phone: "222",
+      occurredAt: ts,
+      question: "Non-Contact Mobile",
+      sourceRowNumber: 2,
+    }),
+  ];
+  const result = analyzeNonContactPatternEvents(events);
+  assert.equal(result.enrichedRows[0]?.gapToNextSeconds, 0);
+  assert.equal(result.enrichedRows[0]?.rapidNonContactFlag, false);
+  assert.equal(result.flaggedNonContactRows.filter((r) => r.rapidNonContactFlag).length, 0);
+  assert.equal(result.canvasserSummaries[0]?.maxBurstCount, 1);
+  assert.equal(result.canvasserSummaries[0]?.burstAlert, false);
+});
+
+test("same-timestamp same last-name household batch is not flagged", () => {
   const ts = "2026-07-21T13:20:52.000-07:00";
   const events = [
     event({
@@ -137,7 +194,7 @@ test("same-timestamp household batch is not flagged", () => {
     }),
     event({
       canvasserName: "Acosta, Carmen",
-      voter: "ALI LANDEROS LOPEZ",
+      voter: "MARIA LANDEROS",
       phone: "7146380647",
       occurredAt: ts,
       question: "Non-Contact Mobile",
@@ -146,15 +203,82 @@ test("same-timestamp household batch is not flagged", () => {
     event({
       canvasserName: "Acosta, Carmen",
       voter: "LUCILA LANDEROS",
-      phone: "7146380647",
+      phone: "5550001111",
       occurredAt: ts,
       question: "Non-Contact Mobile",
       sourceRowNumber: 3,
     }),
   ];
   const result = analyzeNonContactPatternEvents(events);
-  // gap 0 between same-timestamp rows → not flagged (requires 0 < gap)
-  assert.equal(result.flaggedNonContactRows.length, 0);
+  assert.equal(result.flaggedNonContactRows.filter((r) => r.rapidNonContactFlag).length, 0);
+  for (const row of result.enrichedRows) {
+    if (row.sameHouseholdAsNext) {
+      assert.equal(row.rapidNonContactFlag, false);
+      assert.equal(row.householdMatchKind, "last_name");
+    }
+  }
+});
+
+test("same last name with positive gap and different phones is not flagged", () => {
+  const events = [
+    event({
+      canvasserName: "Street, Common",
+      voter: "ANA GARCIA",
+      phone: "111",
+      occurredAt: "2026-07-21T13:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      sourceRowNumber: 1,
+    }),
+    event({
+      canvasserName: "Street, Common",
+      voter: "LUIS GARCIA",
+      phone: "222",
+      occurredAt: "2026-07-21T13:00:10.000-07:00",
+      question: "Non-Contact Mobile",
+      sourceRowNumber: 2,
+    }),
+  ];
+  const result = analyzeNonContactPatternEvents(events);
+  assert.equal(result.enrichedRows[0]?.householdMatchKind, "last_name");
+  assert.equal(result.enrichedRows[0]?.sameHouseholdAsNext, true);
+  assert.equal(result.enrichedRows[0]?.rapidNonContactFlag, false);
+});
+
+test("burst alerts across a 20s internal gap that breaks pairwise streak", () => {
+  // Gaps: 10, 10, 20, 10 — pairwise streak breaks at the 20s gap (>15),
+  // but all 5 marks fit in a 90s window.
+  const times = [
+    "2026-07-21T13:00:00.000-07:00",
+    "2026-07-21T13:00:10.000-07:00",
+    "2026-07-21T13:00:20.000-07:00",
+    "2026-07-21T13:00:40.000-07:00",
+    "2026-07-21T13:00:50.000-07:00",
+  ];
+  const events = times.map((occurredAt, i) =>
+    event({
+      canvasserName: "Burst, Case",
+      voter: `VOTER ${i}`,
+      phone: String(i + 1),
+      occurredAt,
+      question: "Non-Contact Mobile",
+      sourceRowNumber: i + 1,
+      response: "Not Home",
+    })
+  );
+  const result = analyzeNonContactPatternEvents(events);
+  const summary = result.canvasserSummaries[0]!;
+  assert.equal(summary.burstAlert, true);
+  assert.equal(summary.maxBurstCount, 5);
+  assert.ok(result.enrichedRows.every((r) => r.inBurstFlag));
+  // Pairwise rapid flags exist for 10s gaps but streak resets at 20s
+  assert.ok(summary.longestRapidNonContactStreak < 4);
+  assert.equal(summary.dominantRapidResponseShare, 1);
+  assert.equal(summary.rapidOrBurstResponseSample, 5);
+});
+
+test("dominantResponseShare helper", () => {
+  assert.equal(dominantResponseShare(["Not Home", "Not Home", "Moved"]), 2 / 3);
+  assert.equal(dominantResponseShare([]), null);
 });
 
 test("rapid contact flag for different contact voters within 30s", () => {
@@ -180,7 +304,7 @@ test("rapid contact flag for different contact voters within 30s", () => {
   ];
   const result = analyzeNonContactPatternEvents(events);
   assert.equal(result.flaggedContactRows.length, 1);
-  assert.equal(result.flaggedNonContactRows.length, 0);
+  assert.equal(result.flaggedNonContactRows.filter((r) => r.rapidNonContactFlag).length, 0);
 });
 
 test("minimum-denominator guard marks insufficient sample", () => {
@@ -207,6 +331,99 @@ test("minimum-denominator guard marks insufficient sample", () => {
   assert.equal(summary.rapidNonContactCount, 1);
   assert.equal(summary.rateSampleInsufficient, true);
   assert.equal(summary.rapidNonContactRate, null);
+});
+
+test("metrics snapshot includes nonContactRate and maxBurstCount (schema v2)", () => {
+  const events = Array.from({ length: 5 }, (_, i) =>
+    event({
+      canvasserName: "Snap, Shot",
+      voter: `V${i}`,
+      phone: String(i + 1),
+      occurredAt: `2026-07-21T13:00:${String(i * 2).padStart(2, "0")}.000-07:00`,
+      question: "Non-Contact Mobile",
+      sourceRowNumber: i + 1,
+    })
+  );
+  const result = analyzeNonContactPatternEvents(events);
+  assert.ok(result.metricsSnapshot);
+  assert.equal(result.metricsSnapshot!.schemaVersion, METRICS_SCHEMA_VERSION);
+  const snap = result.metricsSnapshot!.canvassers[0]!;
+  assert.equal(snap.totalRows, 5);
+  assert.equal(snap.nonContactRate, 1);
+  assert.ok(snap.maxBurstCount >= 5);
+});
+
+test("baseline medianNonContactRate from history; burst and uniformity tier signals", () => {
+  function daySnap(
+    reportDate: string,
+    canvassers: CanvasserMetricsSnapshot[]
+  ): HistoricalReportDay {
+    return {
+      reportId: reportDate,
+      reportDate,
+      name: reportDate,
+      rapidNonContactFlagCount: 0,
+      flaggedCanvasserCount: 0,
+      metricsSnapshot: {
+        schemaVersion: METRICS_SCHEMA_VERSION,
+        reportDate,
+        analyzedAt: `${reportDate}T12:00:00.000Z`,
+        timestampResolution: "second",
+        stratumTag: "eng",
+        sourceChecksum: "x",
+        teamGapHistogram: emptyGapHistogram(),
+        canvassers,
+      },
+    };
+  }
+
+  const peer = (name: string, ncRate: number): CanvasserMetricsSnapshot => ({
+    canvasserName: name,
+    totalRows: 100,
+    nonContactRowCount: Math.round(ncRate * 100),
+    nonContactRate: ncRate,
+    nonContactGapCount: 20,
+    rapidNonContactCount: 1,
+    rapidNonContactRate: 0.05,
+    longestStreak: 1,
+    rapidContactCount: 0,
+    maxBurstCount: 2,
+    gapHistogram: { ...emptyGapHistogram(), "30-60": 20 },
+    knocksPerHour: 20,
+    stratumTag: "eng",
+  });
+
+  const history = [
+    daySnap("2026-07-18", [peer("A", 0.4), peer("B", 0.5), peer("C", 0.45)]),
+    daySnap("2026-07-19", [peer("A", 0.42), peer("B", 0.48), peer("C", 0.5)]),
+    daySnap("2026-07-20", [peer("A", 0.41), peer("B", 0.49), peer("C", 0.46)]),
+  ];
+
+  const baseline = computeTeamBaseline(history);
+  assert.ok(baseline.medianNonContactRate !== null);
+  assert.ok(baseline.medianNonContactRate! > 0.3 && baseline.medianNonContactRate! < 0.6);
+
+  const burstEvents = Array.from({ length: 5 }, (_, i) =>
+    event({
+      canvasserName: "Burst, Peer",
+      voter: `V${i}`,
+      phone: String(i + 1),
+      occurredAt: `2026-07-21T14:00:${String(i * 3).padStart(2, "0")}.000-07:00`,
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      sourceRowNumber: i + 1,
+    })
+  );
+  const analyzed = analyzeNonContactPatternEvents(burstEvents);
+  const scores = scoreCanvassersAgainstBaseline({
+    summaries: analyzed.canvasserSummaries,
+    baseline,
+    history,
+  });
+  const score = scores[0]!;
+  assert.equal(score.anomalyTier, 1);
+  assert.ok(score.signals.some((s) => /Burst alert/i.test(s)));
+  assert.ok(score.signals.some((s) => /Response uniformity/i.test(s)));
 });
 
 test("fixture integration: 7_22 CSV", async () => {
@@ -237,24 +454,26 @@ test("fixture integration: 7_22 CSV", async () => {
     bermeoFlag!.gapToNextSeconds !== null && bermeoFlag!.gapToNextSeconds <= 15
   );
 
-  // LANDEROS family shared phone / last name at same timestamp should not flag between members
-  const landerosFlags = result.flaggedNonContactRows.filter((r) =>
-    /LANDEROS/i.test(r.voter)
-  );
-  // May still appear if transitioning TO a non-household next row; ensure no LANDEROS→LANDEROS same-household rapid flags
+  // Same-household suppressions should never carry a rapid NC flag
   for (const row of result.enrichedRows.filter((r) => /LANDEROS/i.test(r.voter))) {
     if (row.sameHouseholdAsNext) {
       assert.equal(row.rapidNonContactFlag, false);
     }
   }
-  void landerosFlags;
 
   assert.ok(
     result.canvasserSummaries.some((s) => s.rapidNonContactCount > 0),
     "expected at least one canvasser with rapid flags"
   );
+  assert.ok(
+    result.canvasserSummaries.some((s) => s.maxBurstCount > 0),
+    "expected burst counts computed"
+  );
   assert.ok(result.metricsSnapshot, "expected metrics snapshot");
-  assert.equal(result.metricsSnapshot!.schemaVersion, 1);
+  assert.equal(result.metricsSnapshot!.schemaVersion, METRICS_SCHEMA_VERSION);
+  assert.ok(
+    result.metricsSnapshot!.canvassers.some((c) => typeof c.nonContactRate === "number")
+  );
 });
 
 test("isNonContactMobile ignores RESPONSE emptiness", () => {

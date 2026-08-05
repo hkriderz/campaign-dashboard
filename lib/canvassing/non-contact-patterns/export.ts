@@ -36,6 +36,9 @@ export async function buildNonContactPatternWorkbook(
       "Rapid Non-Contact Rate",
       "Longest Streak",
       "Streak Alert",
+      "Burst Max",
+      "Burst Alert",
+      "Response Uniformity %",
       "Rapid Contact Count",
       "Knocks/Hour",
       "Stratum",
@@ -54,6 +57,11 @@ export async function buildNonContactPatternWorkbook(
           : Number((s.rapidNonContactRate * 100).toFixed(1)),
       s.longestRapidNonContactStreak,
       s.streakAlert,
+      s.maxBurstCount,
+      s.burstAlert,
+      s.dominantRapidResponseShare === null
+        ? ""
+        : Number((s.dominantRapidResponseShare * 100).toFixed(1)),
       s.rapidContactCount,
       s.knocksPerHour === null ? "" : Number(s.knocksPerHour.toFixed(1)),
       s.stratumTag,
@@ -68,6 +76,7 @@ export async function buildNonContactPatternWorkbook(
       "Voter",
       "Next implied gap (s)",
       "Streak",
+      "In Burst",
       "Datetime",
       "Phone",
       "Assignment",
@@ -79,6 +88,7 @@ export async function buildNonContactPatternWorkbook(
       r.voter,
       r.gapToNextSeconds === null ? "" : Number(r.gapToNextSeconds.toFixed(1)),
       r.streakLength,
+      r.inBurstFlag,
       r.dateTimeRaw,
       r.phone,
       r.assignmentName,
@@ -123,9 +133,11 @@ export async function buildNonContactPatternWorkbook(
       "Last Name",
       "Datetime",
       "Gap to Next (s)",
+      "Household Match",
       "Same Household As Next",
       "Rapid Non-Contact",
       "Streak",
+      "In Burst",
       "Rapid Contact",
       "Question",
       "Response",
@@ -139,9 +151,11 @@ export async function buildNonContactPatternWorkbook(
       r.lastName,
       r.dateTimeRaw,
       r.gapToNextSeconds === null ? "" : Number(r.gapToNextSeconds.toFixed(1)),
+      r.householdMatchKind,
       r.sameHouseholdAsNext,
       r.rapidNonContactFlag,
       r.streakLength,
+      r.inBurstFlag,
       r.rapidContactFlag,
       r.question,
       r.response,
@@ -166,6 +180,7 @@ export async function buildNonContactPatternWorkbook(
         "Rapid Rate %",
         "0-15s Share %",
         "Longest Streak",
+        "Burst Max",
         "Anomaly Tier",
         "Composite Score",
         "Team Median Rate %",
@@ -184,6 +199,7 @@ export async function buildNonContactPatternWorkbook(
             ? ""
             : Number((score.rapidBucketShare0to15 * 100).toFixed(1)),
           s.longestRapidNonContactStreak,
+          s.maxBurstCount,
           score?.anomalyTier ?? "",
           score?.compositeScore ?? "",
           b.medianRapidRate === null ? "" : Number((b.medianRapidRate * 100).toFixed(1)),
@@ -226,6 +242,8 @@ export function resultToCsvBundle(result: NonContactPatternResult): string {
       "NonContactRows",
       "RapidNC",
       "LongestStreak",
+      "BurstMax",
+      "BurstAlert",
       "RapidContact",
       "RateOrNote",
     ].join(",")
@@ -243,6 +261,8 @@ export function resultToCsvBundle(result: NonContactPatternResult): string {
         s.nonContactRowCount,
         s.rapidNonContactCount,
         s.longestRapidNonContactStreak,
+        s.maxBurstCount,
+        s.burstAlert,
         s.rapidContactCount,
         csvEscape(rate),
       ].join(",")
@@ -250,7 +270,7 @@ export function resultToCsvBundle(result: NonContactPatternResult): string {
   }
   lines.push("");
   lines.push("=== Flagged Non-Contact ===");
-  lines.push("Canvasser,Voter,GapSeconds,Streak,Datetime");
+  lines.push("Canvasser,Voter,GapSeconds,Streak,InBurst,Datetime");
   for (const r of result.flaggedNonContactRows) {
     lines.push(
       [
@@ -258,6 +278,7 @@ export function resultToCsvBundle(result: NonContactPatternResult): string {
         csvEscape(r.voter),
         r.gapToNextSeconds ?? "",
         r.streakLength,
+        r.inBurstFlag,
         csvEscape(r.dateTimeRaw),
       ].join(",")
     );
@@ -265,7 +286,7 @@ export function resultToCsvBundle(result: NonContactPatternResult): string {
   return lines.join("\r\n");
 }
 
-function csvEscape(value: string | number): string {
+function csvEscape(value: string | number | boolean): string {
   const text = String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }

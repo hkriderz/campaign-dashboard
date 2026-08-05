@@ -1,8 +1,10 @@
 import type { CanvassingKnockEvent, CanvassingSourceFile, CanvassingValidationIssue } from "../types";
 
-export const METRICS_SCHEMA_VERSION = 1 as const;
+export const METRICS_SCHEMA_VERSION = 2 as const;
 export const MIN_NON_CONTACT_GAP_SAMPLE = 10;
 export const SECOND_RESOLUTION_MIN_SHARE = 0.8;
+export const MIN_UNIFORMITY_SAMPLE = 5;
+export const UNIFORMITY_TIER2_SHARE = 0.9;
 
 export type TimestampResolution = "second" | "minute";
 
@@ -18,25 +20,33 @@ export const GAP_HISTOGRAM_BUCKETS: GapHistogramBucket[] = [
   "150+",
 ];
 
+export type HouseholdMatchKind = "phone" | "last_name" | "none";
+
 export type NonContactPatternSettings = {
   rapidNonContactMaxSeconds: number;
   rapidContactMaxSeconds: number;
   streakAlertMin: number;
+  burstWindowSeconds: number;
+  burstMinMarks: number;
 };
 
 export const DEFAULT_NON_CONTACT_PATTERN_SETTINGS: NonContactPatternSettings = {
   rapidNonContactMaxSeconds: 15,
   rapidContactMaxSeconds: 30,
   streakAlertMin: 4,
+  burstWindowSeconds: 90,
+  burstMinMarks: 5,
 };
 
 export type EnrichedKnockRow = CanvassingKnockEvent & {
   lastName: string;
   gapToNextSeconds: number | null;
+  householdMatchKind: HouseholdMatchKind;
   sameHouseholdAsNext: boolean;
   rapidNonContactFlag: boolean;
   streakLength: number;
   rapidContactFlag: boolean;
+  inBurstFlag: boolean;
   isoDate: string | null;
 };
 
@@ -53,6 +63,11 @@ export type CanvasserPatternSummary = {
   longestRapidNonContactStreak: number;
   rapidContactCount: number;
   streakAlert: boolean;
+  maxBurstCount: number;
+  burstAlert: boolean;
+  /** Share of dominant RESPONSE among rapid-NC and/or burst NC rows; null if sample < 1 */
+  dominantRapidResponseShare: number | null;
+  rapidOrBurstResponseSample: number;
   firstKnockAt: string | null;
   lastKnockAt: string | null;
   knocksPerHour: number | null;
@@ -70,17 +85,21 @@ export type NonContactPatternSummary = {
   rapidNonContactFlagCount: number;
   rapidContactFlagCount: number;
   streakAlertCanvasserCount: number;
+  burstAlertCanvasserCount: number;
   settings: NonContactPatternSettings;
 };
 
 export type CanvasserMetricsSnapshot = {
   canvasserName: string;
+  totalRows: number;
   nonContactRowCount: number;
+  nonContactRate: number;
   nonContactGapCount: number;
   rapidNonContactCount: number;
   rapidNonContactRate: number | null;
   longestStreak: number;
   rapidContactCount: number;
+  maxBurstCount: number;
   gapHistogram: Record<GapHistogramBucket, number>;
   knocksPerHour: number | null;
   stratumTag: string;
