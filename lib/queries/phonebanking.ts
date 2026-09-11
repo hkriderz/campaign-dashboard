@@ -21,6 +21,7 @@ import {
   tagDailyCallerHasWorkBeyondLoggedHours,
 } from "../phonebank-session-work";
 import { canonicalizePhonebankerName } from "../phonebanker-name";
+import { stampAndKeepCampaignDayRawCalls } from "../raw-stw-calls";
 import {
   applyCallLevelStrongSupportToDailyCaller,
   candidateTermsForTag,
@@ -524,7 +525,7 @@ export async function fetchPhoneBankDetail(
       campaigns.id          AS campaign_id,
       campaigns.name        AS campaign_name,
       campaigns.created_at  AS campaign_created_date,
-      COUNT(calls.id)                 AS total_calls,
+      COUNTIF(DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}') AS total_calls,
       COUNT(DISTINCT calls.id)        AS total_dials,
       COUNT(DISTINCT calls.caller_id) AS unique_callers,
       SUM(CAST(calls.duration AS FLOAT64)) AS total_seconds,
@@ -617,12 +618,22 @@ export async function fetchPhoneBankDetail(
       LEFT JOIN \`${P}.${D}.calls\` AS calls ON callers.id = calls.caller_id
       WHERE callers.campaign_id = '${campaignId}'
       GROUP BY callers.name, CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE)
+    ),
+    raw_day_calls AS (
+      SELECT
+        CAST(DATETIME(calls.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
+        COUNT(*) AS total_calls
+      FROM \`${P}.${D}.calls\` AS calls
+      WHERE calls.campaign_id = '${campaignId}'
+        AND DATE(calls.created_at, 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+      GROUP BY 1
     )
 
     SELECT
       ds.call_date,
       ds.phonebanker_name,
       COALESCE(cc.num_dials, 0)  AS num_dials,
+      COALESCE(rdc.total_calls, 0) AS campaign_day_raw_calls,
       ds.total_call_seconds,
       ds.total_dialer_seconds,
       ds.earliest_login,
@@ -631,6 +642,8 @@ export async function fetchPhoneBankDetail(
     LEFT JOIN call_counts cc
       ON ds.call_date = cc.call_date
       AND ds.phonebanker_name = cc.phonebanker_name
+    LEFT JOIN raw_day_calls rdc
+      ON ds.call_date = rdc.call_date
     ORDER BY ds.call_date DESC, ds.phonebanker_name
   `;
 
@@ -649,6 +662,7 @@ export async function fetchPhoneBankDetail(
         callDate,
         phonebankerName,
         numDials: 0,
+        campaignDayRawCalls: 0,
         totalCallSeconds: 0,
         totalDialerSeconds: 0,
         totalCallHours: 0,
@@ -662,6 +676,7 @@ export async function fetchPhoneBankDetail(
     }
     const stat = dailyMap.get(key)!;
     stat.numDials += toNum(r.num_dials);
+    stat.campaignDayRawCalls = Math.max(stat.campaignDayRawCalls ?? 0, toNum(r.campaign_day_raw_calls));
     stat.totalCallSeconds += callSec;
     stat.totalDialerSeconds += dialSec;
     const earliest = toStr(r.earliest_login).slice(11, 19);
@@ -839,15 +854,16 @@ export async function fetchTagDailyCallerStats(
   requireDashboardDataAccess();
   if (snapshotsDisabled()) {
     const full = await fetchTagDailyCallerStatsUncached(tagId);
-    return full
+    return stampAndKeepCampaignDayRawCalls(full, tagDailyCallerHasWorkBeyondLoggedHours)
       .map(withDailyCallerMetricDefaults)
-      .filter(tagDailyCallerHasWorkBeyondLoggedHours)
       .sort(sortTagDailyCallerStats);
   }
 
   if (options?.snapshotFullRebuild) {
     const full = await fetchTagDailyCallerStatsUncached(tagId);
-    const rows = full.filter(tagDailyCallerHasWorkBeyondLoggedHours).sort(sortTagDailyCallerStats);
+    const rows = stampAndKeepCampaignDayRawCalls(full, tagDailyCallerHasWorkBeyondLoggedHours).sort(
+      sortTagDailyCallerStats
+    );
     saveDailyCallerSnapshot(tagId, rows, { touchEvenIfUnchanged: true });
     return rows.map(withDailyCallerMetricDefaults);
   }
@@ -861,7 +877,9 @@ export async function fetchTagDailyCallerStats(
       .sort(sortTagDailyCallerStats);
   }
   const full = await fetchTagDailyCallerStatsUncached(tagId);
-  const rows = full.filter(tagDailyCallerHasWorkBeyondLoggedHours).sort(sortTagDailyCallerStats);
+  const rows = stampAndKeepCampaignDayRawCalls(full, tagDailyCallerHasWorkBeyondLoggedHours).sort(
+    sortTagDailyCallerStats
+  );
   saveDailyCallerSnapshot(tagId, rows);
   return rows.map(withDailyCallerMetricDefaults);
 }
@@ -1229,13 +1247,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       mg.campaign_name,
       mg.call_date,
       mg.phonebanker_name,
-      CASE
-        WHEN ROW_NUMBER() OVER (
-          PARTITION BY mg.campaign_id, mg.call_date
-          ORDER BY mg.phonebanker_name
-        ) = 1 THEN COALESCE(rc.total_calls, 0)
-        ELSE 0
-      END AS total_calls,
+      COALESCE(rc.total_calls, 0) AS total_calls,
       COALESCE(cc.calls_answered, 0) AS calls_answered,
       COALESCE(cp.talking_to_correct_person, 0) AS talking_to_correct_person,
       COALESCE(sc.surveyed, 0) AS surveyed,
@@ -1300,7 +1312,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       });
     }
     const row = merged.get(key)!;
-    row.totalCalls += toNum(r.total_calls);
+    row.totalCalls = Math.max(row.totalCalls, toNum(r.total_calls));
     row.callsAnswered += toNum(r.calls_answered);
     row.talkingToCorrectPerson += toNum(r.talking_to_correct_person);
     row.surveyed += toNum(r.surveyed);

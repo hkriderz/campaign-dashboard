@@ -66,6 +66,7 @@ import {
   mergePhoneBankRowWithBqOutcomes,
 } from "@/lib/phonebanker-bq-outcomes";
 import { compareIsoDates, normalizeIsoDateRange } from "@/lib/validation/iso-date";
+import { rawStwCallsForCampaignDay } from "@/lib/raw-stw-calls";
 
 const ALL_CAMPAIGNS_PAGE_TAG: CampaignTag = {
   id: "_all_campaigns",
@@ -137,14 +138,13 @@ function buildOverviewPhoneBankRowsForSelectedDate(
     const ck = campaignGroupKey(slice.campaignId, slice.campaignName);
     const base = phoneBanksByCampaignKey.get(ck);
     const dm = callerMetricsBySlice[slice.sliceKey] ?? [];
-    let totalCalls = 0;
+    let totalCalls = base?.totalCalls ?? rawStwCallsForCampaignDay(dm);
     let totalDials = 0;
     let totalSurveyed = 0;
     let totalSeconds = 0;
     const bankerNames = new Set<string>();
     let campaignId = base?.campaignId ?? "";
     for (const r of dm) {
-      totalCalls += r.totalCalls ?? r.numDials;
       totalDials += r.numDials;
       totalSurveyed += r.surveyed;
       totalSeconds += r.totalCallSeconds;
@@ -153,7 +153,7 @@ function buildOverviewPhoneBankRowsForSelectedDate(
     }
     let uniqueCallers = bankerNames.size;
     if (dm.length === 0) {
-      totalCalls = slice.totalCalls;
+      if (base == null) totalCalls = slice.totalCalls;
       totalDials = slice.numDials;
       totalSurveyed = slice.surveyed;
       totalSeconds = slice.callSeconds;
@@ -307,7 +307,7 @@ export async function buildAllCampaignsDayDashboard(
       });
     }
     const agg = bqSliceMap.get(sliceKey)!;
-    agg.totalCalls += row.totalCalls ?? row.numDials;
+    agg.totalCalls = Math.max(agg.totalCalls, row.totalCalls ?? 0);
     agg.numDials += row.numDials;
     agg.pbers += 1;
     agg.callsAnswered += row.callsAnswered;

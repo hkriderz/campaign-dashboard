@@ -204,12 +204,12 @@ export function mergeTagDailyCallerStats(rows: TagDailyCallerStat[]): TagDailyCa
     if (!prev) {
       map.set(key, {
         ...r,
-        totalCalls: r.totalCalls ?? r.numDials,
+        totalCalls: r.totalCalls ?? 0,
         strongSupport: r.strongSupport ?? 0,
         strongSupportSynthesized: r.strongSupportSynthesized ?? 0,
       });
     } else {
-      prev.totalCalls = (prev.totalCalls ?? prev.numDials) + (r.totalCalls ?? r.numDials);
+      prev.totalCalls = Math.max(prev.totalCalls ?? 0, r.totalCalls ?? 0);
       prev.callsAnswered += r.callsAnswered;
       prev.talkingToCorrectPerson += r.talkingToCorrectPerson;
       prev.surveyed += r.surveyed;

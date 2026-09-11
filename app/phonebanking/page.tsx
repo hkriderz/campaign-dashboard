@@ -1,5 +1,9 @@
 import { Suspense } from "react";
-import { fetchAllActivePhoneBankSummaries, fetchTagDailyCallerStats } from "@/lib/queries/phonebanking";
+import {
+  fetchAllActivePhoneBankSummaries,
+  fetchPhoneBanksByTag,
+  fetchTagDailyCallerStats,
+} from "@/lib/queries/phonebanking";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import CandidateGrid from "@/components/phonebanking/CandidateGrid";
@@ -25,8 +29,16 @@ export default async function PhoneBankingPage() {
   try {
     candidates = await Promise.all(
       phonebankingTags.map(async (tag) => {
-        const rows = await fetchTagDailyCallerStats(tag.id);
-        return buildCandidateStatsFromDailyCallerStats(tag, rows, getTombstonedSliceKeys(tag.id));
+        const [rows, banks] = await Promise.all([
+          fetchTagDailyCallerStats(tag.id),
+          fetchPhoneBanksByTag(tag.id),
+        ]);
+        return buildCandidateStatsFromDailyCallerStats(
+          tag,
+          rows,
+          getTombstonedSliceKeys(tag.id),
+          banks
+        );
       })
     );
   } catch (err) {

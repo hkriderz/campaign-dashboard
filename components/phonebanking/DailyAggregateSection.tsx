@@ -124,6 +124,11 @@ type Props = {
   surveyScriptProfile: SurveyScriptProfile;
   /** When true, the parent owns date filtering — do not render an inner date picker. */
   hideDatePicker?: boolean;
+  /**
+   * Raw STW `calls` total for the current window. Required — do not sum slice.totalCalls
+   * (those banker leftovers undercount until the daily-caller snapshot is rebuilt).
+   */
+  totalCalls: number;
 };
 
 function slotCellClass(isTraciViolation: boolean): string {
@@ -154,6 +159,7 @@ export default function DailyAggregateSection({
   aggregateScopeRows,
   surveyScriptProfile,
   hideDatePicker = false,
+  totalCalls,
 }: Props) {
   const router = useRouter();
   const [layout, setLayout] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
@@ -201,13 +207,12 @@ export default function DailyAggregateSection({
     (acc, s) => {
       acc.phoneBanks += 1;
       acc.pbers += s.pbers;
-      acc.totalCalls += s.totalCalls;
       acc.callsAnswered += s.callsAnswered;
       acc.loggedInSeconds += s.loggedInSeconds;
       acc.callSeconds += s.callSeconds;
       return acc;
     },
-    { phoneBanks: 0, pbers: 0, totalCalls: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
+    { phoneBanks: 0, pbers: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
   );
 
   const pberCount = uniquePhonebankers > 0 ? uniquePhonebankers : totals.pbers;
@@ -442,7 +447,7 @@ export default function DailyAggregateSection({
         <div className="daily-aggregate-card__metrics border-b border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           <div>{totals.phoneBanks} Phone Banks</div>
           <div>{pberCount} PBers</div>
-          <div>{totals.totalCalls.toLocaleString()} Total Calls</div>
+          <div>{totalCalls.toLocaleString()} Total Calls</div>
           <div className="sm:col-span-2 xl:col-span-1">
             {secToTime(totals.loggedInSeconds)} Time logged in{" "}
             <span className="text-gray-600 dark:text-gray-400">({hrsPerPber} hrs/pber)</span>

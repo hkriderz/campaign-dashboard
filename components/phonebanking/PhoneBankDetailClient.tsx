@@ -53,7 +53,7 @@ export default function PhoneBankDetailClient({ detail, tagColor: _tagColor }: P
     const callers = new Set(scopedRows.map((r) => r.phonebankerName));
     const surveyed = scopedRows.reduce((s, r) => s + r.surveyed, 0);
     const callSeconds = scopedRows.reduce((s, r) => s + r.totalCallSeconds, 0);
-    const dayCalls = scopedRows.reduce((s, r) => s + r.numDials, 0);
+    const dayCalls = scopedRows.reduce((max, r) => Math.max(max, r.campaignDayRawCalls ?? 0), 0);
     return {
       phoneBanks: 1,
       totalCalls: selectedDate ? dayCalls : detail.campaign.totalCalls,

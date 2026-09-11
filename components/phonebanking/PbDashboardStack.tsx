@@ -467,11 +467,11 @@ function computeSliceRenderModel(
     const key = canonicalizePhonebankerName(r.phonebankerName);
     const prev = metricsByBanker.get(key);
     if (!prev) {
-      metricsByBanker.set(key, { ...r, phonebankerName: key, totalCalls: r.totalCalls ?? r.numDials });
+      metricsByBanker.set(key, { ...r, phonebankerName: key, totalCalls: r.totalCalls ?? 0 });
     } else {
       metricsByBanker.set(key, {
         ...prev,
-        totalCalls: (prev.totalCalls ?? prev.numDials) + (r.totalCalls ?? r.numDials),
+        totalCalls: Math.max(prev.totalCalls ?? 0, r.totalCalls ?? 0),
         callsAnswered: prev.callsAnswered + r.callsAnswered,
         talkingToCorrectPerson: prev.talkingToCorrectPerson + r.talkingToCorrectPerson,
         surveyed: prev.surveyed + r.surveyed,

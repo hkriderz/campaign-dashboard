@@ -223,6 +223,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           aggregateScopeRows={d.aggregateScopeRows}
           surveyScriptProfile={d.surveyScriptProfile}
           hideDatePicker
+          totalCalls={d.overviewPhoneBanks.reduce((sum, bank) => sum + bank.totalCalls, 0)}
         />
       ) : null}
 

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { withApiHandler } from "@/lib/api/http";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
-import { fetchTagDailyCallerStats } from "@/lib/queries/phonebanking";
+import { fetchPhoneBanksByTag, fetchTagDailyCallerStats } from "@/lib/queries/phonebanking";
 import { getTombstonedSliceKeys } from "@/lib/csv-slice-tombstones";
 import { buildCandidateStatsFromDailyCallerStats } from "@/lib/phonebanking-candidate-stats";
 
@@ -16,8 +16,16 @@ export async function GET(req: NextRequest) {
     const phonebankingTags = getPhonebankingTags();
     const stats = await Promise.all(
       phonebankingTags.map(async (tag) => {
-        const rows = await fetchTagDailyCallerStats(tag.id);
-        return buildCandidateStatsFromDailyCallerStats(tag, rows, getTombstonedSliceKeys(tag.id));
+        const [rows, banks] = await Promise.all([
+          fetchTagDailyCallerStats(tag.id),
+          fetchPhoneBanksByTag(tag.id),
+        ]);
+        return buildCandidateStatsFromDailyCallerStats(
+          tag,
+          rows,
+          getTombstonedSliceKeys(tag.id),
+          banks
+        );
       })
     );
 

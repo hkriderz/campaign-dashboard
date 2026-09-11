@@ -88,6 +88,8 @@ export type PhonebankerDailyStat = {
   callDate: string;
   phonebankerName: string;
   numDials: number;
+  /** Campaign-day raw STW `calls.created_at` count (same on every banker that day). */
+  campaignDayRawCalls?: number;
   totalCallSeconds: number;
   totalDialerSeconds: number;
   totalCallHours: number;
@@ -116,7 +118,10 @@ export type TagDailyCallerStat = {
   campaignName: string;
   callDate: string;
   phonebankerName: string;
-  /** Raw call rows from Scale to Win's `calls` table at campaign/day/caller grain. */
+  /**
+   * Raw STW `calls` rows for this campaign-day (duplicated on every banker after stamp).
+   * Roll up with MAX per campaign-day — never SUM across bankers.
+   */
   totalCalls: number;
   callsAnswered: number;
   talkingToCorrectPerson: number;
