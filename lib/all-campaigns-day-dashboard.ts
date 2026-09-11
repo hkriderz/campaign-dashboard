@@ -5,9 +5,20 @@
  * Uses per-tag BigQuery snapshots/APIs and merges CSV rows from every tag’s upload — matching candidate pages.
  */
 
-import { getPhonebankingTags } from "@/lib/campaign-tags";
+import {
+  getPhonebankingTags,
+  resolveSurveyScriptProfile,
+  tagUsesVerbatimFinalResultAggregate,
+} from "@/lib/campaign-tags";
 import type { DashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
 import { getDashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
+import type { AggregateAnswerLine } from "@/lib/daily-aggregate-survey-rollup";
+import {
+  mergeAggregateAnswerLines,
+  rollupPollingAndFinalAnswers,
+} from "@/lib/daily-aggregate-survey-rollup";
+import type { AggregateScopeQuestionRow } from "@/lib/daily-aggregate-question-rollups";
+import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
 import {
   fetchTagDailyCallerStats,
   fetchTagPhonebankerQuestionStats,
@@ -67,10 +78,28 @@ export type AllCampaignsDayDashboardPayload = {
   mergedRowsForPhonebankers: PhoneBankCsvRow[];
   surveyScriptProfile: SurveyScriptProfile;
   aggregateLexicon: DashboardAggregateLexicon;
+  aggregateScopeRows: AggregateScopeQuestionRow[];
+  uniquePhonebankers: number;
+  bqPollingBreakdown: AggregateAnswerLine[];
+  bqFinalResultBreakdown: AggregateAnswerLine[];
+  finalResultFromCallFill: boolean;
   syntheticPivotAllowlistByQuestion?: Record<string, readonly string[]>;
   widePivotHeaderOrderHint?: readonly string[];
   extraWideColumnOrder?: string[];
 };
+
+function countUniquePhonebankersForSliceKeys(
+  rows: TagDailyCallerStat[],
+  sliceKeys: ReadonlySet<string>
+): number {
+  const names = new Set<string>();
+  for (const r of rows) {
+    const sk = makeSliceKey(r.campaignName, r.callDate);
+    if (!sliceKeys.has(sk)) continue;
+    names.add(canonicalizePhonebankerName(r.phonebankerName));
+  }
+  return names.size;
+}
 
 function blankCsvRow(): PhoneBankCsvRow {
   return {
@@ -511,6 +540,7 @@ export async function buildAllCampaignsDayDashboard(
       callsAnswered: row.callsAnswered,
       talkingToCorrectPerson: row.correctPerson,
       surveyed: row.surveyed,
+      strongSupport: row.finalSS,
       numDials: row.callsAnswered,
       totalCallSeconds: parseTimeToSec(row.timeInCalls),
       totalDialerSeconds: parseTimeToSec(row.hoursLoggedIn),
@@ -533,6 +563,40 @@ export async function buildAllCampaignsDayDashboard(
   const extraWideColumnOrder = headerOrders
     .reduce((acc, cur) => (cur.length > acc.length ? cur : acc), [] as string[]);
 
+  const pollingGroups: AggregateAnswerLine[][] = [];
+  const finalGroups: AggregateAnswerLine[][] = [];
+  for (const tr of tagResults) {
+    const profile = resolveSurveyScriptProfile(tr.tag);
+    const tagRows = tr.questions.filter((r) => isoDateInRange(r.callDate, startDate, endDate));
+    const rollup = rollupPollingAndFinalAnswers(tagRows, {
+      sliceKeys: aggregateSliceKeys,
+      dateFilter: null,
+      surveyScriptProfile: profile,
+    });
+    let polling = rollup.polling;
+    let finalResult = rollup.finalResult;
+    if (polling.length > 0) {
+      polling = consolidateSurveyAnswerLines(polling, profile);
+    }
+    if (finalResult.length > 0 && !tagUsesVerbatimFinalResultAggregate(tr.tag)) {
+      finalResult = consolidateSurveyAnswerLines(finalResult, profile);
+    }
+    if (polling.length) pollingGroups.push(polling);
+    if (finalResult.length) finalGroups.push(finalResult);
+  }
+
+  const aggregateScopeRows: AggregateScopeQuestionRow[] = [];
+  for (const [sk, rows] of Object.entries(questionRowsBySlice)) {
+    if (!aggregateSliceKeys.has(sk)) continue;
+    for (const r of rows) {
+      aggregateScopeRows.push({
+        questionName: r.questionName,
+        answerValue: r.answerValue,
+        responseCount: r.responseCount,
+      });
+    }
+  }
+
   return {
     overviewPhoneBanks,
     filteredSlices,
@@ -541,6 +605,11 @@ export async function buildAllCampaignsDayDashboard(
     mergedRowsForPhonebankers,
     surveyScriptProfile,
     aggregateLexicon,
+    aggregateScopeRows,
+    uniquePhonebankers: countUniquePhonebankersForSliceKeys(bqDailyCaller, aggregateSliceKeys),
+    bqPollingBreakdown: mergeAggregateAnswerLines(pollingGroups),
+    bqFinalResultBreakdown: mergeAggregateAnswerLines(finalGroups),
+    finalResultFromCallFill: false,
     syntheticPivotAllowlistByQuestion,
     widePivotHeaderOrderHint: bestWideRef.length ? bestWideRef : undefined,
     extraWideColumnOrder: extraWideColumnOrder.length ? extraWideColumnOrder : undefined,

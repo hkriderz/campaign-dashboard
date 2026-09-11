@@ -45,17 +45,25 @@ export default async function PhoneBankCampaignOnlyPage({ params }: Props) {
         </span>
       </nav>
 
-      <div className="flex items-start gap-3 mb-6">
-        <span
-          className="w-4 h-4 rounded-full flex-shrink-0 mt-1"
-          style={{ backgroundColor: NEUTRAL_COLOR }}
-        />
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-snug">
-            {detail?.campaign.campaignName ?? "Phone Bank Details"}
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">All campaigns</p>
+      <div className="flex items-start justify-between gap-3 mb-6">
+        <div className="flex items-start gap-3 min-w-0">
+          <span
+            className="w-4 h-4 rounded-full flex-shrink-0 mt-1"
+            style={{ backgroundColor: NEUTRAL_COLOR }}
+          />
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-snug">
+              {detail?.campaign.campaignName ?? "Phone Bank Details"}
+            </h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">All campaigns</p>
+          </div>
         </div>
+        <Link
+          href="/phonebanking#all-campaigns"
+          className="shrink-0 inline-flex items-center text-sm font-medium text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 px-3 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-gray-800 transition-colors whitespace-nowrap"
+        >
+          ← Back to all phonebanks
+        </Link>
       </div>
 
       {error ? (

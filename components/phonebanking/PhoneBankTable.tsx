@@ -47,7 +47,6 @@ export default function PhoneBankTable({
           <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Campaign Name</th>
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Total Calls</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Dials</th>
             {showSurveyed ? (
               <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">Surveyed</th>
             ) : null}
@@ -62,7 +61,7 @@ export default function PhoneBankTable({
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
           {phoneBanks.map((pb) => (
             <tr
-              key={pb.campaignId}
+              key={`${pb.campaignId || "none"}|${pb.campaignName}|${pb.firstCallDate ?? ""}|${pb.lastCallDate ?? ""}`}
               className="hover:bg-indigo-50/40 dark:hover:bg-gray-800 transition-colors"
             >
               <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100 max-w-xs">
@@ -76,9 +75,6 @@ export default function PhoneBankTable({
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
                 {fmt(pb.totalCalls)}
-              </td>
-              <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
-                {fmt(pb.totalDials)}
               </td>
               {showSurveyed ? (
                 <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
@@ -104,9 +100,9 @@ export default function PhoneBankTable({
                         ? `/phonebanking/${tagId}/${pb.campaignId}`
                         : `/phonebanking/c/${pb.campaignId}`
                     }
-                    className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium text-xs px-3 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-gray-800 transition-colors"
+                    className="inline-flex items-center gap-1 text-indigo-600 dark:text-indigo-300 hover:text-indigo-800 dark:hover:text-indigo-200 font-medium text-xs px-3 py-1.5 rounded-md border border-indigo-200 dark:border-indigo-700 hover:bg-indigo-50 dark:hover:bg-gray-800 transition-colors whitespace-nowrap"
                   >
-                    View →
+                    View Detailed Stats →
                   </Link>
                 ) : (
                   <span className="text-xs text-gray-400 dark:text-gray-500">—</span>

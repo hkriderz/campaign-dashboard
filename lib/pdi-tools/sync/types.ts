@@ -30,6 +30,7 @@ export type SyncRunOptions = {
   minRecords: number;
   mappingFileId: string;
   rollbackRun?: string;
+  channel?: "dialer" | "text";
 };
 
 export type SyncRunSummary = {

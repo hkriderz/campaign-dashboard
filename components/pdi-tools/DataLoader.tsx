@@ -11,7 +11,7 @@ import {
 import type { MappingOutput } from "@/lib/pdi-tools/types";
 
 export default function DataLoader() {
-  const { state, dispatch, refreshFromApi } = useApp();
+  const { state, dispatch, refreshFromApi, setChannel } = useApp();
   const mappingFileRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -47,15 +47,16 @@ export default function DataLoader() {
       state.pdiQuestions,
       state.stwData,
       state.questionMappings,
-      state.answerMappings
+      state.answerMappings,
+      state.channel
     );
-    const result = await saveMappingExportToApp(output);
+    const result = await saveMappingExportToApp(output, state.channel);
     if (result.ok) {
       setToast(`✓ Saved ${result.saved?.fileName ?? "mapping"} to pdi-mappings`);
     } else {
       setToast(result.error ?? "Export save failed");
     }
-    downloadMappingJson(output);
+    downloadMappingJson(output, state.channel);
   }
 
   const pdiCount = state.pdiQuestions.length;
@@ -67,7 +68,9 @@ export default function DataLoader() {
       <div className="flex-shrink-0 min-w-0">
         <p className="text-sm sm:text-[15px] font-bold text-green-600 dark:text-green-400 leading-tight">🗺 PDI Magic Mapper</p>
         <p className="text-[11px] text-gray-400 dark:text-zinc-500 leading-tight mt-0.5">
-          Scale to Win → PDI schema unifier
+          {state.channel === "text"
+            ? "STW Text tags → PDI flags · Nithya v1"
+            : "Scale to Win → PDI schema unifier"}
         </p>
       </div>
 
@@ -85,7 +88,36 @@ export default function DataLoader() {
 
       <div className="flex items-center gap-1.5">
         <CountPill label="PDI" count={pdiCount} unit="q" loaded={pdiCount > 0} />
-        <CountPill label="STW" count={stwCount} unit=" surveys" loaded={stwCount > 0} />
+        <CountPill
+          label="STW"
+          count={stwCount}
+          unit={state.channel === "text" ? " campaigns" : " surveys"}
+          loaded={stwCount > 0}
+        />
+        <div className="inline-flex rounded border border-gray-300 dark:border-zinc-600 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setChannel("dialer")}
+            className={`text-[11px] px-2 py-1 ${
+              state.channel === "dialer"
+                ? "bg-green-600 text-white"
+                : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+            }`}
+          >
+            Dialer
+          </button>
+          <button
+            type="button"
+            onClick={() => setChannel("text")}
+            className={`text-[11px] px-2 py-1 ${
+              state.channel === "text"
+                ? "bg-green-600 text-white"
+                : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+            }`}
+          >
+            Text
+          </button>
+        </div>
       </div>
 
       <div className="hidden sm:block w-px h-4 bg-gray-200 dark:bg-zinc-700/60 flex-shrink-0" />

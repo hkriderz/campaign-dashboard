@@ -49,7 +49,9 @@ function writeCsv(filePath: string, headers: string[], rows: Record<string, stri
 export function buildMappingReport(
   rows: SurveyResultRow[],
   maps: MappingMaps,
-  ledger: Set<string>
+  ledger: Set<string>,
+  acquisitionTypeId: string = ACQUISITION_TYPE_ID,
+  fallbackSurvey?: string
 ): {
   report: MappingReportRow[];
   payload: PdiFlagPayloadItem[];
@@ -98,7 +100,7 @@ export function buildMappingReport(
       continue;
     }
 
-    const qid = getQuestionId(maps, survey, question);
+    const qid = getQuestionId(maps, survey, question, fallbackSurvey);
     if (!qid) {
       reportRow.mapping_status = "UNMAPPED: Question not in mapping";
       rowsSkipped += 1;
@@ -106,7 +108,7 @@ export function buildMappingReport(
       continue;
     }
 
-    const flagId = getFlagStrict(maps, survey, question, answer);
+    const flagId = getFlagStrict(maps, survey, question, answer, fallbackSurvey);
     if (!flagId) {
       reportRow.mapping_status = "UNMAPPED_ANSWER: Answer is not explicitly mapped";
       rowsSkipped += 1;
@@ -120,7 +122,7 @@ export function buildMappingReport(
 
     reportRow.questionId = qid;
     reportRow.flagId = flagId;
-    reportRow.acquisitionTypeId = ACQUISITION_TYPE_ID;
+    reportRow.acquisitionTypeId = acquisitionTypeId;
     reportRow.flagEntryDate = flagDateStr;
 
     if (ledger.has(key)) {
@@ -150,7 +152,7 @@ export function buildMappingReport(
       pdiId,
       questionId: qid,
       flagId,
-      acquisitionTypeId: ACQUISITION_TYPE_ID,
+      acquisitionTypeId,
       flagEntryDate: flagDateStr,
     });
     report.push(reportRow);

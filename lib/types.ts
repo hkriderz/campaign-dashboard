@@ -62,6 +62,10 @@ export type PhoneBankSummary = {
   firstCallDate: string | null;
   lastCallDate: string | null;
   campaignCreatedDate: string;
+  /** Logged-in / dialer hours — set on the campaign detail page. */
+  totalDialerHours?: number;
+  /** Final Result strong support — set on the campaign detail page. */
+  totalStrongSupport?: number;
 };
 
 export type CandidateStats = {
@@ -88,6 +92,8 @@ export type PhonebankerDailyStat = {
   totalDialerSeconds: number;
   totalCallHours: number;
   totalDialerHours: number;
+  surveyed: number;
+  strongSupport: number;
   earliestLogin: string;
   latestLogout: string;
 };
@@ -97,6 +103,8 @@ export type PhonebankerAggregateStat = {
   totalDials: number;
   totalCallHours: number;
   totalDialerHours: number;
+  surveyed: number;
+  strongSupport: number;
   daysWorked: number;
   campaigns: string[];
 };
@@ -111,6 +119,8 @@ export type TagDailyCallerStat = {
   callsAnswered: number;
   talkingToCorrectPerson: number;
   surveyed: number;
+  /** Distinct STW calls this session that recorded a strong-support / Support [candidate] outcome. */
+  strongSupport: number;
   /** Distinct dials (calls rows) for this session day — keeps minimal real sessions with 0 STW call seconds. */
   numDials: number;
   totalCallSeconds: number;
@@ -251,3 +261,33 @@ export const EMPTY_CSV_ROW: Omit<PhoneBankCsvRow, 'date' | 'phoneBankName' | 'ca
 export type ApiResponse<T> =
   | { ok: true; data: T }
   | { ok: false; error: string; code: number };
+
+// ─── Texting (STW Text) ───────────────────────────────────────────────────────
+
+export type TextCampaignUiStatus = "Complete" | "Pending";
+
+export type TextCampaignSummary = {
+  campaignId: string;
+  campaignName: string;
+  rawStatus: string;
+  status: TextCampaignUiStatus;
+  contactCount: number;
+  startedAt: string | null;
+  createdAt: string | null;
+};
+
+export type TextContactTagStat = {
+  campaignId: string;
+  campaignName: string;
+  tagName: string;
+  tagCount: number;
+  uniqueContacts: number;
+};
+
+export type TextCandidateStats = {
+  tag: CampaignTag;
+  campaignCount: number;
+  contactCount: number;
+  completeCount: number;
+  pendingCount: number;
+};

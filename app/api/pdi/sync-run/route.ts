@@ -18,6 +18,7 @@ import {
 import { runPdiSyncEngine } from "@/lib/pdi-tools/sync/engine";
 import { createSyncRun } from "@/lib/pdi-tools/sync/run-registry";
 import { DEFAULT_MIN_RECORDS } from "@/lib/pdi-tools/sync/constants";
+import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
 import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 const MAX_CAPTURE_BYTES = 512 * 1024;
@@ -30,6 +31,7 @@ type SyncBody = {
   minRecords?: number;
   rollbackRun?: string;
   mappingFileId?: string;
+  channel?: "dialer" | "text";
 };
 
 type ValidatedSyncBody = SyncBody & {
@@ -187,7 +189,18 @@ export async function POST(req: Request) {
       if (!validation.ok) return validation.response;
       body = validation.body;
 
+      const channel = parsePdiSyncChannel(body.channel);
+
       if (usePythonEngine()) {
+        if (channel === "text") {
+          return NextResponse.json(
+            {
+              error: "The Python sync engine is Dialer-only. Use the TypeScript engine for text tags.",
+              code: 400,
+            },
+            { status: 400 }
+          );
+        }
         return runPythonSync(body, ctx);
       }
 
@@ -205,6 +218,7 @@ export async function POST(req: Request) {
             : DEFAULT_MIN_RECORDS,
         mappingFileId: body.mappingFileId?.trim() || "auto",
         rollbackRun: body.rollbackRun?.trim(),
+        channel,
       };
 
       void runWithCredentialContextAsync(ctx, () => runPdiSyncEngine(runId, options));

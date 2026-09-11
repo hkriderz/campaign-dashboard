@@ -3,6 +3,7 @@ import * as path from "path";
 import type { MappingOutput } from "@/lib/pdi-tools/types";
 import { listMappingFiles, resolveMappingFilePathById, validateMappingOutput } from "@/lib/pdi-tools/mapping-files";
 import { resolvePdiMappingsDir } from "@/lib/pdi-tools/sync-working-dir";
+import { isMappingFileForChannel, mappingFilePrefix, type PdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 export type MappingMaps = {
   mapping: MappingOutput;
@@ -44,7 +45,7 @@ export function buildMappingMaps(mapping: MappingOutput, mappingFilePath: string
   return { mapping, mappingFilePath, questionMap, answerMap, codeMap, flagIdToCode };
 }
 
-export function resolveAutoMappingPath(): string {
+export function resolveAutoMappingPath(channel: PdiSyncChannel = "dialer"): string {
   const mappingsDir = resolvePdiMappingsDir();
   if (!fs.existsSync(mappingsDir)) {
     throw new Error(
@@ -52,9 +53,10 @@ export function resolveAutoMappingPath(): string {
     );
   }
 
+  const prefix = mappingFilePrefix(channel);
   const candidates = fs
     .readdirSync(mappingsDir)
-    .filter((n) => n.toLowerCase().endsWith(".json") && n.toLowerCase().includes("stw_pdi_mapping"))
+    .filter((n) => isMappingFileForChannel(n, channel))
     .map((name) => {
       const absolutePath = path.join(mappingsDir, name);
       const stat = fs.statSync(absolutePath);
@@ -63,21 +65,22 @@ export function resolveAutoMappingPath(): string {
     .filter((c) => fs.statSync(c.absolutePath).isFile());
 
   if (candidates.length === 0) {
-    throw new Error(
-      "No mapping files found matching stw_pdi_mapping_*.json in pdi-mappings."
-    );
+    throw new Error(`No mapping files found matching ${prefix}_*.json in pdi-mappings.`);
   }
 
   candidates.sort((a, b) => b.mtime - a.mtime);
   return candidates[0]!.absolutePath;
 }
 
-export function loadMappingForSync(mappingFileId: string): MappingMaps {
+export function loadMappingForSync(
+  mappingFileId: string,
+  channel: PdiSyncChannel = "dialer"
+): MappingMaps {
   let mappingPath: string;
   if (!mappingFileId || mappingFileId === "auto") {
-    mappingPath = resolveAutoMappingPath();
+    mappingPath = resolveAutoMappingPath(channel);
   } else {
-    mappingPath = resolveMappingFilePathById(mappingFileId);
+    mappingPath = resolveMappingFilePathById(mappingFileId, channel);
   }
 
   const raw = fs.readFileSync(mappingPath, "utf-8");
@@ -94,8 +97,8 @@ export function loadMappingForSync(mappingFileId: string): MappingMaps {
 }
 
 /** Newest mapping anywhere (working dir + uploads) — for UI hints only. */
-export function newestMappingFromCatalog(): string | null {
-  const { files } = listMappingFiles();
+export function newestMappingFromCatalog(channel: PdiSyncChannel = "dialer"): string | null {
+  const { files } = listMappingFiles(channel);
   return files[0]?.absolutePath ?? null;
 }
 
@@ -115,11 +118,25 @@ export function getFlagStrict(
   maps: MappingMaps,
   survey: string,
   question: string,
-  answer: string
+  answer: string,
+  fallbackSurvey?: string
 ): string | undefined {
-  return maps.answerMap.get(mapKey([survey, question, answer]));
+  const hit = maps.answerMap.get(mapKey([survey, question, answer]));
+  if (hit) return hit;
+  const fallback = fallbackSurvey?.trim();
+  if (!fallback || fallback === survey) return undefined;
+  return maps.answerMap.get(mapKey([fallback, question, answer]));
 }
 
-export function getQuestionId(maps: MappingMaps, survey: string, question: string): string | undefined {
-  return maps.questionMap.get(mapKey([survey, question]));
+export function getQuestionId(
+  maps: MappingMaps,
+  survey: string,
+  question: string,
+  fallbackSurvey?: string
+): string | undefined {
+  const hit = maps.questionMap.get(mapKey([survey, question]));
+  if (hit) return hit;
+  const fallback = fallbackSurvey?.trim();
+  if (!fallback || fallback === survey) return undefined;
+  return maps.questionMap.get(mapKey([fallback, question]));
 }

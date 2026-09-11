@@ -78,15 +78,24 @@ function MapperBody() {
                 {state.loadError}
                 <br />
                 <br />
-                Use <strong className="text-gray-700 dark:text-zinc-300">⟳ Refresh</strong> for live BigQuery + PDI API, or load{" "}
-                <code className="bg-gray-100 dark:bg-zinc-800 px-1 rounded text-gray-700 dark:text-zinc-300">
-                  pdi_questions.ndjson
-                </code>{" "}
-                and{" "}
-                <code className="bg-gray-100 dark:bg-zinc-800 px-1 rounded text-gray-700 dark:text-zinc-300">
-                  stw_surveys.ndjson
-                </code>{" "}
-                from the Surveys tab (see <code className="px-1 rounded">PDI_TOOLS_DATA_DIR</code> in README).
+                {state.channel === "text" ? (
+                  <>
+                    Text mode loads Nithya tags from BigQuery (<code className="px-1 rounded">l11_stw_txt</code>). Use{" "}
+                    <strong className="text-gray-700 dark:text-zinc-300">⟳ Refresh</strong> after credentials are set.
+                  </>
+                ) : (
+                  <>
+                    Use <strong className="text-gray-700 dark:text-zinc-300">⟳ Refresh</strong> for live BigQuery + PDI API, or load{" "}
+                    <code className="bg-gray-100 dark:bg-zinc-800 px-1 rounded text-gray-700 dark:text-zinc-300">
+                      pdi_questions.ndjson
+                    </code>{" "}
+                    and{" "}
+                    <code className="bg-gray-100 dark:bg-zinc-800 px-1 rounded text-gray-700 dark:text-zinc-300">
+                      stw_surveys.ndjson
+                    </code>{" "}
+                    from the Surveys tab (see <code className="px-1 rounded">PDI_TOOLS_DATA_DIR</code> in README).
+                  </>
+                )}
               </p>
             </>
           ) : (

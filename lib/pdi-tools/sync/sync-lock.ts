@@ -3,14 +3,17 @@ import * as os from "node:os";
 import { BQ_LOCK_TABLE } from "./constants";
 import { escapeSqlStringLiteral } from "./sql-escape";
 import type { SyncLogger } from "./logger";
+import { parsePdiSyncChannel, syncLockKey, type PdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 const LOCK_TTL_SEC = 1800;
 
 type LockRow = { lock_key?: string; locked_by: string; locked_at: unknown };
 
+export type SyncLockKey = "global" | "text";
+
 export type SyncLockStatus = {
   table: string;
-  lockKey: "global";
+  lockKey: SyncLockKey;
   locked: boolean;
   lockedBy: string | null;
   lockedAt: string | null;
@@ -46,15 +49,20 @@ function lockHolderIdentity(): string {
   return `${user}@${os.hostname()}`;
 }
 
-export async function getSyncLockStatus(): Promise<SyncLockStatus> {
+function resolveLockKey(channel: PdiSyncChannel = "dialer"): SyncLockKey {
+  return syncLockKey(parsePdiSyncChannel(channel)) as SyncLockKey;
+}
+
+export async function getSyncLockStatus(channel: PdiSyncChannel = "dialer"): Promise<SyncLockStatus> {
+  const lockKey = resolveLockKey(channel);
   const rows = await runQuery<LockRow>(
-    `SELECT lock_key, locked_by, locked_at FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = 'global' LIMIT 1`
+    `SELECT lock_key, locked_by, locked_at FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = '${escapeSqlStringLiteral(lockKey)}' LIMIT 1`
   );
 
   if (rows.length === 0) {
     return {
       table: BQ_LOCK_TABLE,
-      lockKey: "global",
+      lockKey,
       locked: false,
       lockedBy: null,
       lockedAt: null,
@@ -69,7 +77,7 @@ export async function getSyncLockStatus(): Promise<SyncLockStatus> {
   const ageSeconds = Math.max(0, Math.floor((Date.now() - lockedAt.getTime()) / 1000));
   return {
     table: BQ_LOCK_TABLE,
-    lockKey: "global",
+    lockKey,
     locked: true,
     lockedBy: row.locked_by,
     lockedAt: lockedAt.toISOString(),
@@ -80,19 +88,32 @@ export async function getSyncLockStatus(): Promise<SyncLockStatus> {
 }
 
 export async function clearGlobalSyncLock(): Promise<void> {
-  await executeSql(`DELETE FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = 'global'`);
+  await clearSyncLock("dialer");
+}
+
+export async function clearSyncLock(channel: PdiSyncChannel = "dialer"): Promise<void> {
+  const lockKey = resolveLockKey(channel);
+  await executeSql(
+    `DELETE FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = '${escapeSqlStringLiteral(lockKey)}'`
+  );
 }
 
 /**
  * Advisory sync lock in BigQuery (parity with `stw_to_pdi.acquire_sync_lock`).
+ * Scoped by channel so Dialer and Text do not clear each other's locks.
  * On failure, logs a warning and returns true so the sync can proceed (Python behavior).
  */
-export async function acquireSyncLock(log: SyncLogger): Promise<boolean> {
+export async function acquireSyncLock(
+  log: SyncLogger,
+  channel: PdiSyncChannel = "dialer"
+): Promise<boolean> {
+  const lockKey = resolveLockKey(channel);
   const me = escapeSqlStringLiteral(lockHolderIdentity());
+  const keySql = escapeSqlStringLiteral(lockKey);
 
   try {
     const rows = await runQuery<LockRow>(
-      `SELECT locked_by, locked_at FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = 'global' LIMIT 1`
+      `SELECT locked_by, locked_at FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = '${keySql}' LIMIT 1`
     );
 
     if (rows.length > 0) {
@@ -108,10 +129,10 @@ export async function acquireSyncLock(log: SyncLogger): Promise<boolean> {
       log.info("Stale lock found — clearing and acquiring.");
     }
 
-    await executeSql(`TRUNCATE TABLE \`${BQ_LOCK_TABLE}\``);
+    await executeSql(`DELETE FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = '${keySql}'`);
     await executeSql(
       `INSERT INTO \`${BQ_LOCK_TABLE}\` (lock_key, locked_by, locked_at) ` +
-        `VALUES ('global', '${me}', CURRENT_TIMESTAMP())`
+        `VALUES ('${keySql}', '${me}', CURRENT_TIMESTAMP())`
     );
     return true;
   } catch (e) {
@@ -120,9 +141,15 @@ export async function acquireSyncLock(log: SyncLogger): Promise<boolean> {
   }
 }
 
-export async function releaseSyncLock(log: SyncLogger): Promise<void> {
+export async function releaseSyncLock(
+  log: SyncLogger,
+  channel: PdiSyncChannel = "dialer"
+): Promise<void> {
+  const lockKey = resolveLockKey(channel);
   try {
-    await executeSql(`TRUNCATE TABLE \`${BQ_LOCK_TABLE}\``);
+    await executeSql(
+      `DELETE FROM \`${BQ_LOCK_TABLE}\` WHERE lock_key = '${escapeSqlStringLiteral(lockKey)}'`
+    );
   } catch (e) {
     log.warn(`Failed to release sync lock: ${e instanceof Error ? e.message : String(e)}`);
   }

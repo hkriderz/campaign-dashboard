@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/pdi", label: "Overview" },
   { href: "/pdi/mapper", label: "Mapper" },
   { href: "/pdi/syncer", label: "Syncer" },
+  { href: "/pdi/text-syncer", label: "Text Syncer" },
 ] as const;
 
 export default function PdiSubNav() {

@@ -137,3 +137,16 @@ export function rollupPollingAndFinalAnswers(
 export function sumAnswerLines(lines: AggregateAnswerLine[]): number {
   return lines.reduce((s, x) => s + x.count, 0);
 }
+
+/** Combine independently rolled-up answer lists (e.g. per-tag polling) by label. */
+export function mergeAggregateAnswerLines(groups: readonly AggregateAnswerLine[][]): AggregateAnswerLine[] {
+  const map = new Map<string, number>();
+  for (const lines of groups) {
+    for (const line of lines) {
+      const label = line.label.trim();
+      if (!label) continue;
+      map.set(label, (map.get(label) ?? 0) + line.count);
+    }
+  }
+  return sortAnswerLineMap(map);
+}

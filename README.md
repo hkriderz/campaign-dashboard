@@ -1,6 +1,6 @@
 # Campaign Operations Dashboard
 
-A unified Next.js dashboard for phone banking analytics, canvassing tracking, and PDI sync tools — all backed by Google BigQuery (Scale to Win data).
+A unified Next.js dashboard for phone banking analytics, texting support tags, canvassing tracking, and PDI sync tools — all backed by Google BigQuery (Scale to Win data).
 
 > **Refactored clone** (`campaign-dashboard-refactor`): modular API helpers, unified GCP credential bootstrap for Docker/VPS, `output: "standalone"` for Dokploy. See [DEPLOY.md](./DEPLOY.md) for production setup and [.env.example](./.env.example) for secrets-safe configuration.
 
@@ -26,6 +26,14 @@ A unified Next.js dashboard for phone banking analytics, canvassing tracking, an
 - **Phone bank detail** — Full per-phonebanker breakdown with session-merged hours (same logic as `phonebanker_daily_hours.py`)
 - **Bar chart** — Dials and call hours per phonebanker, filterable by day
 - **Day filter** — Click any date to narrow the chart and table to that session
+
+### Texting (STW Text)
+
+- **Candidate overview** — `/texting` lists the same sidebar candidates as phone banking (plus **Nithya Raman**), with campaign counts, contacts, and Complete/Pending send status
+- **Campaign table** — `/texting/[tag]` shows Name, Pending/Complete (`INITIAL_SEND_COMPLETE` = Complete), and contact counts
+- **Contact tags** — Support answers (Strong Support / Undecided / Neither / Strong Oppose) and a separate **Moved** block, formatted like phonebank survey rollups
+
+Text data is read from **`l11_stw_txt`** (override with `BQ_TEXT_DATASET`). It is never mixed into phonebank snapshots or `phonebanking-csv-*.json`.
 
 **Canvassing** is still a placeholder. **PDI Tools** are integrated under `/pdi` (overview, mapper, syncer).
 
@@ -58,9 +66,10 @@ Runtime requirements:
 
 | Route | Purpose |
 |-------|---------|
-| `/pdi` | Links to mapper and syncer |
-| `/pdi/mapper` | **Magic Mapper** — STW ↔ PDI question/answer mapping; exports `stw_pdi_mapping_*.json` (schema v2) |
-| `/pdi/syncer` | Runs `../pdiv3/stw_to_pdi.py` with `--non-interactive`; shows stdout/stderr (dry-run by default) |
+| `/pdi` | Links to mapper and both syncers |
+| `/pdi/mapper` | **Magic Mapper** — Dialer / Text toggle. Dialer lists phone surveys. Text lists every Nithya campaign (including untagged lists). **All lists** writes the shared `Nithya (STW Text)` mapping; **This list only** writes that campaign’s name. **Save mapping** stores a reusable Q&A template; opening the next list with the same questions and a similar campaign name auto-applies it. Exports `stw_pdi_mapping_*.json` or `stw_text_pdi_mapping_*.json` |
+| `/pdi/syncer` | Dialer TypeScript sync (dry-run by default). Optional `PDI_SYNC_ENGINE=python` for `stw_to_pdi.py` |
+| `/pdi/text-syncer` | Text-tag TypeScript sync. Same dry-run, incremental/range, stale lock, rollback, and reports as Dialer; own `state_key` / `lock_key` (`text`) |
 
 **Cached NDJSON:** Mapper “cached” loads use `pdi_questions.ndjson` + `stw_surveys.ndjson`. Resolution order: `PDI_TOOLS_DATA_DIR` (if both files exist), then `campaign-dashboard/pdi-data`, then `../pdiv3`, then `../MoonDough`.
 
@@ -68,7 +77,9 @@ Runtime requirements:
 
 **Live refresh:** Header **⟳ Refresh** in the Mapper calls BigQuery and the PDI Questions API. Configure GCP + PDI via the credentials folder or `GOOGLE_APPLICATION_CREDENTIALS` + `PDI_*` in `.env.local`.
 
-**Syncer:** Requires a local Python environment where `stw_to_pdi.py` runs (Parsons, `dotenv`, GCP + PDI credentials). Optional env: `PDI_STW_TO_PDI_SCRIPT` (absolute path to script), `PDI_STW_WORKING_DIR` (usually your `pdiv3` folder with mapping JSON + `.env`), `PYTHON_EXECUTABLE`. The dashboard injects the same resolved GCP/PDI env vars as the mapper APIs. Place the latest `stw_pdi_mapping_*.json` in that working directory before a real sync.
+**Syncer (Dialer):** TypeScript engine by default. Optional Python escape hatch: `PDI_STW_TO_PDI_SCRIPT`, `PDI_STW_WORKING_DIR`, `PYTHON_EXECUTABLE`, `PDI_SYNC_ENGINE=python`. Place the latest `stw_pdi_mapping_*.json` in `pdi-mappings/` before a real sync.
+
+**Text Syncer:** Mapper Text mode lists each Nithya text campaign in the sidebar, using the same Dec 1, 2025 window as `/texting/nithya`. Campaigns with no Support/Moved tags stay visible as **No tags yet** and cannot be opened until Refresh finds mappable tags. **All lists** maps raw STW tag names (`NithyaMayorYES`, …) on the shared survey `Nithya (STW Text)`. **This list only** stores the same keys on that campaign’s name. **Save mapping** on a question stores a template (display campaign name + PDI flags). Opening another list auto-applies that template only when the question name matches, the question is still unmapped, and the campaign titles are similar (`Nithya PAC` ↔ `Nithya HWLRA`; not `School Board GOTV`). **Delete saved mapping** removes the template only. Sync looks up the campaign first, then falls back to `Nithya (STW Text)`. `/pdi/text-syncer` reads `l11_stw_txt` (`campaign_contact_tags` + `campaign_contacts.data` PDI ids: `v1_pdiid` / `pdi_id` / `PDI ID`), skips empty PDI ids and non-Support/Moved tags, and posts the same `/flags` payload as Dialer except `acquisitionTypeId` is PDI **Text Bank** (Dialer uses **ScaletoWin Phone Bank**). Incremental cursor is `sync_state.state_key = 'text'`. Advisory lock is `lock_key = 'text'`. People-level dedupe is shared (`pdi_id|flag_code|flag_date`). Python parity is Dialer-only.
 
 ---
 
@@ -98,6 +109,8 @@ The defaults in `.env.local.example` already match your project. The file should
 GOOGLE_APPLICATION_CREDENTIALS=starlit-link-475400-s5-9b1224eed9dd.json
 GCP_PROJECT_ID=starlit-link-475400-s5
 BQ_DATASET=l11_stw
+# optional — defaults to l11_stw_txt
+# BQ_TEXT_DATASET=l11_stw_txt
 ```
 
 ### 3. Install dependencies
@@ -149,6 +162,10 @@ campaign-dashboard/
 │   ├── page.tsx                         # Landing / mode selector
 │   ├── layout.tsx                       # Root layout
 │   ├── globals.css
+│   ├── texting/
+│   │   ├── layout.tsx                   # Same sidebar candidates as phone banking
+│   │   ├── page.tsx                     # Candidate overview for STW Text
+│   │   └── [tag]/page.tsx               # Campaign table + contact-tag rollups
 │   ├── phonebanking/
 │   │   ├── layout.tsx                   # TopNav + Sidebar wrapper
 │   │   ├── page.tsx                     # Candidate overview grid
@@ -168,6 +185,10 @@ campaign-dashboard/
 │   ├── layout/
 │   │   ├── TopNav.tsx                   # Mode switcher nav bar
 │   │   └── Sidebar.tsx                  # Candidate list sidebar
+│   ├── texting/
+│   │   ├── TextCandidateGrid.tsx
+│   │   ├── TextCampaignTable.tsx
+│   │   └── TextTagRollup.tsx
 │   ├── phonebanking/
 │   │   ├── CandidateGrid.tsx            # Candidate card grid
 │   │   ├── PhoneBankTable.tsx           # Phone bank list table
@@ -186,20 +207,30 @@ campaign-dashboard/
     ├── campaign-tags.ts                 # Tag config + SQL helpers
     ├── types.ts                         # All TypeScript types
     └── queries/
-        └── phonebanking.ts             # BQ queries (TS port of Python scripts)
+        ├── phonebanking.ts             # Dialer BQ queries
+        └── texting.ts                  # STW Text BQ queries
 ```
 
 ---
 
 ## Data Sources
 
-All phone banking data comes from BigQuery:
+Phone banking data comes from the Dialer dataset (`BQ_DATASET`, default `l11_stw`):
 
 | Table | Used for |
 |---|---|
 | `l11_stw.campaigns` | Campaign names, IDs, creation dates |
 | `l11_stw.calls` | Dials, duration, caller/callee joins |
 | `l11_stw.callers` | Phonebanker sessions (login/logout times) |
+
+Texting data comes from the STW Text dataset (`BQ_TEXT_DATASET`, default `l11_stw_txt`):
+
+| Table | Used for |
+|---|---|
+| `l11_stw_txt.campaigns` | Text campaign name, send status, contact count |
+| `l11_stw_txt.campaign_contacts` | Contact-count fallback |
+| `l11_stw_txt.campaign_contact_tags` + `tags` | Support / moved tag rollups; PDI Text Syncer flag source |
+| `l11_stw_txt.campaign_contacts.data` | PDI person ids for Text Syncer (`v1_pdiid` / `pdi_id` / `PDI ID`) |
 
 The queries are TypeScript ports of:
 - `pdiv3/campaign_hours_dials.py` → campaign-level stats

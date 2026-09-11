@@ -6,7 +6,8 @@ import {
   resolveContextFromRequest,
   runWithCredentialContextAsync,
 } from "@/lib/credentials";
-import { clearGlobalSyncLock, getSyncLockStatus } from "@/lib/pdi-tools/sync/sync-lock";
+import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
+import { clearSyncLock, getSyncLockStatus } from "@/lib/pdi-tools/sync/sync-lock";
 
 async function withSyncLockAccess<T>(req: Request, fn: () => Promise<T>): Promise<Response> {
   const ctx = resolveContextFromRequest(req);
@@ -26,14 +27,16 @@ async function withSyncLockAccess<T>(req: Request, fn: () => Promise<T>): Promis
 }
 
 export async function GET(req: Request) {
-  return withSyncLockAccess(req, () => getSyncLockStatus());
+  const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
+  return withSyncLockAccess(req, () => getSyncLockStatus(channel));
 }
 
 export async function DELETE(req: Request) {
+  const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
   return withSyncLockAccess(req, async () => {
-    const previous = await getSyncLockStatus();
-    await clearGlobalSyncLock();
-    const current = await getSyncLockStatus();
+    const previous = await getSyncLockStatus(channel);
+    await clearSyncLock(channel);
+    const current = await getSyncLockStatus(channel);
     return { ok: true, previous, current };
   });
 }

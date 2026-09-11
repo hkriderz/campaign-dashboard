@@ -8,12 +8,14 @@ import type {
   OutputAnswerMapping,
 } from "./types";
 import { buildFlagRegistry } from "./flag-registry";
+import { mappingExportFileName as channelMappingFileName, type PdiSyncChannel } from "./channel";
 
 export function buildMappingOutput(
   pdiQuestions: PdiQuestion[],
   stwData: StwData,
   questionMappings: QuestionMappings,
-  answerMappings: AnswerMappings
+  answerMappings: AnswerMappings,
+  channel: PdiSyncChannel = "dialer"
 ): MappingOutput {
   const flagRegistry = buildFlagRegistry(pdiQuestions);
 
@@ -54,7 +56,10 @@ export function buildMappingOutput(
   return {
     schemaVersion: 2,
     generated: new Date().toISOString(),
-    description: "STW → PDI schema unification mapping (question-first model)",
+    description:
+      channel === "text"
+        ? "STW Text tags → PDI schema unification mapping (question-first model)"
+        : "STW → PDI schema unification mapping (question-first model)",
     stats: {
       totalQuestionMappings: outputQuestionMappings.length,
       totalAnswerMappings: outputAnswerMappings.length,
@@ -66,16 +71,18 @@ export function buildMappingOutput(
   };
 }
 
-export function mappingExportFileName(generatedIso?: string): string {
-  const date = (generatedIso ?? new Date().toISOString()).slice(0, 10);
-  return `stw_pdi_mapping_${date}.json`;
+export function mappingExportFileName(generatedIso?: string, channel: PdiSyncChannel = "dialer"): string {
+  return channelMappingFileName(channel, generatedIso);
 }
 
 export function serializeMappingJson(output: MappingOutput): string {
   return JSON.stringify(output, null, 2);
 }
 
-export async function saveMappingExportToApp(output: MappingOutput): Promise<{
+export async function saveMappingExportToApp(
+  output: MappingOutput,
+  channel: PdiSyncChannel = "dialer"
+): Promise<{
   ok: boolean;
   saved?: { fileName: string; absolutePath: string; id: string };
   mappingsDir?: string;
@@ -84,7 +91,7 @@ export async function saveMappingExportToApp(output: MappingOutput): Promise<{
   const res = await fetch("/api/pdi/mapping-export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mapping: output }),
+    body: JSON.stringify({ mapping: output, channel }),
   });
   const data = (await res.json()) as {
     ok?: boolean;
@@ -103,8 +110,8 @@ export async function saveMappingExportToApp(output: MappingOutput): Promise<{
   };
 }
 
-export function downloadMappingJson(output: MappingOutput): void {
-  const filename = mappingExportFileName(output.generated);
+export function downloadMappingJson(output: MappingOutput, channel: PdiSyncChannel = "dialer"): void {
+  const filename = mappingExportFileName(output.generated, channel);
   const blob = new Blob([serializeMappingJson(output)], {
     type: "application/json",
   });

@@ -6,6 +6,11 @@ import {
   migrateMappingFilesToMappingsDir,
   resolvePdiMappingsDir,
 } from "./sync-working-dir";
+import {
+  isMappingFileForChannel,
+  mappingExportFileName,
+  type PdiSyncChannel,
+} from "./channel";
 
 export type MappingFileSource = "mappings";
 
@@ -17,8 +22,6 @@ export type MappingFileEntry = {
   modifiedAt: string;
   sizeBytes: number;
 };
-
-const MAPPING_GLOB_PREFIX = "stw_pdi_mapping";
 
 function encodeId(fileName: string): string {
   return `mappings:${fileName}`;
@@ -44,15 +47,15 @@ export function decodeMappingFileId(id: string): { fileName: string } | null {
   return { fileName };
 }
 
-function isMappingFileName(name: string): boolean {
-  return name.toLowerCase().endsWith(".json") && name.toLowerCase().includes(MAPPING_GLOB_PREFIX);
+function isMappingFileName(name: string, channel: PdiSyncChannel = "dialer"): boolean {
+  return isMappingFileForChannel(name, channel);
 }
 
-function scanDir(dir: string): MappingFileEntry[] {
+function scanDir(dir: string, channel: PdiSyncChannel): MappingFileEntry[] {
   if (!fs.existsSync(dir)) return [];
   const entries: MappingFileEntry[] = [];
   for (const name of fs.readdirSync(dir)) {
-    if (!isMappingFileName(name)) continue;
+    if (!isMappingFileName(name, channel)) continue;
     const absolutePath = path.join(dir, name);
     let stat: fs.Stats;
     try {
@@ -73,17 +76,18 @@ function scanDir(dir: string): MappingFileEntry[] {
   return entries;
 }
 
-export function listMappingFiles(): {
+export function listMappingFiles(channel: PdiSyncChannel = "dialer"): {
   mappingsDir: string;
   /** @deprecated Use mappingsDir */
   exportsDir: string;
   workingDir: string;
   uploadsDir: string;
   files: MappingFileEntry[];
+  channel: PdiSyncChannel;
 } {
   migrateMappingFilesToMappingsDir();
   const mappingsDir = ensurePdiMappingsDir();
-  const files = scanDir(mappingsDir).sort(
+  const files = scanDir(mappingsDir, channel).sort(
     (a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime()
   );
 
@@ -93,13 +97,19 @@ export function listMappingFiles(): {
     workingDir: mappingsDir,
     uploadsDir: mappingsDir,
     files,
+    channel,
   };
 }
 
-export function resolveMappingFilePathById(id: string): string {
+export function resolveMappingFilePathById(id: string, channel?: PdiSyncChannel): string {
   const decoded = decodeMappingFileId(id);
   if (!decoded) {
     throw new Error("Invalid mapping file id.");
+  }
+  if (channel && !isMappingFileForChannel(decoded.fileName, channel)) {
+    throw new Error(
+      `Mapping file ${decoded.fileName} is not a ${channel} mapping (${channel === "text" ? "stw_text_pdi_mapping" : "stw_pdi_mapping"}).`
+    );
   }
 
   const baseDir = resolvePdiMappingsDir();
@@ -248,17 +258,22 @@ function pickUniqueFileName(dir: string, preferredName: string): string {
   return `${base}_${n}.json`;
 }
 
-export function defaultMappingExportFileName(generatedIso?: string): string {
-  const date = (generatedIso ?? new Date().toISOString()).slice(0, 10);
-  return `stw_pdi_mapping_${date}.json`;
+export function defaultMappingExportFileName(
+  generatedIso?: string,
+  channel: PdiSyncChannel = "dialer"
+): string {
+  return mappingExportFileName(channel, generatedIso);
 }
 
-export function saveMappingExport(output: MappingOutput): MappingFileEntry {
+export function saveMappingExport(
+  output: MappingOutput,
+  channel: PdiSyncChannel = "dialer"
+): MappingFileEntry {
   const content = JSON.stringify(output, null, 2);
   assertValidMappingJsonContent(content);
 
   const mappingsDir = ensurePdiMappingsDir();
-  const preferred = defaultMappingExportFileName(output.generated);
+  const preferred = defaultMappingExportFileName(output.generated, channel);
   const fileName = pickUniqueFileName(mappingsDir, preferred);
   const absolutePath = path.join(mappingsDir, fileName);
   fs.writeFileSync(absolutePath, content, "utf-8");
@@ -274,7 +289,11 @@ export function saveMappingExport(output: MappingOutput): MappingFileEntry {
   };
 }
 
-export function saveUploadedMappingFile(originalName: string, content: string): MappingFileEntry {
+export function saveUploadedMappingFile(
+  originalName: string,
+  content: string,
+  channel: PdiSyncChannel = "dialer"
+): MappingFileEntry {
   assertValidMappingJsonContent(content);
 
   const safeBase = path
@@ -282,9 +301,9 @@ export function saveUploadedMappingFile(originalName: string, content: string): 
     .replace(/[^a-zA-Z0-9._-]/g, "_")
     .replace(/^_+/, "");
   const preferred =
-    safeBase && isMappingFileName(safeBase)
+    safeBase && isMappingFileName(safeBase, channel)
       ? safeBase
-      : defaultMappingExportFileName();
+      : defaultMappingExportFileName(undefined, channel);
 
   const mappingsDir = ensurePdiMappingsDir();
   const fileName = pickUniqueFileName(mappingsDir, preferred);

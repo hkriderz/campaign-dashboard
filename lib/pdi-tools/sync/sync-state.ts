@@ -3,6 +3,7 @@ import { runQuery } from "@/lib/bigquery";
 import { BQ_SYNC_STATE_TABLE, DEFAULT_LOOKBACK_DAYS } from "./constants";
 import type { SyncLogger } from "./logger";
 import { escapeSqlStringLiteral } from "./sql-escape";
+import { parsePdiSyncChannel, syncStateKey, type PdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 export type SyncState = {
   last_sync_timestamp: string;
@@ -34,10 +35,14 @@ function toDateOnly(val: unknown): string | null {
   return toIsoString(val).slice(0, 10);
 }
 
-export async function loadSyncState(log: SyncLogger): Promise<SyncState> {
+export async function loadSyncState(
+  log: SyncLogger,
+  channel: PdiSyncChannel = "dialer"
+): Promise<SyncState> {
+  const key = syncStateKey(channel);
   try {
     const rows = await runQuery<BqSyncStateRow>(
-      `SELECT * FROM \`${BQ_SYNC_STATE_TABLE}\` WHERE state_key = 'global' LIMIT 1`
+      `SELECT * FROM \`${BQ_SYNC_STATE_TABLE}\` WHERE state_key = '${escapeSqlStringLiteral(key)}' LIMIT 1`
     );
     if (rows.length > 0) {
       const row = rows[0]!;
@@ -68,13 +73,20 @@ export async function loadSyncState(log: SyncLogger): Promise<SyncState> {
   };
 }
 
-export async function saveSyncState(state: SyncState, log: SyncLogger): Promise<void> {
+export async function saveSyncState(
+  state: SyncState,
+  log: SyncLogger,
+  channel: PdiSyncChannel = "dialer"
+): Promise<void> {
+  const key = syncStateKey(parsePdiSyncChannel(channel));
   const dr = state.date_range;
   const machine = os.hostname();
   const user = process.env.USER || process.env.USERNAME || "unknown";
 
   try {
-    await runQuery(`DELETE FROM \`${BQ_SYNC_STATE_TABLE}\` WHERE state_key = 'global'`);
+    await runQuery(
+      `DELETE FROM \`${BQ_SYNC_STATE_TABLE}\` WHERE state_key = '${escapeSqlStringLiteral(key)}'`
+    );
   } catch {
     /* table may not exist yet */
   }
@@ -89,7 +101,7 @@ export async function saveSyncState(state: SyncState, log: SyncLogger): Promise<
     (state_key, last_sync_timestamp, records_processed, date_range_start, date_range_end,
      success_flag, error_log, updated_at, updated_by)
     VALUES (
-      'global',
+      '${escapeSqlStringLiteral(key)}',
       TIMESTAMP('${escapeSqlStringLiteral(state.last_sync_timestamp)}'),
       ${state.records_processed},
       ${startVal},

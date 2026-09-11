@@ -122,6 +122,8 @@ type Props = {
   finalResultUsesScriptOptionLabels: boolean;
   aggregateScopeRows: AggregateScopeQuestionRow[];
   surveyScriptProfile: SurveyScriptProfile;
+  /** When true, the parent owns date filtering — do not render an inner date picker. */
+  hideDatePicker?: boolean;
 };
 
 function slotCellClass(isTraciViolation: boolean): string {
@@ -151,6 +153,7 @@ export default function DailyAggregateSection({
   finalResultUsesScriptOptionLabels,
   aggregateScopeRows,
   surveyScriptProfile,
+  hideDatePicker = false,
 }: Props) {
   const router = useRouter();
   const [layout, setLayout] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
@@ -199,13 +202,12 @@ export default function DailyAggregateSection({
       acc.phoneBanks += 1;
       acc.pbers += s.pbers;
       acc.totalCalls += s.totalCalls;
-      acc.numDials += s.numDials;
       acc.callsAnswered += s.callsAnswered;
       acc.loggedInSeconds += s.loggedInSeconds;
       acc.callSeconds += s.callSeconds;
       return acc;
     },
-    { phoneBanks: 0, pbers: 0, totalCalls: 0, numDials: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
+    { phoneBanks: 0, pbers: 0, totalCalls: 0, callsAnswered: 0, loggedInSeconds: 0, callSeconds: 0 }
   );
 
   const pberCount = uniquePhonebankers > 0 ? uniquePhonebankers : totals.pbers;
@@ -393,8 +395,12 @@ export default function DailyAggregateSection({
 
   return (
     <>
-      <div className="flex items-center gap-2 flex-wrap mb-3">
-        {availableDates.length > 0 ? (
+      <div
+        className={`flex items-center gap-2 flex-wrap mb-3 ${
+          hideDatePicker || availableDates.length === 0 ? "justify-end" : "justify-between"
+        }`}
+      >
+        {!hideDatePicker && availableDates.length > 0 ? (
           <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-950/30">
             <DateRangePicker
               startDate={activeDate}
@@ -419,9 +425,9 @@ export default function DailyAggregateSection({
         <button
           type="button"
           onClick={openModal}
-          className="px-3 py-1.5 rounded-md border border-indigo-300 dark:border-indigo-700 text-sm font-medium text-indigo-800 dark:text-indigo-200 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50"
+          className="px-4 py-2.5 rounded-md text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 shadow-sm"
         >
-          Update layout
+          Update Table layout
         </button>
       </div>
 
@@ -437,7 +443,6 @@ export default function DailyAggregateSection({
           <div>{totals.phoneBanks} Phone Banks</div>
           <div>{pberCount} PBers</div>
           <div>{totals.totalCalls.toLocaleString()} Total Calls</div>
-          <div>{totals.numDials.toLocaleString()} Dials</div>
           <div className="sm:col-span-2 xl:col-span-1">
             {secToTime(totals.loggedInSeconds)} Time logged in{" "}
             <span className="text-gray-600 dark:text-gray-400">({hrsPerPber} hrs/pber)</span>

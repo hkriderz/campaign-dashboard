@@ -41,7 +41,9 @@ export type TransformResult = {
 export function transformSurveyRows(
   rows: SurveyResultRow[],
   maps: MappingMaps,
-  ledger: Set<string>
+  ledger: Set<string>,
+  acquisitionTypeId: string = ACQUISITION_TYPE_ID,
+  fallbackSurvey?: string
 ): TransformResult {
   const payload: PdiFlagPayloadItem[] = [];
   let rowsSkipped = 0;
@@ -60,13 +62,13 @@ export function transformSurveyRows(
       continue;
     }
 
-    const qid = getQuestionId(maps, survey, question);
+    const qid = getQuestionId(maps, survey, question, fallbackSurvey);
     if (!qid) {
       rowsSkipped += 1;
       continue;
     }
 
-    const flagId = getFlagStrict(maps, survey, question, answer);
+    const flagId = getFlagStrict(maps, survey, question, answer, fallbackSurvey);
     if (!flagId) {
       rowsSkipped += 1;
       continue;
@@ -92,7 +94,7 @@ export function transformSurveyRows(
       pdiId,
       questionId: qid,
       flagId,
-      acquisitionTypeId: ACQUISITION_TYPE_ID,
+      acquisitionTypeId,
       flagEntryDate: flagDateStr,
     });
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import PhoneBankStats from "./PhoneBankStats";
 import PhonebankerTable from "./PhonebankerTable";
 import DayFilterBar from "./DayFilterBar";
@@ -22,7 +22,13 @@ type Props = {
   tagColor: string;
 };
 
-export default function PhoneBankDetailClient({ detail, tagColor }: Props) {
+function formatDateRange(start: string | null, end: string | null): string {
+  if (!start) return "—";
+  if (!end || end === start) return start;
+  return `${start} → ${end}`;
+}
+
+export default function PhoneBankDetailClient({ detail, tagColor: _tagColor }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -35,20 +41,41 @@ export default function PhoneBankDetailClient({ detail, tagColor }: Props) {
     return () => observer.disconnect();
   }, []);
 
-  // For the bar chart: if a day is selected, aggregate only that day's daily rows
+  const scopedRows = useMemo(
+    () =>
+      selectedDate
+        ? detail.dailyStats.filter((r) => r.callDate === selectedDate)
+        : detail.dailyStats,
+    [detail.dailyStats, selectedDate]
+  );
+
+  const headerStats = useMemo(() => {
+    const callers = new Set(scopedRows.map((r) => r.phonebankerName));
+    const surveyed = scopedRows.reduce((s, r) => s + r.surveyed, 0);
+    const callSeconds = scopedRows.reduce((s, r) => s + r.totalCallSeconds, 0);
+    const dayCalls = scopedRows.reduce((s, r) => s + r.numDials, 0);
+    return {
+      phoneBanks: 1,
+      totalCalls: selectedDate ? dayCalls : detail.campaign.totalCalls,
+      surveyed,
+      callHours: Math.round((callSeconds / 3600) * 100) / 100,
+      callers: callers.size,
+      uniqueCallers: detail.campaign.uniqueCallers,
+    };
+  }, [detail.campaign.totalCalls, detail.campaign.uniqueCallers, scopedRows, selectedDate]);
+
   const chartData: PhonebankerAggregateStat[] = selectedDate
     ? (() => {
-        const dayRows = detail.dailyStats.filter(
-          (r) => r.callDate === selectedDate
-        );
         const aggMap = new Map<string, PhonebankerAggregateStat>();
-        for (const row of dayRows) {
+        for (const row of scopedRows) {
           if (!aggMap.has(row.phonebankerName)) {
             aggMap.set(row.phonebankerName, {
               phonebankerName: row.phonebankerName,
               totalDials: 0,
               totalCallHours: 0,
               totalDialerHours: 0,
+              surveyed: 0,
+              strongSupport: 0,
               daysWorked: 0,
               campaigns: [detail.campaign.campaignName],
             });
@@ -57,30 +84,40 @@ export default function PhoneBankDetailClient({ detail, tagColor }: Props) {
           agg.totalDials += row.numDials;
           agg.totalCallHours =
             Math.round((agg.totalCallHours + row.totalCallHours) * 100) / 100;
+          agg.totalDialerHours =
+            Math.round((agg.totalDialerHours + row.totalDialerHours) * 100) / 100;
+          agg.surveyed += row.surveyed;
+          agg.strongSupport += row.strongSupport;
         }
-        return Array.from(aggMap.values()).sort(
-          (a, b) => b.totalDials - a.totalDials
-        );
+        return Array.from(aggMap.values());
       })()
     : detail.phonebankerAggregates;
 
+  const rangeLabel = selectedDate
+    ? selectedDate
+    : formatDateRange(detail.campaign.firstCallDate, detail.campaign.lastCallDate);
+
   return (
     <div className="space-y-8">
-      {/* Campaign stats */}
-      <PhoneBankStats campaign={detail.campaign} />
+      <PhoneBankStats stats={headerStats} />
 
-      {/* Day filter */}
-      {detail.availableDates.length > 1 && (
-        <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {detail.availableDates.length > 1 ? (
           <DayFilterBar
             dates={detail.availableDates}
             selectedDate={selectedDate}
             onChange={setSelectedDate}
           />
-        </div>
-      )}
+        ) : (
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+            Date range
+          </span>
+        )}
+        <p className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap sm:text-right">
+          {rangeLabel}
+        </p>
+      </div>
 
-      {/* Bar chart */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-5">
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-1">
           Phonebankers
@@ -91,26 +128,20 @@ export default function PhoneBankDetailClient({ detail, tagColor }: Props) {
           )}
         </h2>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-          Dials and call hours per phonebanker
+          Hours on dialer vs in calls, surveyed, and strong supports
           {selectedDate ? " on this day" : " across all days"}
         </p>
-        <PhonebankerBarChart
-          data={chartData}
-          tagColor={tagColor}
-          showHours={true}
-          darkMode={isDarkMode}
-        />
+        <PhonebankerBarChart data={chartData} darkMode={isDarkMode} />
       </div>
 
-      {/* Table */}
       <div>
         <h2 className="text-base font-semibold text-gray-800 dark:text-gray-100 mb-3">
-          Daily Breakdown
+          Breakdown
+          {selectedDate ? (
+            <span className="ml-2 text-sm font-normal text-indigo-500">— {selectedDate}</span>
+          ) : null}
         </h2>
-        <PhonebankerTable
-          rows={detail.dailyStats}
-          selectedDate={selectedDate}
-        />
+        <PhonebankerTable rows={scopedRows} selectedDate={selectedDate} />
       </div>
     </div>
   );

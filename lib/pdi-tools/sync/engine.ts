@@ -8,10 +8,11 @@ import { insertFlagInstances } from "./flag-instances";
 import { appendLedgerEntries, loadLedger } from "./ledger";
 import { seedLedgerFromExports } from "./ledger-seed";
 import { SyncLogger } from "./logger";
-import { loadMappingForSync } from "./mapping";
+import { loadMappingForSync, type MappingMaps } from "./mapping";
 import { postFlagsToPdi } from "./pdi-client";
 import { progressForPhase } from "./phases";
 import { buildSurveyQuery } from "./query";
+import { buildTextTagQuery } from "./text-query";
 import { rollbackSyncRun } from "./rollback";
 import { appendSyncRunEvent, finishSyncRun } from "./run-registry";
 import { appendSyncRunLog } from "./sync-run-log";
@@ -20,6 +21,14 @@ import { acquireSyncLock, releaseSyncLock } from "./sync-lock";
 import { buildMappingReport, writeSyncCsvReports } from "./sync-reports";
 import type { SurveyResultRow, SyncRunOptions, SyncRunSummary } from "./types";
 import { isValidIsoDate, normalizeIsoDateRange } from "@/lib/validation/iso-date";
+import {
+  acquisitionTypeIdForChannel,
+  ledgerSourceForChannel,
+  parsePdiSyncChannel,
+  TEXT_MAPPING_SURVEY_NAME,
+  type PdiSyncChannel,
+} from "@/lib/pdi-tools/channel";
+import { normalizeTextSyncRow } from "@/lib/pdi-tools/text-tag-stw-data";
 
 function parseIsoDateAtLocalTime(isoDate: string, endOfDay = false): Date {
   if (!isValidIsoDate(isoDate)) {
@@ -82,9 +91,45 @@ function formatQueryDateTime(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+async function loadAndPrepareRows(
+  channel: PdiSyncChannel,
+  startStr: string,
+  endStr: string,
+  maps: MappingMaps,
+  log: SyncLogger
+): Promise<{ filledRows: SurveyResultRow[]; synthetic: SurveyResultRow[] }> {
+  if (channel === "text") {
+    const query = buildTextTagQuery(startStr, endStr);
+    log.step("bigquery", progressForPhase("bigquery"), "Executing BigQuery (STW Text tags)...");
+    const rawRows = await runQuery<SurveyResultRow>(query);
+    const filledRows = rawRows
+      .map((row) => normalizeTextSyncRow(row))
+      .filter((row): row is SurveyResultRow => row != null);
+    log.step(
+      "bigquery",
+      progressForPhase("bigquery"),
+      `Retrieved ${rawRows.length} tagged contacts; ${filledRows.length} Nithya Support/Moved with PDI ids`
+    );
+    return { filledRows, synthetic: [] };
+  }
+
+  const query = buildSurveyQuery(startStr, endStr);
+  log.step("bigquery", progressForPhase("bigquery"), "Executing BigQuery...");
+  const rows = await runQuery<SurveyResultRow>(query);
+  log.step("bigquery", progressForPhase("bigquery"), `Retrieved ${rows.length} rows from BigQuery`);
+
+  logFinalResultCoverage(rows, maps, log, "before fill");
+  const { rows: filledRows, synthetic } = fillFinalResults(rows, maps, log);
+  log.step("fill", progressForPhase("fill"), `After Final Result fill: ${filledRows.length} rows total`);
+  logFinalResultCoverage(filledRows, maps, log, "after fill");
+  return { filledRows, synthetic };
+}
+
 export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): Promise<void> {
   const log = new SyncLogger((event) => appendSyncRunEvent(runId, event));
   const runStartedAt = new Date();
+  const channel = parsePdiSyncChannel(options.channel);
+  const runTitle = channel === "text" ? "PDI TEXT TAG SYNC" : "PDI SURVEY RESULTS SYNC";
   let lockHeld = false;
 
   try {
@@ -98,7 +143,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
 
     if (options.rollbackRun?.trim()) {
       log.step("starting", progressForPhase("starting"), "=".repeat(70));
-      log.step("starting", progressForPhase("starting"), "PDI SURVEY RESULTS SYNC — Rollback (TypeScript engine)");
+      log.step("starting", progressForPhase("starting"), `${runTitle} — Rollback (TypeScript engine)`);
       log.step("starting", progressForPhase("starting"), "=".repeat(70));
       await rollbackSyncRun(options.rollbackRun.trim(), log);
       finishSyncRun(runId, {
@@ -109,30 +154,23 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     }
 
     log.step("starting", progressForPhase("starting"), "=".repeat(70));
-    log.step("starting", progressForPhase("starting"), "PDI SURVEY RESULTS SYNC - Started (TypeScript engine)");
+    log.step("starting", progressForPhase("starting"), `${runTitle} - Started (TypeScript engine)`);
     log.step("starting", progressForPhase("starting"), "=".repeat(70));
 
-    const maps = loadMappingForSync(options.mappingFileId);
+    const maps = loadMappingForSync(options.mappingFileId, channel);
     log.step(
       "mapping",
       progressForPhase("mapping"),
       `Loading mapping file: ${maps.mappingFilePath.split(/[/\\]/).pop()}`
     );
 
-    const syncState = await loadSyncState(log);
+    const syncState = await loadSyncState(log, channel);
     const { start, end, startStr, endStr } = parseRangeOptions(options, syncState, log);
     log.step("sync_state", progressForPhase("sync_state"), `Date range: ${startStr} to ${endStr}`);
     log.step("sync_state", progressForPhase("sync_state"), `Dry-run: ${options.dryRun}`);
+    log.step("sync_state", progressForPhase("sync_state"), `Channel: ${channel}`);
 
-    const query = buildSurveyQuery(startStr, endStr);
-    log.step("bigquery", progressForPhase("bigquery"), "Executing BigQuery...");
-    const rows = await runQuery<SurveyResultRow>(query);
-    log.step("bigquery", progressForPhase("bigquery"), `Retrieved ${rows.length} rows from BigQuery`);
-
-    logFinalResultCoverage(rows, maps, log, "before fill");
-    const { rows: filledRows, synthetic } = fillFinalResults(rows, maps, log);
-    log.step("fill", progressForPhase("fill"), `After Final Result fill: ${filledRows.length} rows total`);
-    logFinalResultCoverage(filledRows, maps, log, "after fill");
+    const { filledRows, synthetic } = await loadAndPrepareRows(channel, startStr, endStr, maps, log);
 
     if (filledRows.length === 0) {
       log.warn("No rows returned from BigQuery");
@@ -141,7 +179,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
       return;
     }
 
-    const acquired = await acquireSyncLock(log);
+    const acquired = await acquireSyncLock(log, channel);
     if (!acquired) {
       throw new Error("Another sync is already in progress (BQ advisory lock). Wait and retry.");
     }
@@ -152,10 +190,19 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
 
     await seedLedgerFromExports(ledger, runId, log);
 
+    const acquisitionTypeId = acquisitionTypeIdForChannel(channel);
+    const fallbackSurvey = channel === "text" ? TEXT_MAPPING_SURVEY_NAME : undefined;
+    log.step(
+      "transform",
+      progressForPhase("transform"),
+      `Acquisition type: ${channel === "text" ? "Text Bank" : "ScaletoWin Phone Bank"} (${acquisitionTypeId})`
+    );
     const { report, payload, rowsSkipped, rowsDeduped, rowsDedupedSameBatch } = buildMappingReport(
       filledRows,
       maps,
-      ledger
+      ledger,
+      acquisitionTypeId,
+      fallbackSurvey
     );
     log.step(
       "transform",
@@ -182,7 +229,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     if (options.dryRun) {
       log.step("complete", progressForPhase("complete"), "DRY-RUN MODE: Skipping PDI post");
       log.step("complete", 100, "=".repeat(70));
-      log.step("complete", 100, "PDI SURVEY RESULTS SYNC - Completed (dry-run)");
+      log.step("complete", 100, `${runTitle} - Completed (dry-run)`);
       log.step("complete", 100, "=".repeat(70));
       const summary: SyncRunSummary = {
         ...emptySummary(runId, options, maps.mappingFilePath, startStr, endStr),
@@ -201,7 +248,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     if (payload.length === 0) {
       log.warn("No payload to post to PDI");
       log.info("=".repeat(70));
-      log.info("PDI SURVEY RESULTS SYNC - Completed (no payload)");
+      log.info(`${runTitle} - Completed (no payload)`);
       log.info("=".repeat(70));
       const summary: SyncRunSummary = {
         ...emptySummary(runId, options, maps.mappingFilePath, startStr, endStr),
@@ -222,7 +269,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     const postResult = await postFlagsToPdi(payload, maps.flagIdToCode, runId, log);
 
     if (postResult.newLedgerEntries.length > 0) {
-      await appendLedgerEntries(postResult.newLedgerEntries, "sync_run", runId, log);
+      await appendLedgerEntries(postResult.newLedgerEntries, ledgerSourceForChannel(channel), runId, log);
       for (const e of postResult.newLedgerEntries) {
         ledger.add(`${e.pdi_id}|${e.flag_code}|${e.flag_date}`);
       }
@@ -259,7 +306,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
         `Insufficient records posted (${postResult.successCount} < ${minRecords})`,
       ];
     }
-    await saveSyncState(nextState, log);
+    await saveSyncState(nextState, log, channel);
 
     await appendSyncRunLog(
       {
@@ -281,7 +328,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     );
 
     log.step("complete", 100, "=".repeat(70));
-    log.step("complete", 100, "PDI SURVEY RESULTS SYNC - Completed");
+    log.step("complete", 100, `${runTitle} - Completed`);
     log.step("complete", 100, "=".repeat(70));
 
     const summary: SyncRunSummary = {
@@ -308,7 +355,7 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     finishSyncRun(runId, { status: "failed", error: message });
   } finally {
     if (lockHeld) {
-      await releaseSyncLock(log);
+      await releaseSyncLock(log, channel);
     }
   }
 }

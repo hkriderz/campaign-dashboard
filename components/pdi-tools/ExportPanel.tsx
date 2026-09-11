@@ -8,6 +8,8 @@ import {
   saveMappingExportToApp,
 } from "@/lib/pdi-tools/export-mapping";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
+import { collectAnswersAcrossSurveys } from "@/lib/pdi-tools/text-tag-stw-data";
+import { TEXT_MAPPING_SURVEY_NAME } from "@/lib/pdi-tools/channel";
 
 export default function ExportPanel() {
   const { state } = useApp();
@@ -17,8 +19,14 @@ export default function ExportPanel() {
 
   const output = useMemo(
     () =>
-      buildMappingOutput(state.pdiQuestions, state.stwData, state.questionMappings, state.answerMappings),
-    [state.pdiQuestions, state.stwData, state.questionMappings, state.answerMappings]
+      buildMappingOutput(
+        state.pdiQuestions,
+        state.stwData,
+        state.questionMappings,
+        state.answerMappings,
+        state.channel
+      ),
+    [state.pdiQuestions, state.stwData, state.questionMappings, state.answerMappings, state.channel]
   );
 
   const preview = useMemo(
@@ -40,7 +48,7 @@ export default function ExportPanel() {
     setSaveBusy(true);
     setSaveMessage(null);
     try {
-      const result = await saveMappingExportToApp(output);
+      const result = await saveMappingExportToApp(output, state.channel);
       if (!result.ok) {
         setSaveMessage(result.error ?? "Save failed");
         return;
@@ -58,7 +66,10 @@ export default function ExportPanel() {
 
   const unmappedAnswers = Object.entries(state.questionMappings).reduce((acc, [key]) => {
     const [surveyName, questionName] = key.split("||");
-    const answers = state.stwData[surveyName]?.[questionName] ?? [];
+    const answers =
+      state.channel === "text" && surveyName === TEXT_MAPPING_SURVEY_NAME
+        ? collectAnswersAcrossSurveys(state.stwData, questionName ?? "")
+        : (state.stwData[surveyName ?? ""]?.[questionName ?? ""] ?? []);
     const unmapped = answers.filter((a) => !state.answerMappings[`${key}||${a}`]).length;
     return acc + unmapped;
   }, 0);
@@ -70,7 +81,8 @@ export default function ExportPanel() {
           Export Mapping
         </p>
         <p className="text-[10px] text-gray-500 dark:text-zinc-500 mb-2 leading-relaxed">
-          Saves to <code className="text-emerald-700 dark:text-emerald-400">pdi-mappings/</code> for the Syncer.
+          Saves to <code className="text-emerald-700 dark:text-emerald-400">pdi-mappings/</code> for the{" "}
+          {state.channel === "text" ? "Text Syncer" : "Dialer Syncer"}.
         </p>
         <div className="grid grid-cols-2 gap-1.5">
           <StatCard label="Questions mapped" value={totalQuestionMappings} />
@@ -99,7 +111,7 @@ export default function ExportPanel() {
           </button>
           <button
             type="button"
-            onClick={() => downloadMappingJson(output)}
+            onClick={() => downloadMappingJson(output, state.channel)}
             className="flex-1 dash-action-btn dash-action-btn-sm dash-action-btn-download py-1"
           >
             Download copy

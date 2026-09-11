@@ -13,8 +13,10 @@ export const BQ_RUN_LOG_TABLE = `${STW_PROJECT}.${PDI_DATASET}.sync_run_log`;
 export const BQ_LOCK_TABLE = `${STW_PROJECT}.${PDI_DATASET}.sync_lock`;
 export const BQ_FLAG_INSTANCES_TABLE = `${STW_PROJECT}.${PDI_DATASET}.created_flag_instances`;
 
-/** Same acquisition type as `stw_to_pdi.py`. */
-export const ACQUISITION_TYPE_ID = "w6we79BXkuCsBbb9QCyiLA==";
+import { DIALER_ACQUISITION_TYPE_ID } from "@/lib/pdi-tools/channel";
+
+/** Dialer / phone bank acquisition type. Prefer `acquisitionTypeIdForChannel`. */
+export const ACQUISITION_TYPE_ID = DIALER_ACQUISITION_TYPE_ID;
 
 export const PDI_BATCH_SIZE = 200;
 export const PDI_RETRY_BATCH_SIZE = 50;

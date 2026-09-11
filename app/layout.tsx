@@ -18,7 +18,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "Campaign Operations Dashboard",
   description:
-    "Phone banking and canvassing analytics for Scale to Win campaigns.",
+    "Phone banking, texting, and canvassing analytics for Scale to Win campaigns.",
 };
 
 export const viewport: Viewport = {

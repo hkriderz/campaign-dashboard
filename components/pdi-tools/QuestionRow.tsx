@@ -3,6 +3,12 @@
 import React from "react";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
 import type { PdiQuestion, PdiAnswerOption, AnswerMappingEntry } from "@/lib/pdi-tools/types";
+import {
+  mappingAnswerKey,
+  mappingQuestionKey,
+  TEXT_CANDIDATE_TAG_ID,
+} from "@/lib/pdi-tools/channel";
+import { classifyTextContactTag } from "@/lib/texting-tag-labels";
 import PdiQuestionCombobox from "./PdiQuestionCombobox";
 
 interface Props {
@@ -13,9 +19,10 @@ interface Props {
 }
 
 export default function QuestionRow({ surveyName, questionName, answers, pdiQuestions }: Props) {
-  const { state, mapQuestion, unmapQuestion, mapAnswer, unmapAnswer } = useApp();
+  const { state, mapQuestion, unmapQuestion, mapAnswer, unmapAnswer, saveQuestionTemplate, deleteSavedQuestionTemplate } =
+    useApp();
 
-  const questionKey = `${surveyName}||${questionName}`;
+  const questionKey = mappingQuestionKey(state.channel, surveyName, questionName, state.textMappingScope);
   const qMapping = state.questionMappings[questionKey];
   const mappedPdiQuestion = qMapping ? pdiQuestions.find((q) => q.id === qMapping.pdiQuestionId) : null;
 
@@ -40,6 +47,11 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
   }
 
   const isFullyMapped = Boolean(qMapping && mappedAnswerCount === answers.length);
+  const savedTemplate = state.questionTemplates[questionName];
+  const sharedQuestionMapped =
+    state.channel === "text" &&
+    state.textMappingScope === "one" &&
+    Boolean(state.questionMappings[mappingQuestionKey(state.channel, surveyName, questionName, "all")]);
 
   return (
     <div
@@ -63,7 +75,7 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
         <span className="text-[10px] text-gray-400 dark:text-zinc-600 whitespace-nowrap">{answers.length} ans</span>
       </div>
 
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 dark:border-zinc-700/40">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 border-b border-gray-100 dark:border-zinc-700/40">
         <span className="text-[10px] text-gray-400 dark:text-zinc-500 whitespace-nowrap font-mono flex-shrink-0">
           MAP TO PDI →
         </span>
@@ -74,7 +86,43 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
             questions={pdiQuestions}
           />
         </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <button
+            type="button"
+            disabled={!qMapping}
+            onClick={() => saveQuestionTemplate(surveyName, questionName)}
+            className="text-[10px] px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700/50 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {savedTemplate ? "Update saved mapping" : "Save mapping"}
+          </button>
+          {savedTemplate ? (
+            <button
+              type="button"
+              onClick={() => deleteSavedQuestionTemplate(questionName)}
+              className="text-[10px] px-2 py-0.5 rounded border border-red-200 dark:border-red-700/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+            >
+              Delete saved mapping
+            </button>
+          ) : null}
+        </div>
       </div>
+
+      {savedTemplate ? (
+        <div className="px-3 py-1 border-b border-gray-100 dark:border-zinc-700/40 bg-emerald-50/70 dark:bg-emerald-950/20">
+          <span className="text-[10px] text-emerald-700 dark:text-emerald-400">
+            Saved for other lists
+            {savedTemplate.sourceSurveyName ? ` · from ${savedTemplate.sourceSurveyName}` : ""}
+          </span>
+        </div>
+      ) : null}
+
+      {sharedQuestionMapped && !qMapping ? (
+        <div className="px-3 py-1 border-b border-gray-100 dark:border-zinc-700/40 bg-amber-50/70 dark:bg-amber-950/20">
+          <span className="text-[10px] text-amber-700 dark:text-amber-400">
+            A shared All-lists mapping exists. Sync will use it unless you map this list.
+          </span>
+        </div>
+      ) : null}
 
       {mappedPdiQuestion ? (
         <div className="px-3 py-1 border-b border-gray-100 dark:border-zinc-700/40 bg-green-50/60 dark:bg-zinc-900/30">
@@ -138,7 +186,7 @@ function AnswerRow({
   onSelect,
 }: AnswerRowProps) {
   const { state } = useApp();
-  const aKeyFull = `${surveyName}||${questionName}||${answerValue}`;
+  const aKeyFull = mappingAnswerKey(state.channel, surveyName, questionName, answerValue, state.textMappingScope);
   const aMapping: AnswerMappingEntry | undefined = state.answerMappings[aKeyFull];
 
   return (
@@ -147,7 +195,11 @@ function AnswerRow({
         <p className="text-[11px] text-gray-700 dark:text-zinc-200 truncate" title={answerValue}>
           {answerValue}
         </p>
-        <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">{questionName}</p>
+        <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">
+          {state.channel === "text"
+            ? classifyTextContactTag(answerValue, TEXT_CANDIDATE_TAG_ID).answer
+            : questionName}
+        </p>
       </div>
 
       <span className="hidden sm:inline text-gray-300 dark:text-zinc-700 text-[11px] flex-shrink-0">—</span>

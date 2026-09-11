@@ -73,3 +73,5 @@ export async function executeSql(sql: string): Promise<void> {
 
 export const PROJECT = process.env.GCP_PROJECT_ID ?? "starlit-link-475400-s5";
 export const DATASET = process.env.BQ_DATASET ?? "l11_stw";
+/** Scale to Win Text warehouse (separate from Dialer `l11_stw`). */
+export const TEXT_DATASET = process.env.BQ_TEXT_DATASET ?? "l11_stw_txt";

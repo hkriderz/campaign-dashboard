@@ -2,31 +2,62 @@
 
 import React, { useState } from "react";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
+import { mappingQuestionKey } from "@/lib/pdi-tools/channel";
 import QuestionRow from "./QuestionRow";
 
 export default function SurveyMapper() {
-  const { state, dispatch } = useApp();
+  const { state, dispatch, mappingSurveyName, setTextMappingScope } = useApp();
   const [confirmClear, setConfirmClear] = useState(false);
-  const { activeSurvey, stwData, pdiQuestions, questionMappings } = state;
+  const { activeSurvey, stwData, pdiQuestions, questionMappings, channel, textMappingScope } = state;
 
   if (!activeSurvey) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-gray-50 dark:bg-zinc-950 transition-colors">
         <div className="text-4xl mb-4 opacity-20">🗺</div>
         <h2 className="text-sm font-semibold text-gray-500 dark:text-zinc-400 mb-2">
-          Select a survey from the sidebar
+          {channel === "text" ? "Select a text campaign from the sidebar" : "Select a survey from the sidebar"}
         </h2>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs leading-relaxed">
-          Each STW survey shows its questions. Map each STW question to a PDI question, then answer-level
-          flags auto-populate.
+          {channel === "text"
+            ? "Each Nithya text list is shown separately. Use All lists to map once, or This list only to fill one campaign. Save mapping applies when you open the next similar list."
+            : "Each STW survey shows its questions. Map each STW question to a PDI question, then answer-level flags auto-populate. Save mapping applies when you open the next similar list."}
         </p>
+        {channel === "text" ? (
+          <div className="mt-4 inline-flex rounded border border-gray-300 dark:border-zinc-600 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setTextMappingScope("all")}
+              className={`text-[11px] px-2.5 py-1 ${
+                textMappingScope === "all"
+                  ? "bg-green-600 text-white"
+                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+              }`}
+            >
+              All lists
+            </button>
+            <button
+              type="button"
+              onClick={() => setTextMappingScope("one")}
+              className={`text-[11px] px-2.5 py-1 ${
+                textMappingScope === "one"
+                  ? "bg-green-600 text-white"
+                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+              }`}
+            >
+              This list only
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   }
 
   const questions = stwData[activeSurvey] ?? {};
   const questionNames = Object.keys(questions).sort();
-  const totalMapped = questionNames.filter((q) => questionMappings[`${activeSurvey}||${q}`]).length;
+  const mappingName = mappingSurveyName(activeSurvey);
+  const totalMapped = questionNames.filter((q) =>
+    questionMappings[mappingQuestionKey(channel, activeSurvey, q, textMappingScope)]
+  ).length;
   const pct = questionNames.length > 0 ? Math.round((totalMapped / questionNames.length) * 100) : 0;
 
   return (
@@ -38,8 +69,41 @@ export default function SurveyMapper() {
           </h2>
           <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">
             {questionNames.length} question{questionNames.length !== 1 ? "s" : ""} · {totalMapped} mapped
+            {channel === "text"
+              ? textMappingScope === "one"
+                ? " · this list only"
+                : " · shared Nithya mapping"
+              : ""}
+            {" · saved mappings apply on the next similar list"}
           </p>
         </div>
+
+        {channel === "text" ? (
+          <div className="inline-flex rounded border border-gray-300 dark:border-zinc-600 overflow-hidden flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setTextMappingScope("all")}
+              className={`text-[10px] px-2 py-1 ${
+                textMappingScope === "all"
+                  ? "bg-green-600 text-white"
+                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+              }`}
+            >
+              All lists
+            </button>
+            <button
+              type="button"
+              onClick={() => setTextMappingScope("one")}
+              className={`text-[10px] px-2 py-1 ${
+                textMappingScope === "one"
+                  ? "bg-green-600 text-white"
+                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+              }`}
+            >
+              This list only
+            </button>
+          </div>
+        ) : null}
 
         <div className="flex items-center gap-2">
           <div className="w-24 h-1 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
@@ -60,7 +124,7 @@ export default function SurveyMapper() {
               <button
                 type="button"
                 onClick={() => {
-                  dispatch({ type: "CLEAR_SURVEY", surveyName: activeSurvey });
+                  dispatch({ type: "CLEAR_SURVEY", surveyName: mappingName });
                   setConfirmClear(false);
                 }}
                 className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 transition-colors"

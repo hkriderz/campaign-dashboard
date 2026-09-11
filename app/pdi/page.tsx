@@ -8,14 +8,21 @@ const TOOLS = [
     icon: "🗺",
     title: "PDI Mapper",
     description:
-      "Map Scale to Win survey questions and answers to PDI flags. Generates the stw_pdi_mapping_*.json used by the syncer.",
+      "Map Dialer survey Q/A or Text tags to PDI flags. Dialer exports stw_pdi_mapping_*.json; Text exports stw_text_pdi_mapping_*.json.",
   },
   {
     href: "/pdi/syncer",
     icon: "🔄",
     title: "PDI Syncer",
     description:
-      "Run the BigQuery → PDI flag sync with live progress. Dry-run by default; compare counts to Python before your first live post.",
+      "Dialer BigQuery → PDI flag sync with live progress. Dry-run by default; compare counts to Python before your first live post.",
+  },
+  {
+    href: "/pdi/text-syncer",
+    icon: "💬",
+    title: "PDI Text Syncer",
+    description:
+      "Nithya STW Text tags → PDI flags. Uses Mapper Text mappings, its own lock and incremental cursor, and the shared people ledger.",
   },
 ] as const;
 
@@ -30,7 +37,7 @@ export default function PdiPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {TOOLS.map((tool) => (
             <Link
               key={tool.href}
@@ -56,9 +63,12 @@ export default function PdiPage() {
         <div className="mt-10 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-5">
           <p className="font-semibold text-emerald-800 dark:text-emerald-300 text-sm mb-2">How it fits together</p>
           <p className="text-sm text-emerald-700 dark:text-emerald-300">
-            Use the <strong>Mapper</strong> to build <code className="bg-emerald-100 dark:bg-emerald-900/40 px-1 rounded">stw_pdi_mapping_*.json</code>,
-            save it to <code className="px-1 rounded">pdi-mappings/</code> from the Mapper, then run the <strong>Syncer</strong> (start with dry-run). CSV reports land in <code className="px-1 rounded">pdi-sync-exports/</code>.
-            Cached survey and PDI question lists load from <code className="px-1 rounded">PDI_TOOLS_DATA_DIR</code> or{" "}
+            Use the <strong>Mapper</strong> (Dialer or Text toggle) to build mapping JSON in{" "}
+            <code className="px-1 rounded">pdi-mappings/</code>, then run the matching syncer (start with dry-run). Dialer
+            files are <code className="bg-emerald-100 dark:bg-emerald-900/40 px-1 rounded">stw_pdi_mapping_*.json</code>;
+            Text files are <code className="bg-emerald-100 dark:bg-emerald-900/40 px-1 rounded">stw_text_pdi_mapping_*.json</code>.
+            CSV reports land in <code className="px-1 rounded">pdi-sync-exports/</code>. Cached Dialer survey and PDI
+            question lists load from <code className="px-1 rounded">PDI_TOOLS_DATA_DIR</code> or{" "}
             <code className="px-1 rounded">../pdiv3</code> when present. Configure{" "}
             <a href="#credentials" className="font-medium text-emerald-800 dark:text-emerald-300 underline">
               credentials

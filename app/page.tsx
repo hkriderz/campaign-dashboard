@@ -9,8 +9,16 @@ const MODES = [
     icon: "📞",
     title: "Phone Banking",
     description:
-      "View dials, hours, and phonebanker stats for every STW campaign, organized by candidate.",
+      "View hours, surveys, and phonebanker stats for every STW campaign, organized by candidate.",
     color: "indigo",
+  },
+  {
+    href: "/texting",
+    icon: "💬",
+    title: "Texting",
+    description:
+      "View Scale to Win Text campaigns, send status, contacts, and support / moved tags by candidate.",
+    color: "teal",
   },
   {
     href: "/canvassing",
@@ -63,6 +71,12 @@ const colorMap = {
     icon: "bg-mint-500/15 text-mint-600 dark:text-mint-400 border border-mint-500/25",
     btn: "bg-mint-600 hover:bg-mint-500 text-white rounded-full font-semibold shadow-[0_0_24px_rgba(69,211,153,0.35)]",
   },
+  teal: {
+    ring: "ring-teal-400/50 dark:ring-teal-500/40",
+    glow: "from-teal-500/20",
+    icon: "bg-teal-500/15 text-teal-600 dark:text-teal-300 border border-teal-500/20",
+    btn: "bg-teal-600 hover:bg-teal-500 text-white rounded-full font-semibold",
+  },
 };
 
 export default function LandingPage() {
@@ -89,12 +103,11 @@ export default function LandingPage() {
             Campaign Operations Dashboard
           </h1>
           <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg max-w-xl mx-auto">
-            Phone banking analytics, canvassing tracking, and PDI tools — all
-            in one place.
+            Phone banking, texting, canvassing, and PDI tools — all in one place.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4 xl:gap-6">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 xl:gap-6">
           {MODES.map((mode) => {
             const c = colorMap[mode.color];
             return (

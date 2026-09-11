@@ -30,7 +30,8 @@ Ensure these are **not** committed: `.env.local`, `credentials/*.json`, `starlit
 | Variable | Required | Notes |
 |----------|----------|--------|
 | `GCP_PROJECT_ID` | Yes | BigQuery project |
-| `BQ_DATASET` | Yes | e.g. `l11_stw` |
+| `BQ_DATASET` | Yes | e.g. `l11_stw` (Dialer) |
+| `BQ_TEXT_DATASET` | Optional | STW Text dataset; default `l11_stw_txt` |
 | `GCP_SERVICE_ACCOUNT_JSON` | Yes* | Full JSON or base64 JSON (*unless mounting `credentials/gcp-service-account.json`) |
 | `PDI_USERNAME` / `PDI_PASSWORD` / `PDI_API_TOKEN` | For PDI | Or upload via `/pdi` UI into mounted `credentials/` |
 | `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` | Optional | Enables snapshot rebuild API |

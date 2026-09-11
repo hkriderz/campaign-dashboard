@@ -8,6 +8,7 @@ import type { SyncLogEvent } from "@/lib/pdi-tools/sync/logger";
 import type { ParityReport } from "@/lib/pdi-tools/sync/parity";
 import type { SyncRunSummary } from "@/lib/pdi-tools/sync/types";
 import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
+import type { PdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 type MappingFileEntry = {
   id: string;
@@ -44,7 +45,7 @@ type SyncReportsResponse = {
 
 type SyncLockStatus = {
   table: string;
-  lockKey: "global";
+  lockKey: "global" | "text";
   locked: boolean;
   lockedBy: string | null;
   lockedAt: string | null;
@@ -120,7 +121,9 @@ function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function SyncerClient() {
+export default function SyncerClient({ channel = "dialer" }: { channel?: PdiSyncChannel }) {
+  const isText = channel === "text";
+  const channelQuery = `?channel=${channel}`;
   const [mode, setMode] = useState<"incremental" | "range">("incremental");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -158,7 +161,7 @@ export default function SyncerClient() {
   const refreshMappingFiles = useCallback(async () => {
     setMappingLoadError(null);
     try {
-      const res = await fetch("/api/pdi/mapping-files");
+      const res = await fetch(`/api/pdi/mapping-files${channelQuery}`);
       const data = (await res.json()) as MappingFilesResponse;
       if (!res.ok) {
         setMappingLoadError(data.error ?? res.statusText);
@@ -168,7 +171,7 @@ export default function SyncerClient() {
     } catch (e) {
       setMappingLoadError(e instanceof Error ? e.message : "Failed to list mapping files");
     }
-  }, []);
+  }, [channelQuery]);
 
   const refreshReports = useCallback(async () => {
     setReportsLoadError(null);
@@ -191,7 +194,7 @@ export default function SyncerClient() {
   const refreshSyncLock = useCallback(async () => {
     setSyncLockError(null);
     try {
-      const res = await fetch("/api/pdi/sync-lock", {
+      const res = await fetch(`/api/pdi/sync-lock${channelQuery}`, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -204,7 +207,7 @@ export default function SyncerClient() {
     } catch (e) {
       setSyncLockError(e instanceof Error ? e.message : "Failed to load sync lock status");
     }
-  }, []);
+  }, [channelQuery]);
 
   useEffect(() => {
     void refreshMappingFiles();
@@ -228,7 +231,7 @@ export default function SyncerClient() {
     try {
       const fd = new FormData();
       fd.append("mappingFile", file);
-      const res = await fetch("/api/pdi/mapping-files", { method: "POST", body: fd });
+      const res = await fetch(`/api/pdi/mapping-files${channelQuery}`, { method: "POST", body: fd });
       const data = (await res.json()) as MappingFilesResponse & {
         ok?: boolean;
         saved?: MappingFileEntry;
@@ -256,7 +259,7 @@ export default function SyncerClient() {
 
   async function clearSyncLock() {
     const confirmed = window.confirm(
-      "Only clear the sync lock if you are sure no PDI sync is currently running. Clear the global sync lock now?"
+      `Only clear the sync lock if you are sure no ${isText ? "text" : "Dialer"} PDI sync is currently running. Clear the ${isText ? "text" : "Dialer"} sync lock now?`
     );
     if (!confirmed) return;
 
@@ -264,7 +267,7 @@ export default function SyncerClient() {
     setSyncLockMessage(null);
     setSyncLockError(null);
     try {
-      const res = await fetch("/api/pdi/sync-lock", {
+      const res = await fetch(`/api/pdi/sync-lock${channelQuery}`, {
         method: "DELETE",
         credentials: "same-origin",
       });
@@ -344,6 +347,7 @@ export default function SyncerClient() {
           minRecords,
           rollbackRun: rollbackRun.trim() || undefined,
           mappingFileId,
+          channel,
         }),
       });
 
@@ -412,11 +416,24 @@ export default function SyncerClient() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">PDI Syncer</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          {isText ? "PDI Text Syncer" : "PDI Syncer"}
+        </h1>
         <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          Native TypeScript sync with live logs (default). Set{" "}
-          <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_SYNC_ENGINE=python</code> to use{" "}
-          <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">stw_to_pdi.py</code> instead.
+          {isText ? (
+            <>
+              Posts mapped Nithya text tags to PDI flags. Uses{" "}
+              <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">stw_text_pdi_mapping_*.json</code> from
+              Mapper Text mode. Flags are posted with PDI acquisition type{" "}
+              <strong>Text Bank</strong>. Dry-run first; live posts share the people ledger with Dialer.
+            </>
+          ) : (
+            <>
+              Native TypeScript sync with live logs (default). Set{" "}
+              <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">PDI_SYNC_ENGINE=python</code> to use{" "}
+              <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">stw_to_pdi.py</code> instead.
+            </>
+          )}
         </p>
       </div>
 
@@ -425,7 +442,8 @@ export default function SyncerClient() {
           <div>
             <h2 className="text-sm font-bold text-gray-900 dark:text-gray-100">Sync lock</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Prevents overlapping PDI syncs. Clear only when a previous run crashed or was interrupted.
+              Prevents overlapping {isText ? "text" : "Dialer"} PDI syncs. Clear only when a previous run crashed or
+              was interrupted.
             </p>
           </div>
           <button
@@ -510,7 +528,9 @@ export default function SyncerClient() {
             onChange={(e) => setMappingFileId(e.target.value)}
             className="w-full text-sm border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
           >
-            <option value="auto">Auto — newest in pdi-mappings</option>
+            <option value="auto">
+              Auto — newest {isText ? "stw_text_pdi_mapping_*.json" : "stw_pdi_mapping_*.json"}
+            </option>
             {(mappingCatalog?.files ?? []).map((f) => (
               <option key={f.id} value={f.id}>
                 {f.fileName} ({formatSource(f.source)}, {new Date(f.modifiedAt).toLocaleString()})
@@ -542,6 +562,13 @@ export default function SyncerClient() {
               {uploadMessage}
             </p>
           ) : null}
+          {mappingCatalog && mappingCatalog.files.length === 0 && !rollbackRun.trim() ? (
+            <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
+              {isText
+                ? "No stw_text_pdi_mapping_*.json in pdi-mappings yet. In Mapper Text mode, map Support and Moved, then Save to pdi-mappings (or upload the JSON here)."
+                : "No stw_pdi_mapping_*.json in pdi-mappings yet. Export from the Mapper, or upload a mapping JSON here."}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-4 items-center">
@@ -565,7 +592,11 @@ export default function SyncerClient() {
               setEnd(range.endDate);
             }}
             label="Sync range"
-            helpText="Range mode syncs survey results from the selected start through the selected end date."
+            helpText={
+              isText
+                ? "Range mode syncs Nithya text tags applied from the selected start through the selected end date."
+                : "Range mode syncs survey results from the selected start through the selected end date."
+            }
             maxDate={todayIsoDate()}
             tone="emerald"
           />
@@ -590,7 +621,9 @@ export default function SyncerClient() {
 
         <div>
           <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">
-            Rollback run ID (optional — Python engine only for now)
+            {isText
+              ? "Rollback run ID (optional — deletes PDI flags from that text sync run)"
+              : "Rollback run ID (optional — Python engine only for now)"}
           </label>
           <input
             value={rollbackRun}
@@ -603,14 +636,20 @@ export default function SyncerClient() {
         <button
           type="button"
           onClick={() => void runSync()}
-          disabled={loading || parityLoading}
+          disabled={
+            loading ||
+            parityLoading ||
+            (!rollbackRun.trim() && mappingCatalog !== null && mappingCatalog.files.length === 0)
+          }
           className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? "Running…" : "Run sync"}
         </button>
       </div>
 
-      <ParityReportCard report={parityReport} loading={parityLoading} onRun={() => void runParityCheck()} />
+      {isText ? null : (
+        <ParityReportCard report={parityReport} loading={parityLoading} onRun={() => void runParityCheck()} />
+      )}
 
       <SyncRunConsole events={logEvents} summary={tsSummary} status={runStatus} dryRun={dryRun} />
 

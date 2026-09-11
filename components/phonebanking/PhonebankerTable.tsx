@@ -20,7 +20,7 @@ export default function PhonebankerTable({ rows, selectedDate }: Props) {
   if (!filtered.length) {
     return (
       <p className="text-gray-500 dark:text-gray-400 text-sm text-center py-8">
-        No data for this day.
+        No data for this selection.
       </p>
     );
   }
@@ -37,16 +37,17 @@ export default function PhonebankerTable({ rows, selectedDate }: Props) {
               <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Date</th>
             )}
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">
-              Dials
+              Hrs on dialer
             </th>
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">
-              Call Hours
+              Hrs on calls
             </th>
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">
-              Dialer Hours
+              Surveyed
             </th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Login</th>
-            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Logout</th>
+            <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">
+              Strong Supports
+            </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -60,20 +61,17 @@ export default function PhonebankerTable({ rows, selectedDate }: Props) {
                   {row.callDate}
                 </td>
               )}
-              <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
-                {row.numDials.toLocaleString()}
+              <td className="px-4 py-3 text-right font-mono text-gray-700 dark:text-gray-300">
+                {fmtHours(row.totalDialerHours)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-700 dark:text-gray-300">
                 {fmtHours(row.totalCallHours)}
               </td>
-              <td className="px-4 py-3 text-right font-mono text-gray-700 dark:text-gray-300">
-                {fmtHours(row.totalDialerHours)}
+              <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
+                {row.surveyed.toLocaleString()}
               </td>
-              <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                {row.earliestLogin || "—"}
-              </td>
-              <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">
-                {row.latestLogout || "—"}
+              <td className="px-4 py-3 text-right font-mono text-emerald-700 dark:text-emerald-300 font-semibold">
+                {row.strongSupport.toLocaleString()}
               </td>
             </tr>
           ))}

@@ -1,6 +1,9 @@
 import { isFinalResultQuestionName } from "./daily-aggregate-survey-rollup";
 import { canonicalizePhonebankerName } from "./phonebanker-name";
-import { classifySurveyAnswerDisplayLabel } from "./survey-answer-consolidation";
+import {
+  classifySurveyAnswerDisplayLabel,
+  isStrongSupportSurveyHit,
+} from "./survey-answer-consolidation";
 import { makeSliceKey } from "./slice-key";
 import {
   isCanvassResultColumnQuestion,
@@ -137,7 +140,9 @@ export function buildPhonebankerBqOutcomeMap(
     if (!map.has(k)) map.set(k, emptyAcc());
     const acc = map.get(k)!;
 
-    if (isFinalResultQuestionName(r.questionName)) {
+    if (isStrongSupportSurveyHit(r.questionName, r.answerValue, profile)) {
+      acc.finalSS += r.responseCount;
+    } else if (isFinalResultQuestionName(r.questionName)) {
       addFinalResultCount(r.answerValue, r.responseCount, acc, profile);
     } else if (countsTowardDeclineColumn(r.questionName)) {
       acc.declineTotal += r.responseCount;

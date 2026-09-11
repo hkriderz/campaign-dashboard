@@ -3,10 +3,12 @@ import {
   listMappingFiles,
   saveUploadedMappingFile,
 } from "@/lib/pdi-tools/mapping-files";
+import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const payload = listMappingFiles();
+    const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
+    const payload = listMappingFiles(channel);
     return NextResponse.json(payload);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -16,14 +18,15 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
     const form = await req.formData();
     const file = form.get("mappingFile");
     if (!(file instanceof File) || file.size === 0) {
       return NextResponse.json({ error: "mappingFile is required.", code: 400 }, { status: 400 });
     }
     const text = await file.text();
-    const saved = saveUploadedMappingFile(file.name, text);
-    const payload = listMappingFiles();
+    const saved = saveUploadedMappingFile(file.name, text, channel);
+    const payload = listMappingFiles(channel);
     return NextResponse.json({ ok: true, saved, ...payload });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

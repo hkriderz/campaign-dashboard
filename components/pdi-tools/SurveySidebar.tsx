@@ -4,6 +4,8 @@ import React, { useRef, useState, useMemo } from "react";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import type { PdiQuestion, StwRow } from "@/lib/pdi-tools/types";
+import { mappingAnswerKey, mappingQuestionKey } from "@/lib/pdi-tools/channel";
+import { hasMappableTextQuestions } from "@/lib/pdi-tools/text-tag-stw-data";
 
 type CompletionFilter = "all" | "filled" | "empty";
 
@@ -52,14 +54,18 @@ export default function SurveySidebar() {
     const questions = state.stwData[surveyName] ?? {};
     const questionNames = Object.keys(questions);
     const totalQ = questionNames.length;
-    const mappedQ = questionNames.filter((q) => state.questionMappings[`${surveyName}||${q}`]).length;
+    const mappedQ = questionNames.filter((q) =>
+      state.questionMappings[mappingQuestionKey(state.channel, surveyName, q, state.textMappingScope)]
+    ).length;
     let totalA = 0;
     let mappedA = 0;
     for (const q of questionNames) {
       const answers = questions[q];
       totalA += answers.length;
       for (const a of answers) {
-        if (state.answerMappings[`${surveyName}||${q}||${a}`]) mappedA++;
+        if (state.answerMappings[mappingAnswerKey(state.channel, surveyName, q, a, state.textMappingScope)]) {
+          mappedA++;
+        }
       }
     }
     return { mappedQ, totalQ, mappedA, totalA };
@@ -80,7 +86,7 @@ export default function SurveySidebar() {
       return matchesSearch && matchesCompletionFilter(n, completionFilter);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [surveyNames, search, completionFilter, state.questionMappings, state.answerMappings]);
+  }, [surveyNames, search, completionFilter, state.questionMappings, state.answerMappings, state.textMappingScope]);
 
   const pdiCount = state.pdiQuestions.length;
   const stwRecords = Object.values(state.stwData).reduce(
@@ -136,13 +142,13 @@ export default function SurveySidebar() {
 
       <div className="px-3 pt-2.5 pb-2 border-b border-gray-200 dark:border-zinc-700/50">
         <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">
-          STW Surveys ({surveyNames.length})
+          {state.channel === "text" ? "Text campaigns" : "STW Surveys"} ({surveyNames.length})
         </p>
         <input
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter surveys…"
+          placeholder={state.channel === "text" ? "Filter campaigns…" : "Filter surveys…"}
           className="w-full text-[11px] px-2 py-1 rounded border border-gray-300 dark:border-zinc-700 focus:outline-none focus:ring-1 focus:ring-green-500/40 bg-gray-50 dark:bg-zinc-800 dark:bg-zinc-900 text-gray-800 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-600 transition-colors"
         />
         <div className="mt-2 grid grid-cols-3 gap-1">
@@ -166,27 +172,47 @@ export default function SurveySidebar() {
       <div className="flex-1 overflow-y-auto">
         {Object.keys(state.stwData).length === 0 ? (
           <p className="px-3 py-5 text-center text-[11px] text-gray-400 dark:text-zinc-600">
-            No survey data loaded.
+            {state.channel === "text" ? "No text campaign data loaded." : "No survey data loaded."}
           </p>
         ) : filtered.length === 0 ? (
           <p className="px-3 py-4 text-center text-[11px] text-gray-400 dark:text-zinc-600">
-            No surveys match the current filter.
+            {state.channel === "text"
+              ? "No campaigns match the current filter."
+              : "No surveys match the current filter."}
           </p>
         ) : (
           <ul>
             {filtered.map((name) => {
               const { mappedQ, totalQ, mappedA, totalA } = getSurveyStats(name);
               const isActive = state.activeSurvey === name;
+              const openable = state.channel !== "text" || hasMappableTextQuestions(state.stwData[name]);
+              const rowClass = `w-full text-left px-3 py-2 border-b border-gray-100 dark:border-zinc-800/80 border-l-2 ${
+                isActive
+                  ? "bg-green-50 dark:bg-green-900/20 border-l-green-500"
+                  : "border-l-transparent"
+              }`;
+
+              if (!openable) {
+                return (
+                  <li key={name}>
+                    <div className={`${rowClass} cursor-default opacity-80`}>
+                      <p className="text-[11px] leading-snug truncate text-gray-500 dark:text-zinc-400" title={name}>
+                        {name}
+                      </p>
+                      <p className="text-[10px] text-gray-400 dark:text-zinc-500 underline underline-offset-2 mt-0.5">
+                        No tags yet
+                      </p>
+                    </div>
+                  </li>
+                );
+              }
+
               return (
                 <li key={name}>
                   <button
                     type="button"
                     onClick={() => dispatch({ type: "SET_ACTIVE_SURVEY", survey: name })}
-                    className={`w-full text-left px-3 py-2 border-b border-gray-100 dark:border-zinc-800/80 transition-colors border-l-2 ${
-                      isActive
-                        ? "bg-green-50 dark:bg-green-900/20 border-l-green-500"
-                        : "border-l-transparent hover:bg-gray-50 dark:hover:bg-zinc-800/60"
-                    }`}
+                    className={`${rowClass} hover:bg-gray-50 dark:hover:bg-zinc-800/60`}
                   >
                     <p
                       className={`text-[11px] leading-snug truncate mb-1 ${

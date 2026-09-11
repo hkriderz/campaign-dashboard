@@ -14,9 +14,11 @@ import {
   snapshotsDisabled,
 } from "../bq-snapshot-store";
 import { cachedBq } from "../bq-cache";
-import { buildTagWhereClause, getTagById } from "../campaign-tags";
+import { buildTagWhereClause, campaignNameMatchesTag, getPhonebankingTags, getTagById, resolveSurveyScriptProfile } from "../campaign-tags";
 import { phonebankingPhoneBanksTag } from "../phonebanking-data-cache";
 import { canonicalizePhonebankerName } from "../phonebanker-name";
+import { buildPhonebankerBqOutcomeMap } from "../phonebanker-bq-outcomes";
+import { makeSliceKey } from "../slice-key";
 import { buildDisclaimerHintsPattern, buildPhraseNormalizedExpr } from "../survey-i18n/bq-expressions";
 import {
   SCRIPT_BLOCK_EXCLUSION_REGEX_BODY,
@@ -30,6 +32,7 @@ import type {
   TagDailyCallerStat,
   PhonebankerQuestionResponseStat,
   CallSurveyRowForFill,
+  SurveyScriptProfile,
 } from "../types";
 
 const P = PROJECT;
@@ -53,6 +56,7 @@ function withDailyCallerMetricDefaults(row: TagDailyCallerStat): TagDailyCallerS
   return {
     ...row,
     totalCalls: row.totalCalls ?? row.numDials,
+    strongSupport: row.strongSupport ?? 0,
   };
 }
 
@@ -362,6 +366,8 @@ async function fetchAllPhonebankersForDateUncached(isoDate: string): Promise<Pho
         totalDials: 0,
         totalCallHours: 0,
         totalDialerHours: 0,
+        surveyed: 0,
+        strongSupport: 0,
         daysWorked: 0,
         campaigns: [],
       });
@@ -390,6 +396,94 @@ export async function fetchAllTagStats(
     })
   );
   return result;
+}
+
+function sessionMetricKey(callDate: string, phonebankerName: string): string {
+  return `${callDate}::${canonicalizePhonebankerName(phonebankerName)}`;
+}
+
+function addDailyCallerSurveyMetrics(
+  rows: readonly TagDailyCallerStat[],
+  campaignId: string,
+  surveyedByKey: Map<string, number>,
+  strongSupportByKey: Map<string, number>
+): void {
+  for (const r of rows) {
+    if (r.campaignId !== campaignId) continue;
+    const k = sessionMetricKey(r.callDate, r.phonebankerName);
+    surveyedByKey.set(k, (surveyedByKey.get(k) ?? 0) + r.surveyed);
+    strongSupportByKey.set(k, (strongSupportByKey.get(k) ?? 0) + (r.strongSupport ?? 0));
+  }
+}
+
+function overlayStrongSupportFromQuestionStats(
+  questions: readonly PhonebankerQuestionResponseStat[],
+  campaignId: string,
+  profile: SurveyScriptProfile,
+  strongSupportByKey: Map<string, number>
+): void {
+  const scoped = questions.filter((r) => r.campaignId === campaignId);
+  const outcomeMap = buildPhonebankerBqOutcomeMap(scoped, profile);
+  const seen = new Set<string>();
+  for (const r of scoped) {
+    const k = sessionMetricKey(r.callDate, r.phonebankerName);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const acc = outcomeMap.get(
+      `${makeSliceKey(r.campaignName, r.callDate)}|${canonicalizePhonebankerName(r.phonebankerName)}`
+    );
+    if (acc) strongSupportByKey.set(k, acc.finalSS);
+  }
+}
+
+async function loadSurveyMetricsForCampaign(
+  campaignId: string,
+  campaignName: string
+): Promise<{ surveyedByKey: Map<string, number>; strongSupportByKey: Map<string, number> }> {
+  const tags = getPhonebankingTags();
+  const matching =
+    tags.find((t) => !t.id.startsWith("qc-") && campaignNameMatchesTag(campaignName, t)) ??
+    tags.find((t) => campaignNameMatchesTag(campaignName, t));
+  const profile: SurveyScriptProfile = matching
+    ? resolveSurveyScriptProfile(matching)
+    : "faizahTraci";
+
+  const surveyedByKey = new Map<string, number>();
+  const strongSupportByKey = new Map<string, number>();
+  if (!matching) {
+    return { surveyedByKey, strongSupportByKey };
+  }
+
+  const snap = snapshotsDisabled() ? null : loadDailyCallerSnapshot(matching.id);
+  if (snap) {
+    addDailyCallerSurveyMetrics(
+      snap.rows.map(withDailyCallerMetricDefaults),
+      campaignId,
+      surveyedByKey,
+      strongSupportByKey
+    );
+    const persistedSs = snap.rows.some((r) =>
+      Object.prototype.hasOwnProperty.call(r, "strongSupport")
+    );
+    if (persistedSs) {
+      return { surveyedByKey, strongSupportByKey };
+    }
+    try {
+      const questions = await fetchTagPhonebankerQuestionStats(matching.id);
+      overlayStrongSupportFromQuestionStats(questions, campaignId, profile, strongSupportByKey);
+    } catch {
+      // Keep surveyed from daily; SS stays 0 when question-stats are unavailable.
+    }
+    return { surveyedByKey, strongSupportByKey };
+  }
+
+  try {
+    const daily = await fetchTagDailyCallerStats(matching.id);
+    addDailyCallerSurveyMetrics(daily, campaignId, surveyedByKey, strongSupportByKey);
+  } catch {
+    // Empty maps — View still shows hours/dials from the campaign BQ queries.
+  }
+  return { surveyedByKey, strongSupportByKey };
 }
 
 // ─── Per-phonebanker daily stats for a specific campaign ─────────────────────
@@ -533,6 +627,8 @@ export async function fetchPhoneBankDetail(
         totalDialerSeconds: 0,
         totalCallHours: 0,
         totalDialerHours: 0,
+        surveyed: 0,
+        strongSupport: 0,
         earliestLogin: toStr(r.earliest_login).slice(11, 19),
         latestLogout: toStr(r.latest_logout).slice(11, 19),
       });
@@ -552,15 +648,37 @@ export async function fetchPhoneBankDetail(
     totalDialerHours: Math.round((d.totalDialerSeconds / 3600) * 100) / 100,
   }));
 
+  const survey = await loadSurveyMetricsForCampaign(campaignId, campaign.campaignName);
+  for (const d of dailyStats) {
+    const k = `${d.callDate}::${d.phonebankerName}`;
+    d.surveyed += survey.surveyedByKey.get(k) ?? 0;
+    d.strongSupport += survey.strongSupportByKey.get(k) ?? 0;
+  }
+
+  // Drop idle / wrong-bank logins (name-only sessions with no dials, talk time, or survey).
+  // Same rule as tagDailyCallerHasWorkBeyondLoggedHours — logged-in time alone is not work.
+  const workingDailyStats = dailyStats.filter(
+    (d) =>
+      Boolean(d.phonebankerName.trim()) &&
+      (d.numDials > 0 || d.totalCallSeconds > 0 || d.surveyed > 0 || d.strongSupport > 0)
+  );
+
+  campaign.totalSurveyed = workingDailyStats.reduce((s, d) => s + d.surveyed, 0);
+  campaign.totalStrongSupport = workingDailyStats.reduce((s, d) => s + d.strongSupport, 0);
+  campaign.totalDialerHours =
+    Math.round((workingDailyStats.reduce((s, d) => s + d.totalDialerSeconds, 0) / 3600) * 100) / 100;
+
   // Roll up per-phonebanker aggregates
   const aggMap = new Map<string, PhonebankerAggregateStat>();
-  for (const d of dailyStats) {
+  for (const d of workingDailyStats) {
     if (!aggMap.has(d.phonebankerName)) {
       aggMap.set(d.phonebankerName, {
         phonebankerName: d.phonebankerName,
         totalDials: 0,
         totalCallHours: 0,
         totalDialerHours: 0,
+        surveyed: 0,
+        strongSupport: 0,
         daysWorked: 0,
         campaigns: [campaign.campaignName],
       });
@@ -571,19 +689,21 @@ export async function fetchPhoneBankDetail(
       Math.round((agg.totalCallHours + d.totalCallHours) * 100) / 100;
     agg.totalDialerHours =
       Math.round((agg.totalDialerHours + d.totalDialerHours) * 100) / 100;
+    agg.surveyed += d.surveyed;
+    agg.strongSupport += d.strongSupport;
     agg.daysWorked += 1;
   }
 
   const phonebankerAggregates = Array.from(aggMap.values()).sort(
-    (a, b) => b.totalDials - a.totalDials
+    (a, b) => b.strongSupport - a.strongSupport || b.surveyed - a.surveyed || a.phonebankerName.localeCompare(b.phonebankerName)
   );
   campaign.uniqueCallers = phonebankerAggregates.length;
 
   const availableDates = [
-    ...new Set(dailyStats.map((d) => d.callDate).filter(Boolean)),
+    ...new Set(workingDailyStats.map((d) => d.callDate).filter(Boolean)),
   ].sort((a, b) => b.localeCompare(a));
 
-  return { campaign, dailyStats, phonebankerAggregates, availableDates };
+  return { campaign, dailyStats: workingDailyStats, phonebankerAggregates, availableDates };
 }
 
 // ─── Per-phonebanker stats across ALL campaigns for a tag ────────────────────
@@ -663,6 +783,8 @@ export async function fetchPhonebankersByTag(
         totalDials: 0,
         totalCallHours: 0,
         totalDialerHours: 0,
+        surveyed: 0,
+        strongSupport: 0,
         daysWorked: 0,
         campaigns: [],
       });
@@ -736,6 +858,9 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
   // disclaimer and has a structured lettered answer (matches stw_phonebanker_survey_export.py
   // is_structured_option: leading letter + . ) - : etc.). Only calls that also qualify as
   // talking-to-correct-person (same rules as correct_person_counts) — so surveyed <= correct person.
+  //
+  // Strong support: distinct call_id with a Final Result / pitch SS hit (combined answer text or
+  // split "Final Result - Strong Support" column). Same Pacific callers.created_at grain as surveyed.
   //
   // Rows with only logged-in time (wrong phonebank, no dials / no call time / no survey funnel) are
   // dropped after merge — see tagDailyCallerHasWorkBeyondLoggedHours.
@@ -947,6 +1072,57 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       FROM first_structured_answer_per_call
       GROUP BY campaign_id, campaign_name, phonebanker_name, call_date
     ),
+    strong_support_calls AS (
+      SELECT DISTINCT
+        sb.campaign_id,
+        sb.campaign_name,
+        sb.phonebanker_name,
+        sb.call_date,
+        sb.call_id
+      FROM survey_base sb
+      WHERE NOT REGEXP_CONTAINS(
+          LOWER(sb.question_name),
+          r'${SCRIPT_BLOCK_EXCLUSION_REGEX_BODY}'
+        )
+        AND NOT REGEXP_CONTAINS(LOWER(sb.question_name), r'${TRACI_SCRIPT_EXCLUSION_REGEX_BODY}')
+        AND NOT REGEXP_CONTAINS(LOWER(TRIM(sb.question_name)), r'${disclaimerHintsSql}')
+        AND (
+          (
+            REGEXP_CONTAINS(
+              sb.question_name_norm,
+              r'(final\\s*result|resultado\\s*final|\\bpitch\\b).*(strong\\s*support|\\bss\\b|fuerte\\s+apoyo|support\\s+(faizah|ada|eunisses))'
+            )
+            AND NOT REGEXP_CONTAINS(sb.question_name_norm, r'strong\\s*oppose')
+            AND sb.answer_raw != ''
+            AND NOT REGEXP_CONTAINS(
+              sb.answer_value_norm,
+              r'^(no|false|0|n|\\[no answer recorded\\])$'
+            )
+          )
+          OR (
+            REGEXP_CONTAINS(sb.question_name_norm, r'final\\s*result|resultado\\s*final')
+            AND NOT REGEXP_CONTAINS(sb.question_name_norm, r'strong\\s*oppose')
+            AND REGEXP_CONTAINS(
+              sb.answer_value_norm_i18n,
+              r'strong\\s*support|\\bss\\b|fuerte\\s+apoyo|support\\s+(faizah|ada|eunisses)|apoya.*(faizah|ada|eunisses)|\\bfaizah\\b|\\bmalik\\b|\\beunisses\\b|\\bhernandez\\b'
+            )
+            AND NOT REGEXP_CONTAINS(
+              sb.answer_value_norm_i18n,
+              r'oppose|strong\\s*oppose|support\\s+traci|traci\\s+park|other\\s+candidate'
+            )
+          )
+        )
+    ),
+    strong_support_counts AS (
+      SELECT
+        campaign_id,
+        campaign_name,
+        phonebanker_name,
+        call_date,
+        COUNT(DISTINCT call_id) AS strong_support
+      FROM strong_support_calls
+      GROUP BY campaign_id, campaign_name, phonebanker_name, call_date
+    ),
     daily_summary AS (
       SELECT
         campaign_id,
@@ -996,6 +1172,8 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       UNION DISTINCT
       SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM surveyed_counts
       UNION DISTINCT
+      SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM strong_support_counts
+      UNION DISTINCT
       SELECT campaign_id, campaign_name, phonebanker_name, call_date FROM dial_counts
     )
     SELECT
@@ -1013,6 +1191,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       COALESCE(cc.calls_answered, 0) AS calls_answered,
       COALESCE(cp.talking_to_correct_person, 0) AS talking_to_correct_person,
       COALESCE(sc.surveyed, 0) AS surveyed,
+      COALESCE(ssc.strong_support, 0) AS strong_support,
       COALESCE(ds.total_call_seconds, 0) AS total_call_seconds,
       COALESCE(ds.total_dialer_seconds, 0) AS total_dialer_seconds,
       COALESCE(dc.num_dials, 0) AS num_dials
@@ -1040,6 +1219,10 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       ON mg.campaign_id = sc.campaign_id
       AND mg.phonebanker_name = sc.phonebanker_name
       AND mg.call_date = sc.call_date
+    LEFT JOIN strong_support_counts ssc
+      ON mg.campaign_id = ssc.campaign_id
+      AND mg.phonebanker_name = ssc.phonebanker_name
+      AND mg.call_date = ssc.call_date
     ORDER BY mg.call_date DESC, mg.campaign_name, mg.phonebanker_name
   `;
 
@@ -1061,6 +1244,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
         callsAnswered: 0,
         talkingToCorrectPerson: 0,
         surveyed: 0,
+        strongSupport: 0,
         numDials: 0,
         totalCallSeconds: 0,
         totalDialerSeconds: 0,
@@ -1071,6 +1255,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
     row.callsAnswered += toNum(r.calls_answered);
     row.talkingToCorrectPerson += toNum(r.talking_to_correct_person);
     row.surveyed += toNum(r.surveyed);
+    row.strongSupport += toNum(r.strong_support);
     row.numDials += toNum(r.num_dials);
     row.totalCallSeconds += toNum(r.total_call_seconds);
     row.totalDialerSeconds += toNum(r.total_dialer_seconds);
@@ -1085,6 +1270,7 @@ export function tagDailyCallerHasWorkBeyondLoggedHours(row: TagDailyCallerStat):
     row.callsAnswered > 0 ||
     row.talkingToCorrectPerson > 0 ||
     row.surveyed > 0 ||
+    (row.strongSupport ?? 0) > 0 ||
     row.totalCallSeconds > 0 ||
     row.totalCalls > 0 ||
     row.numDials > 0

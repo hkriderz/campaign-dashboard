@@ -5,6 +5,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
+import DailyAggregateSection from "@/components/phonebanking/DailyAggregateSection";
 import TabBar from "@/components/phonebanking/TabBar";
 import type { AllCampaignsDayDashboardPayload } from "@/lib/all-campaigns-day-dashboard";
 import type { PhoneBankSummary } from "@/lib/types";
@@ -131,15 +132,6 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
     [replaceQuery]
   );
 
-  const onClearDate = useCallback(() => {
-    replaceQuery((p) => {
-      p.delete(ALL_DATE_PARAM);
-      p.delete(ALL_START_PARAM);
-      p.delete(ALL_END_PARAM);
-      p.delete(ALL_TAB_PARAM);
-    });
-  }, [replaceQuery]);
-
   useEffect(() => {
     if (!allStartDate) {
       setDayDashboard(null);
@@ -189,26 +181,15 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
-        <div className="w-full max-w-xl">
-          <DateRangePicker
-            startDate={allStartDate}
-            endDate={allEndDate}
-            onChange={onDateRangeChange}
-            label="Filter"
-            helpText="Choose one Pacific day or a multi-day range across all campaign tags."
-            allowEmpty
-          />
-        </div>
-        {allStartDate ? (
-          <button
-            type="button"
-            onClick={onClearDate}
-            className="text-xs font-medium text-indigo-600 dark:text-indigo-300 hover:underline active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 self-start sm:self-auto"
-          >
-            Clear range (full window)
-          </button>
-        ) : null}
+      <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-950/30">
+        <DateRangePicker
+          startDate={allStartDate}
+          endDate={allEndDate}
+          onChange={onDateRangeChange}
+          label="Filter"
+          helpText="Choose one Pacific day or a multi-day range across all campaign tags. Clear to show the full window."
+          allowEmpty
+        />
       </div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
         Leave the range empty for the usual all-time window list (since Dec 1, 2025). Choosing a range loads merged
@@ -220,6 +201,29 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
         <div className="rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 p-3 text-sm text-red-800 dark:text-red-200">
           Could not load day-scoped data: <span className="font-mono text-xs">{dayError}</span>
         </div>
+      ) : null}
+
+      {showTabs && d && d.filteredSlices.length > 0 ? (
+        <DailyAggregateSection
+          tagId="_all_campaigns"
+          basePath="/phonebanking"
+          activeTab={activeTab}
+          availableDates={[]}
+          activeDate={allStartDate}
+          activeEndDate={allEndDate}
+          dateLabel={allDateLabel}
+          slices={d.filteredSlices}
+          uniquePhonebankers={d.uniquePhonebankers}
+          showPollingAggregate
+          bqPollingBreakdown={d.bqPollingBreakdown}
+          bqFinalResultBreakdown={d.bqFinalResultBreakdown}
+          finalResultFromCallFill={d.finalResultFromCallFill}
+          aggregateLexicon={d.aggregateLexicon}
+          finalResultUsesScriptOptionLabels={false}
+          aggregateScopeRows={d.aggregateScopeRows}
+          surveyScriptProfile={d.surveyScriptProfile}
+          hideDatePicker
+        />
       ) : null}
 
       {showTabs ? (

@@ -1,4 +1,8 @@
-import type { AggregateAnswerLine } from "./daily-aggregate-survey-rollup";
+import {
+  effectiveFinalResultAnswerLabelForRollup,
+  isFinalResultQuestionName,
+  type AggregateAnswerLine,
+} from "./daily-aggregate-survey-rollup";
 import type { SurveyScriptProfile } from "./types";
 import { normalizeSurveyTextForMatching } from "./survey-i18n/rules";
 
@@ -226,6 +230,50 @@ export function classifySurveyAnswerDisplayLabel(
   }
 
   return rawLabel.trim();
+}
+
+const STRONG_SUPPORT_DISPLAY_BUCKETS = new Set([
+  "Support Faizah",
+  "Support Ada",
+  "Support Eunisses",
+]);
+
+function isAffirmativeSurveyAnswer(answerValue: string): boolean {
+  const t = answerValue.trim().toLowerCase();
+  if (!t || t === "[no answer recorded]") return false;
+  return !/^(no|false|0|n)$/i.test(t);
+}
+
+/**
+ * STW split columns where the question name *is* the SS option
+ * (e.g. "Final Result - Strong Support", "Pitch - Strong Support").
+ */
+export function isSplitStrongSupportQuestionName(questionName: string): boolean {
+  const t = questionName.trim().toLowerCase();
+  if (/strong\s*oppose/.test(t)) return false;
+  if (/\boppose\b/.test(t) && !/strong\s*support/.test(t)) return false;
+  const isFinalOrPitch = /\bfinal\s*result\b|resultado\s*final|\bpitch\b/.test(t);
+  const isSsOption =
+    /strong\s*support|\bss\b|fuerte\s+apoyo|support\s+(faizah|ada|eunisses)/.test(t);
+  return isFinalOrPitch && isSsOption;
+}
+
+/**
+ * True when this survey row should count as one strong-support hit
+ * (Support Faizah / Ada / Eunisses, or a checked split SS column).
+ */
+export function isStrongSupportSurveyHit(
+  questionName: string,
+  answerValue: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  if (isSplitStrongSupportQuestionName(questionName) && isAffirmativeSurveyAnswer(answerValue)) {
+    return true;
+  }
+  if (!isFinalResultQuestionName(questionName)) return false;
+  const label = effectiveFinalResultAnswerLabelForRollup(questionName, answerValue);
+  if (!label) return false;
+  return STRONG_SUPPORT_DISPLAY_BUCKETS.has(classifySurveyAnswerDisplayLabel(label, profile));
 }
 
 /**

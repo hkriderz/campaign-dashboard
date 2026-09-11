@@ -66,6 +66,14 @@ const DEFAULT_CORE_CANDIDATE_TAGS: CampaignTag[] = [
     textColor: "#ffffff",
     mode: "both",
   },
+  {
+    id: "nithya",
+    label: "Nithya Raman",
+    searchTerms: ["nithya"],
+    color: "#0d9488",
+    textColor: "#ffffff",
+    mode: "both",
+  },
 ];
 
 function qcMarkerGroup(): string[] {
@@ -154,7 +162,16 @@ function buildTagsFromFile(config: CampaignTagsConfigFileV1): CampaignTag[] {
       qcBuckets.push(buildQcBucketTag(primary));
     }
   }
-  return [...primaries, ...qcBuckets];
+  return withNithyaIfMissing([...primaries, ...qcBuckets]);
+}
+
+function withNithyaIfMissing(tags: CampaignTag[]): CampaignTag[] {
+  if (tags.some((t) => t.id === "nithya")) return tags;
+  const nithya = DEFAULT_CORE_CANDIDATE_TAGS.find((t) => t.id === "nithya");
+  if (!nithya) return tags;
+  const primaries = tags.filter((t) => !isDerivedQcTagId(t.id));
+  const qc = tags.filter((t) => isDerivedQcTagId(t.id));
+  return [...primaries, nithya, ...qc, buildQcBucketTag(nithya)];
 }
 
 function computeAllTags(): CampaignTag[] {
@@ -194,6 +211,43 @@ export function getPhonebankingTags(): CampaignTag[] {
   return allTagsList().filter(
     (t) => t.mode === "phonebanking" || t.mode === "both"
   );
+}
+
+function campaignNameMatchesCode(nameLower: string, raw: string): boolean {
+  const c = regexSafeCode(raw);
+  if (!c) return false;
+  return new RegExp(`(^|[^a-z0-9])${c}(\\s|-)?[0-9]`).test(nameLower);
+}
+
+/** True when a campaign display name would be included in this tag’s SQL filter. */
+export function campaignNameMatchesTag(campaignName: string, tag: CampaignTag): boolean {
+  const n = campaignName.trim().toLowerCase();
+  if (!n) return false;
+
+  if (tag.searchTermGroups && tag.searchTermGroups.length > 0) {
+    const lastIdx = tag.searchTermGroups.length - 1;
+    return tag.searchTermGroups.every((group, i) => {
+      const termHit = (group ?? []).some((t) => {
+        const term = t.trim().toLowerCase();
+        return Boolean(term) && n.includes(term);
+      });
+      const codeHit =
+        i === lastIdx && (tag.campaignCodes ?? []).some((raw) => campaignNameMatchesCode(n, raw));
+      return termHit || codeHit;
+    });
+  }
+
+  const termHit = tag.searchTerms.some((t) => {
+    const term = t.trim().toLowerCase();
+    return Boolean(term) && n.includes(term);
+  });
+  const codeHit = (tag.campaignCodes ?? []).some((raw) => campaignNameMatchesCode(n, raw));
+  return termHit || codeHit;
+}
+
+/** Same candidate list as phone banking (includes Nithya once present in defaults or config). */
+export function getTextingTags(): CampaignTag[] {
+  return getPhonebankingTags();
 }
 
 /** Resolved phone-banking tags for UI (includes derived `qc-*` slugs). */

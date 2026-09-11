@@ -7,6 +7,7 @@ import ThemeToggle from "./ThemeToggle";
 
 const MODES = [
   { href: "/phonebanking", label: "Phone Banking", shortLabel: "Phone", icon: "📞" },
+  { href: "/texting", label: "Texting", shortLabel: "Text", icon: "💬" },
   { href: "/canvassing", label: "Canvassing", shortLabel: "Canvas", icon: "🚶" },
   { href: "/district-classifier", label: "Districts", shortLabel: "Districts", icon: "🗺" },
   { href: "/pdi", label: "PDI Tools", shortLabel: "PDI", icon: "🔧" },
@@ -25,7 +26,9 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
 
   const showMenu =
     showSidebarToggle &&
-    (pathname.startsWith("/phonebanking") || pathname.startsWith("/canvassing"));
+    (pathname.startsWith("/phonebanking") ||
+      pathname.startsWith("/texting") ||
+      pathname.startsWith("/canvassing"));
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-200/80 dark:border-white/10 bg-white/75 dark:bg-gray-950/80 backdrop-blur-xl">
