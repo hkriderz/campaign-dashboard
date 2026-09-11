@@ -1,5 +1,5 @@
 import { sortAggregateAnswerLines } from "./aggregate-answer-sort";
-import { makeSliceKey } from "./slice-key";
+import { dailyCallerSliceKey } from "./slice-key";
 import {
   isCanvassResultColumnQuestion,
   isTraciViolationQuestionName,
@@ -109,7 +109,7 @@ export function rollupPollingAndFinalAnswers(
   const finalMap = new Map<string, number>();
 
   for (const r of rows) {
-    const sk = makeSliceKey(r.campaignName, r.callDate);
+    const sk = dailyCallerSliceKey(r);
     if (!opts.sliceKeys.has(sk)) continue;
     if (opts.dateFilter && r.callDate !== opts.dateFilter) continue;
 

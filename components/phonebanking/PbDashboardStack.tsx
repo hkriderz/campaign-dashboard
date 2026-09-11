@@ -33,6 +33,8 @@ type PendingSliceUndo = {
 
 export type PbDashboardSlice = {
   sliceKey: string;
+  /** Scale to Win campaign id when this slice came from BigQuery. */
+  campaignId?: string;
   campaignName: string;
   callDate: string;
   /** Raw call rows from Scale to Win's `calls` table for this campaign×day. */
@@ -474,6 +476,8 @@ function computeSliceRenderModel(
         talkingToCorrectPerson: prev.talkingToCorrectPerson + r.talkingToCorrectPerson,
         surveyed: prev.surveyed + r.surveyed,
         strongSupport: (prev.strongSupport ?? 0) + (r.strongSupport ?? 0),
+        strongSupportSynthesized:
+          (prev.strongSupportSynthesized ?? 0) + (r.strongSupportSynthesized ?? 0),
         numDials: prev.numDials + r.numDials,
         totalCallSeconds: prev.totalCallSeconds + r.totalCallSeconds,
         totalDialerSeconds: prev.totalDialerSeconds + r.totalDialerSeconds,

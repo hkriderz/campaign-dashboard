@@ -1,5 +1,7 @@
 "use client";
 
+import { secToTime } from "@/lib/csv-parser";
+import { formatStrongSupportCell } from "@/lib/strong-support-from-survey";
 import type { PhonebankerDailyStat } from "@/lib/types";
 
 type Props = {
@@ -7,23 +9,26 @@ type Props = {
   selectedDate: string | null;
 };
 
-function fmtHours(h: number) {
-  if (h === 0) return "0.00h";
-  return `${h.toFixed(2)}h`;
+function hoursCell(seconds: number): string {
+  return secToTime(Math.max(0, seconds));
 }
 
 export default function PhonebankerTable({ rows, selectedDate }: Props) {
-  const filtered = selectedDate
-    ? rows.filter((r) => r.callDate === selectedDate)
-    : rows;
+  const showDate = selectedDate === null;
 
-  if (!filtered.length) {
+  if (!rows.length) {
     return (
       <p className="text-gray-500 dark:text-gray-400 text-sm text-center py-8">
         No data for this selection.
       </p>
     );
   }
+
+  const totalDialerSeconds = rows.reduce((s, r) => s + r.totalDialerSeconds, 0);
+  const totalCallSeconds = rows.reduce((s, r) => s + r.totalCallSeconds, 0);
+  const totalSurveyed = rows.reduce((s, r) => s + r.surveyed, 0);
+  const totalStrongSupport = rows.reduce((s, r) => s + r.strongSupport, 0);
+  const totalSynthesized = rows.reduce((s, r) => s + (r.strongSupportSynthesized ?? 0), 0);
 
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-900">
@@ -33,7 +38,7 @@ export default function PhonebankerTable({ rows, selectedDate }: Props) {
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">
               Phonebanker
             </th>
-            {!selectedDate && (
+            {showDate && (
               <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300">Date</th>
             )}
             <th className="px-4 py-3 font-semibold text-gray-600 dark:text-gray-300 text-right">
@@ -51,27 +56,43 @@ export default function PhonebankerTable({ rows, selectedDate }: Props) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-          {filtered.map((row, i) => (
+          <tr className="bg-gray-50 dark:bg-gray-800 border-b-2 border-gray-200 dark:border-gray-600 font-semibold">
+            <td className="px-4 py-3 text-gray-900 dark:text-gray-100">TOTAL</td>
+            {showDate && <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs">—</td>}
+            <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
+              {hoursCell(totalDialerSeconds)}
+            </td>
+            <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
+              {hoursCell(totalCallSeconds)}
+            </td>
+            <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
+              {totalSurveyed.toLocaleString()}
+            </td>
+            <td className="px-4 py-3 text-right font-mono text-emerald-700 dark:text-emerald-300">
+              {formatStrongSupportCell(totalStrongSupport, totalSynthesized)}
+            </td>
+          </tr>
+          {rows.map((row, i) => (
             <tr key={i} className="hover:bg-indigo-50/30 dark:hover:bg-gray-800 transition-colors">
               <td className="px-4 py-3 font-medium text-gray-900 dark:text-gray-100">
                 {row.phonebankerName}
               </td>
-              {!selectedDate && (
+              {showDate && (
                 <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs font-mono">
                   {row.callDate}
                 </td>
               )}
               <td className="px-4 py-3 text-right font-mono text-gray-700 dark:text-gray-300">
-                {fmtHours(row.totalDialerHours)}
+                {hoursCell(row.totalDialerSeconds)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-700 dark:text-gray-300">
-                {fmtHours(row.totalCallHours)}
+                {hoursCell(row.totalCallSeconds)}
               </td>
               <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
                 {row.surveyed.toLocaleString()}
               </td>
               <td className="px-4 py-3 text-right font-mono text-emerald-700 dark:text-emerald-300 font-semibold">
-                {row.strongSupport.toLocaleString()}
+                {formatStrongSupportCell(row.strongSupport, row.strongSupportSynthesized ?? 0)}
               </td>
             </tr>
           ))}

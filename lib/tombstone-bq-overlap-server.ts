@@ -1,6 +1,6 @@
 import { listTombstoneEntries } from "@/lib/csv-slice-tombstones";
 import { loadDailyCallerSnapshot } from "@/lib/bq-snapshot-store";
-import { makeSliceKey } from "@/lib/slice-key";
+import { tombstoneKeysForRow } from "@/lib/slice-key";
 import type { TagDailyCallerStat } from "@/lib/types";
 
 export type TombstoneBqOverlapRow = {
@@ -18,7 +18,7 @@ export function getTombstoneBqOverlapForTag(tagId: string): TombstoneBqOverlapRo
   const bqSliceKeys = new Set<string>();
   if (snap?.rows?.length) {
     for (const row of snap.rows as TagDailyCallerStat[]) {
-      bqSliceKeys.add(makeSliceKey(row.campaignName, row.callDate));
+      for (const k of tombstoneKeysForRow(row)) bqSliceKeys.add(k);
     }
   }
   const tombEntries = listTombstoneEntries(tagId);

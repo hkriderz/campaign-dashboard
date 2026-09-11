@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { secToTime } from "@/lib/csv-parser";
 import type { PhoneBankSummary } from "@/lib/types";
 
 const DEFAULT_NEUTRAL_DOT = "#64748b";
@@ -15,11 +16,6 @@ type Props = {
 
 function fmt(n: number) {
   return n.toLocaleString();
-}
-
-function fmtHours(h: number) {
-  if (h === 0) return "0m";
-  return h >= 1 ? `${h.toFixed(1)}h` : `${Math.round(h * 60)}m`;
 }
 
 export default function PhoneBankTable({
@@ -82,7 +78,7 @@ export default function PhoneBankTable({
                 </td>
               ) : null}
               <td className="px-4 py-3 text-right font-mono text-gray-800 dark:text-gray-200">
-                {fmtHours(pb.totalHours)}
+                {secToTime(pb.totalSeconds)}
               </td>
               <td className="px-4 py-3 text-right text-gray-700 dark:text-gray-300">
                 {pb.uniqueCallers}

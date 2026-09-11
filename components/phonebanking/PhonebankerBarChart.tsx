@@ -31,10 +31,16 @@ const SERIES_LABELS: Record<string, string> = {
 
 const SERIES_SWATCHES: Record<string, { light: string; dark: string }> = {
   totalDialerHours: { light: "#64748b", dark: "#94a3b8" },
-  totalCallHours: { light: "#10b981", dark: "#45d399" },
+  totalCallHours: { light: "#d97706", dark: "#fbbf24" },
   surveyed: { light: "#0ea5e9", dark: "#7dd3fc" },
   strongSupport: { light: "#16a34a", dark: "#4ade80" },
 };
+
+function seriesFill(dataKey: string, darkMode: boolean): string {
+  const swatch = SERIES_SWATCHES[dataKey];
+  if (!swatch) return darkMode ? "#9ca3af" : "#6b7280";
+  return darkMode ? swatch.dark : swatch.light;
+}
 
 function isHoursKey(dataKey: string): boolean {
   return dataKey === "totalDialerHours" || dataKey === "totalCallHours";
@@ -158,7 +164,7 @@ export default function PhonebankerBarChart({ data, darkMode = false }: Props) {
             yAxisId="hours"
             dataKey="totalDialerHours"
             name="totalDialerHours"
-            fill={darkMode ? "#94a3b8" : "#64748b"}
+            fill={seriesFill("totalDialerHours", darkMode)}
             radius={[3, 3, 0, 0]}
             maxBarSize={22}
           />
@@ -166,7 +172,7 @@ export default function PhonebankerBarChart({ data, darkMode = false }: Props) {
             yAxisId="hours"
             dataKey="totalCallHours"
             name="totalCallHours"
-            fill={darkMode ? "#45d399" : "#10b981"}
+            fill={seriesFill("totalCallHours", darkMode)}
             radius={[3, 3, 0, 0]}
             maxBarSize={22}
           />
@@ -174,7 +180,7 @@ export default function PhonebankerBarChart({ data, darkMode = false }: Props) {
             yAxisId="counts"
             dataKey="surveyed"
             name="surveyed"
-            fill={darkMode ? "#7dd3fc" : "#0ea5e9"}
+            fill={seriesFill("surveyed", darkMode)}
             radius={[3, 3, 0, 0]}
             maxBarSize={22}
           />
@@ -182,7 +188,7 @@ export default function PhonebankerBarChart({ data, darkMode = false }: Props) {
             yAxisId="counts"
             dataKey="strongSupport"
             name="strongSupport"
-            fill={darkMode ? "#4ade80" : "#16a34a"}
+            fill={seriesFill("strongSupport", darkMode)}
             radius={[3, 3, 0, 0]}
             maxBarSize={22}
           />

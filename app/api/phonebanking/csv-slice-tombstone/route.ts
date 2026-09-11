@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTagById } from "@/lib/campaign-tags";
 import { addTombstone } from "@/lib/csv-slice-tombstones";
-import { makeSliceKey } from "@/lib/slice-key";
+import { sliceKeyMatchesCampaignDate } from "@/lib/slice-key";
 
 /**
  * POST JSON { tag, sliceKey, campaignName, isoDate }
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (makeSliceKey(campaignName, isoDate) !== sliceKey) {
+  if (!sliceKeyMatchesCampaignDate(sliceKey, campaignName, isoDate)) {
     return NextResponse.json(
       { ok: false, error: "sliceKey does not match campaignName + isoDate" },
       { status: 400 }

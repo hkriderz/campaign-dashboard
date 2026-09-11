@@ -3,7 +3,7 @@
  * can render for campaign×days that only exist in the CSV store (no STW question stats in BQ).
  */
 import { buildWideImportPreview, normalizeWideHeaderKey } from "./pb-wide-report-to-sheet-rows";
-import { makeSliceKey, normalizeDateToIso } from "./slice-key";
+import { csvSliceKeyAgainstBq, makeSliceKey, normalizeDateToIso } from "./slice-key";
 import type { PhoneBankCsvRow } from "./types";
 
 export type PbQuestionAnswerRowLike = {
@@ -165,6 +165,7 @@ export type AppendCsvOnlyQuestionRowsOptions = {
   /** Last imported wide CSV header row (order preserved). When set, pivot uses wide column titles + importer order. */
   widePivotHeaders?: readonly string[];
   savedHeaderFieldMap?: Record<string, keyof PhoneBankCsvRow> | null;
+  bqDailyCaller?: readonly { campaignId?: string; campaignName: string; callDate: string }[];
 };
 
 /**
@@ -202,7 +203,9 @@ export function appendCsvOnlyQuestionRowsForPbDashboard(
   for (const row of csvRows) {
     const iso = normalizeDateToIso(row.date);
     if (!iso) continue;
-    const sk = makeSliceKey(row.phoneBankName, iso);
+    const sk = opts?.bqDailyCaller
+      ? csvSliceKeyAgainstBq(row.phoneBankName, iso, opts.bqDailyCaller)
+      : makeSliceKey(row.phoneBankName, iso);
     if (bqSliceKeys.has(sk)) continue;
 
     const banker = (row.callerNameRaw?.trim() || row.callerName).trim();

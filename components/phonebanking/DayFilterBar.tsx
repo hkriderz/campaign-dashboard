@@ -16,6 +16,7 @@ export default function DayFilterBar({ dates, selectedDate, onChange }: Props) {
       </span>
 
       <button
+        type="button"
         onClick={() => onChange(null)}
         className={[
           "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",
@@ -30,6 +31,7 @@ export default function DayFilterBar({ dates, selectedDate, onChange }: Props) {
       {dates.map((d) => (
         <button
           key={d}
+          type="button"
           onClick={() => onChange(d)}
           className={[
             "px-3 py-1.5 rounded-full text-xs font-medium border transition-colors",

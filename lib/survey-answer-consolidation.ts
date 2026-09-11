@@ -174,6 +174,15 @@ function matchesSupportEunisses(n: string): boolean {
   );
 }
 
+function matchesSupportNithya(n: string): boolean {
+  return (
+    (/strong\s+support|\bsupport\s+nithya|\bnithya\b|\braman\b/i.test(n) ||
+      /\bapoya\b.*\bnithya\b/.test(n)) &&
+    !/\boppose\b.*\bnithya\b/i.test(n) &&
+    !/\bbass\b/i.test(n)
+  );
+}
+
 /**
  * Map raw STW answer labels into display buckets. Unmatched lines keep their original label.
  */
@@ -223,6 +232,8 @@ export function classifySurveyAnswerDisplayLabel(
     }
   } else if (matchesSupportFaizah(n)) {
     return "Support Faizah";
+  } else if (matchesSupportNithya(n)) {
+    return "Support Nithya";
   }
 
   if (/\bundecided\b|\bnot\s+sure\b|indeciso/i.test(n)) {
@@ -236,7 +247,34 @@ const STRONG_SUPPORT_DISPLAY_BUCKETS = new Set([
   "Support Faizah",
   "Support Ada",
   "Support Eunisses",
+  "Support Nithya",
 ]);
+
+const FINAL_RESULT_DISPLAY_BUCKETS = new Set([
+  ...STRONG_SUPPORT_DISPLAY_BUCKETS,
+  "Support other candidate",
+  "Undecided",
+  "Undecided — won't vote for Traci",
+  "Undecided — won't vote opponent",
+  "Support Traci",
+  "Oppose current candidate",
+]);
+
+/** True when the classified label is a strong-support bucket for any script profile. */
+export function classifiedAnswerIsStrongSupport(
+  rawLabel: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  return STRONG_SUPPORT_DISPLAY_BUCKETS.has(classifySurveyAnswerDisplayLabel(rawLabel, profile));
+}
+
+/** True when the answer maps to a Final Result-style bucket (SS / U / SO / other / Traci). */
+export function classifiedAnswerIsFinalResultBucket(
+  rawLabel: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  return FINAL_RESULT_DISPLAY_BUCKETS.has(classifySurveyAnswerDisplayLabel(rawLabel, profile));
+}
 
 function isAffirmativeSurveyAnswer(answerValue: string): boolean {
   const t = answerValue.trim().toLowerCase();
@@ -254,7 +292,7 @@ export function isSplitStrongSupportQuestionName(questionName: string): boolean 
   if (/\boppose\b/.test(t) && !/strong\s*support/.test(t)) return false;
   const isFinalOrPitch = /\bfinal\s*result\b|resultado\s*final|\bpitch\b/.test(t);
   const isSsOption =
-    /strong\s*support|\bss\b|fuerte\s+apoyo|support\s+(faizah|ada|eunisses)/.test(t);
+    /strong\s*support|\bss\b|fuerte\s+apoyo|support\s+(faizah|ada|eunisses|nithya)/.test(t);
   return isFinalOrPitch && isSsOption;
 }
 

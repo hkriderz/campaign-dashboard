@@ -35,7 +35,13 @@ import type {
   PbDashboardSlice,
   PbQuestionAnswerRow,
 } from "@/components/phonebanking/PbDashboardStack";
-import { makeSliceKey, normalizeCampaignKey, normalizeDateToIso } from "@/lib/slice-key";
+import {
+  campaignGroupKey,
+  csvSliceKeyAgainstBq,
+  dailyCallerSliceKey,
+  normalizeCampaignKey,
+  normalizeDateToIso,
+} from "@/lib/slice-key";
 import {
   buildPhonebankerRepMapBySlice,
   mergePhonebankerQuestionStats,
@@ -94,7 +100,7 @@ function countUniquePhonebankersForSliceKeys(
 ): number {
   const names = new Set<string>();
   for (const r of rows) {
-    const sk = makeSliceKey(r.campaignName, r.callDate);
+    const sk = dailyCallerSliceKey(r);
     if (!sliceKeys.has(sk)) continue;
     names.add(canonicalizePhonebankerName(r.phonebankerName));
   }
@@ -128,7 +134,7 @@ function buildOverviewPhoneBankRowsForSelectedDate(
 ): PhoneBankSummary[] {
   const out: PhoneBankSummary[] = [];
   for (const slice of filteredSlices) {
-    const ck = normalizeCampaignKey(slice.campaignName);
+    const ck = campaignGroupKey(slice.campaignId, slice.campaignName);
     const base = phoneBanksByCampaignKey.get(ck);
     const dm = callerMetricsBySlice[slice.sliceKey] ?? [];
     let totalCalls = 0;
@@ -266,11 +272,12 @@ export async function buildAllCampaignsDayDashboard(
   const bqSliceKeys = new Set<string>();
 
   for (const row of bqDailyCaller) {
-    const sliceKey = makeSliceKey(row.campaignName, row.callDate);
+    const sliceKey = dailyCallerSliceKey(row);
     bqSliceKeys.add(sliceKey);
     if (!bqSliceMap.has(sliceKey)) {
       bqSliceMap.set(sliceKey, {
         sliceKey,
+        campaignId: row.campaignId || undefined,
         campaignName: row.campaignName,
         callDate: row.callDate,
         totalCalls: 0,
@@ -321,7 +328,7 @@ export async function buildAllCampaignsDayDashboard(
       iso,
       normalizeName(row.callerName)
     );
-    const sliceKey = makeSliceKey(row.phoneBankName, iso);
+    const sliceKey = csvSliceKeyAgainstBq(row.phoneBankName, iso, bqDailyCaller);
     if (!bqSliceMap.has(sliceKey)) {
       bqSliceMap.set(sliceKey, {
         sliceKey,
@@ -474,7 +481,7 @@ export async function buildAllCampaignsDayDashboard(
 
   const questionRowsBySlice: Record<string, PbQuestionAnswerRow[]> = {};
   for (const row of bqQuestionStats) {
-    const sliceKey = makeSliceKey(row.campaignName, row.callDate);
+    const sliceKey = dailyCallerSliceKey(row);
     if (!questionRowsBySlice[sliceKey]) {
       questionRowsBySlice[sliceKey] = [];
     }
@@ -507,11 +514,12 @@ export async function buildAllCampaignsDayDashboard(
   appendCsvOnlyQuestionRowsForPbDashboard(questionRowsBySlice, csvRowsSafe, bqSliceKeys, {
     widePivotHeaders: bestWideRef.length > 0 ? bestWideRef : undefined,
     savedHeaderFieldMap: wideHeaderFieldMaps[0] ?? undefined,
+    bqDailyCaller,
   });
 
   const callerMetricsBySlice: Record<string, TagDailyCallerStat[]> = {};
   for (const row of bqDailyCaller) {
-    const sk = makeSliceKey(row.campaignName, row.callDate);
+    const sk = dailyCallerSliceKey(row);
     if (!aggregateSliceKeys.has(sk)) continue;
     if (!callerMetricsBySlice[sk]) {
       callerMetricsBySlice[sk] = [];
@@ -522,7 +530,7 @@ export async function buildAllCampaignsDayDashboard(
   for (const row of csvRowsSafe) {
     const iso = normalizeDateToIso(row.date);
     if (!iso || !isoDateInRange(iso, startDate, endDate)) continue;
-    const sk = makeSliceKey(row.phoneBankName, iso);
+    const sk = csvSliceKeyAgainstBq(row.phoneBankName, iso, bqDailyCaller);
     if (bqSliceKeys.has(sk)) continue;
     const canonicalCaller = resolvePhonebankerRep(
       phonebankerRepBySlice,
@@ -552,7 +560,7 @@ export async function buildAllCampaignsDayDashboard(
 
   const phoneBanksDay = startDate === endDate ? await fetchAllPhoneBankSummariesForDate(startDate) : [];
   const phoneBanksByCampaignKey = new Map(
-    phoneBanksDay.map((p) => [normalizeCampaignKey(p.campaignName), p] as const)
+    phoneBanksDay.map((p) => [campaignGroupKey(p.campaignId, p.campaignName), p] as const)
   );
   const overviewPhoneBanks = buildOverviewPhoneBankRowsForSelectedDate(
     filteredSlices,

@@ -24,6 +24,12 @@ test("Yes on a generic Final Result question does not count as SS", () => {
   assert.equal(isStrongSupportSurveyHit("Final Result", "[No Answer Recorded]"), false);
 });
 
+test("Nithya support answers count as SS", () => {
+  assert.equal(isStrongSupportSurveyHit("Final Result", "Support Nithya"), true);
+  assert.equal(isStrongSupportSurveyHit("Final Result", "A. Support Nithya Raman"), true);
+  assert.equal(isStrongSupportSurveyHit("03 Final Result", "Strong Support"), true);
+});
+
 test("Ada and Eunisses profiles map candidate support to SS", () => {
   assert.equal(
     isStrongSupportSurveyHit("Final Result", "Support Ada", "genericChallenger"),

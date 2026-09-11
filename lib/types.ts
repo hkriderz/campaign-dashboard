@@ -94,6 +94,8 @@ export type PhonebankerDailyStat = {
   totalDialerHours: number;
   surveyed: number;
   strongSupport: number;
+  /** SS counted via Final Result synthesis (missing FR, filled from initial survey). */
+  strongSupportSynthesized?: number;
   earliestLogin: string;
   latestLogout: string;
 };
@@ -121,6 +123,8 @@ export type TagDailyCallerStat = {
   surveyed: number;
   /** Distinct STW calls this session that recorded a strong-support / Support [candidate] outcome. */
   strongSupport: number;
+  /** Subset of `strongSupport` filled from polling/ID when Final Result was missing. */
+  strongSupportSynthesized?: number;
   /** Distinct dials (calls rows) for this session day — keeps minimal real sessions with 0 STW call seconds. */
   numDials: number;
   totalCallSeconds: number;

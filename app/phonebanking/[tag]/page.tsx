@@ -29,7 +29,14 @@ import PbDashboardStack, {
 } from "@/components/phonebanking/PbDashboardStack";
 import TombstoneOverlapAfterRefresh from "@/components/phonebanking/TombstoneOverlapAfterRefresh";
 import TagHiddenSlicesBar, { type HiddenSliceRow } from "@/components/phonebanking/TagHiddenSlicesBar";
-import { makeSliceKey, normalizeCampaignKey, normalizeDateToIso } from "@/lib/slice-key";
+import {
+  campaignGroupKey,
+  csvSliceKeyAgainstBq,
+  dailyCallerSliceKey,
+  makeSliceKey,
+  normalizeCampaignKey,
+  normalizeDateToIso,
+} from "@/lib/slice-key";
 import {
   buildPhonebankerRepMapBySlice,
   mergePhonebankerQuestionStats,
@@ -107,7 +114,7 @@ function countUniquePhonebankersForSliceKeys(
 ): number {
   const names = new Set<string>();
   for (const r of rows) {
-    const sk = makeSliceKey(r.campaignName, r.callDate);
+    const sk = dailyCallerSliceKey(r);
     if (!sliceKeys.has(sk)) continue;
     names.add(canonicalizePhonebankerName(r.phonebankerName));
   }
@@ -126,7 +133,7 @@ function buildOverviewPhoneBankRowsForSelectedDate(
 ): PhoneBankSummary[] {
   const out: PhoneBankSummary[] = [];
   for (const slice of filteredSlices) {
-    const ck = normalizeCampaignKey(slice.campaignName);
+    const ck = campaignGroupKey(slice.campaignId, slice.campaignName);
     const base = phoneBanksByCampaignKey.get(ck);
     const dm = callerMetricsBySlice[slice.sliceKey] ?? [];
     let totalCalls = 0;
@@ -195,13 +202,13 @@ function buildOverviewPhoneBankRowsFromSlices(
 
   const byCampaign = new Map<string, Acc>();
   for (const slice of slices) {
-    const campaignKey = normalizeCampaignKey(slice.campaignName);
+    const campaignKey = campaignGroupKey(slice.campaignId, slice.campaignName);
     const base = phoneBanksByCampaignKey.get(campaignKey);
     const existing = byCampaign.get(campaignKey);
     const acc: Acc =
       existing ??
       {
-        campaignId: base?.campaignId ?? "",
+        campaignId: base?.campaignId ?? slice.campaignId ?? "",
         campaignName: slice.campaignName,
         totalCalls: 0,
         totalDials: 0,
@@ -368,11 +375,12 @@ export default async function TagPage({ params, searchParams }: Props) {
   const bqSliceMap = new Map<string, PbDashboardSlice>();
   const bqSliceKeys = new Set<string>();
   for (const row of bqDailyCaller) {
-    const sliceKey = makeSliceKey(row.campaignName, row.callDate);
+    const sliceKey = dailyCallerSliceKey(row);
     bqSliceKeys.add(sliceKey);
     if (!bqSliceMap.has(sliceKey)) {
       bqSliceMap.set(sliceKey, {
         sliceKey,
+        campaignId: row.campaignId || undefined,
         campaignName: row.campaignName,
         callDate: row.callDate,
         totalCalls: 0,
@@ -419,7 +427,17 @@ export default async function TagPage({ params, searchParams }: Props) {
     phoneBankName: t.phoneBankName,
     isoDate: t.isoDate,
     reason: t.reason,
-    inBqSnapshot: bqSliceKeys.has(t.sliceKey),
+    inBqSnapshot:
+      bqSliceKeys.has(t.sliceKey) ||
+      Boolean(
+        t.phoneBankName &&
+          t.isoDate &&
+          bqDailyCaller.some(
+            (r) =>
+              r.callDate === t.isoDate &&
+              normalizeCampaignKey(r.campaignName) === normalizeCampaignKey(t.phoneBankName ?? "")
+          )
+      ),
   }));
 
   const csvRowsBySliceCaller = new Map<string, PhoneBankCsvRow[]>();
@@ -443,7 +461,7 @@ export default async function TagPage({ params, searchParams }: Props) {
     });
     csvRowsBySliceCaller.set(key, existing);
 
-    const sliceKey = makeSliceKey(row.phoneBankName, isoDate);
+    const sliceKey = csvSliceKeyAgainstBq(row.phoneBankName, isoDate, bqDailyCaller);
     if (!bqSliceMap.has(sliceKey)) {
       bqSliceMap.set(sliceKey, {
         sliceKey,
@@ -532,7 +550,11 @@ export default async function TagPage({ params, searchParams }: Props) {
   mergeTraciViolationStatsFromBq(bqQuestionStats, bqSliceMap);
 
   const dashboardSlices = Array.from(bqSliceMap.values())
-    .filter((s) => !tombstonedSliceKeys.has(s.sliceKey))
+    .filter(
+      (s) =>
+        !tombstonedSliceKeys.has(s.sliceKey) &&
+        !tombstonedSliceKeys.has(makeSliceKey(s.campaignName, s.callDate))
+    )
     .sort((a, b) => {
       if (a.callDate !== b.callDate) return b.callDate.localeCompare(a.callDate);
       return a.campaignName.localeCompare(b.campaignName);
@@ -577,13 +599,16 @@ export default async function TagPage({ params, searchParams }: Props) {
     .filter((r) => {
       const iso = normalizeDateToIso(r.date);
       if (!iso) return true;
-      return !tombstonedSliceKeys.has(makeSliceKey(r.phoneBankName, iso));
+      return (
+        !tombstonedSliceKeys.has(makeSliceKey(r.phoneBankName, iso)) &&
+        !tombstonedSliceKeys.has(csvSliceKeyAgainstBq(r.phoneBankName, iso, bqDailyCaller))
+      );
     })
     .map((r) => mergePhoneBankRowWithBqOutcomes(r, bqOutcomeByCallerSlice));
 
   const questionRowsBySlice: Record<string, PbQuestionAnswerRow[]> = {};
   for (const row of bqQuestionStats) {
-    const sliceKey = makeSliceKey(row.campaignName, row.callDate);
+    const sliceKey = dailyCallerSliceKey(row);
     if (!questionRowsBySlice[sliceKey]) {
       questionRowsBySlice[sliceKey] = [];
     }
@@ -598,6 +623,7 @@ export default async function TagPage({ params, searchParams }: Props) {
   appendCsvOnlyQuestionRowsForPbDashboard(questionRowsBySlice, csvRowsSafe, bqSliceKeys, {
     widePivotHeaders: wideRefHeaders.length > 0 ? wideRefHeaders : undefined,
     savedHeaderFieldMap: wideHeaderFieldMap ?? undefined,
+    bqDailyCaller,
   });
 
   for (const sk of tombstonedSliceKeys) {
@@ -606,7 +632,7 @@ export default async function TagPage({ params, searchParams }: Props) {
 
   const callerMetricsBySlice: Record<string, TagDailyCallerStat[]> = {};
   for (const row of bqDailyCaller) {
-    const sk = makeSliceKey(row.campaignName, row.callDate);
+    const sk = dailyCallerSliceKey(row);
     if (!callerMetricsBySlice[sk]) {
       callerMetricsBySlice[sk] = [];
     }
@@ -617,7 +643,7 @@ export default async function TagPage({ params, searchParams }: Props) {
   for (const row of csvRowsSafe) {
     const isoDate = normalizeDateToIso(row.date);
     if (!isoDate) continue;
-    const sk = makeSliceKey(row.phoneBankName, isoDate);
+    const sk = csvSliceKeyAgainstBq(row.phoneBankName, isoDate, bqDailyCaller);
     if (bqSliceKeys.has(sk)) continue;
     const canonicalCaller = resolvePhonebankerRep(
       phonebankerRepBySlice,
@@ -670,7 +696,7 @@ export default async function TagPage({ params, searchParams }: Props) {
       })
     : mergedRowsForPhonebankers;
   const phoneBanksByCampaignKey = new Map(
-    phoneBanks.map((p) => [normalizeCampaignKey(p.campaignName), p] as const)
+    phoneBanks.map((p) => [campaignGroupKey(p.campaignId, p.campaignName), p] as const)
   );
   const overviewPhoneBanks = buildOverviewPhoneBankRowsFromSlices(
     filteredSlices,
@@ -709,7 +735,7 @@ export default async function TagPage({ params, searchParams }: Props) {
 
   const aggregateScopeRows: AggregateScopeQuestionRow[] = [];
   for (const r of bqQuestionStats) {
-    const sk = makeSliceKey(r.campaignName, r.callDate);
+    const sk = dailyCallerSliceKey(r);
     if (!aggregateSliceKeys.has(sk)) continue;
     aggregateScopeRows.push({
       questionName: r.questionName,

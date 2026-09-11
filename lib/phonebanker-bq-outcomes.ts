@@ -62,6 +62,10 @@ function distributeUnclassifiedFinalAnswer(
       acc.finalSS += n;
       return;
     }
+    if ((/\bnithya\b|\braman\b|support\s+nithya/i.test(t)) && !/oppose/i.test(t) && !/\bbass\b/i.test(t)) {
+      acc.finalSS += n;
+      return;
+    }
     if (/\badam\b|\bada\b|support\s+ada/i.test(t)) {
       acc.finalSS += n;
       return;

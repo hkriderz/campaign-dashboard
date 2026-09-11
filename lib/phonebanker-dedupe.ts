@@ -7,7 +7,7 @@
 
 import { normalizeName } from "./csv-parser";
 import { canonicalizePhonebankerName } from "./phonebanker-name";
-import { makeSliceKey, normalizeDateToIso } from "./slice-key";
+import { dailyCallerSliceKey, makeBqSliceKey, makeSliceKey, normalizeDateToIso } from "./slice-key";
 import type { PhoneBankCsvRow, PhonebankerQuestionResponseStat, TagDailyCallerStat } from "./types";
 
 /** Union-find for transitive clustering. */
@@ -164,7 +164,9 @@ export function buildPhonebankerRepMapBySlice(
   };
 
   for (const r of bqCallers) {
-    add(makeSliceKey(r.campaignName, r.callDate), r.phonebankerName);
+    add(dailyCallerSliceKey(r), r.phonebankerName);
+    const nameKey = makeSliceKey(r.campaignName, r.callDate);
+    if (nameKey !== dailyCallerSliceKey(r)) add(nameKey, r.phonebankerName);
   }
   for (const r of csvRows) {
     const iso = normalizeDateToIso(r.date);
@@ -183,11 +185,13 @@ export function resolvePhonebankerRep(
   repMapBySlice: Map<string, Map<string, string>>,
   campaignName: string,
   callDate: string,
-  rawOrCanonicalName: string
+  rawOrCanonicalName: string,
+  campaignId?: string
 ): string {
-  const sk = makeSliceKey(campaignName, callDate);
   const canonical = canonicalizePhonebankerName(rawOrCanonicalName);
-  const m = repMapBySlice.get(sk);
+  const bqSk = makeBqSliceKey(campaignId ?? "", campaignName, callDate);
+  const nameSk = makeSliceKey(campaignName, callDate);
+  const m = repMapBySlice.get(bqSk) ?? repMapBySlice.get(nameSk);
   if (!m) return canonical;
   return m.get(canonical) ?? canonical;
 }
@@ -202,6 +206,7 @@ export function mergeTagDailyCallerStats(rows: TagDailyCallerStat[]): TagDailyCa
         ...r,
         totalCalls: r.totalCalls ?? r.numDials,
         strongSupport: r.strongSupport ?? 0,
+        strongSupportSynthesized: r.strongSupportSynthesized ?? 0,
       });
     } else {
       prev.totalCalls = (prev.totalCalls ?? prev.numDials) + (r.totalCalls ?? r.numDials);
@@ -209,6 +214,8 @@ export function mergeTagDailyCallerStats(rows: TagDailyCallerStat[]): TagDailyCa
       prev.talkingToCorrectPerson += r.talkingToCorrectPerson;
       prev.surveyed += r.surveyed;
       prev.strongSupport = (prev.strongSupport ?? 0) + (r.strongSupport ?? 0);
+      prev.strongSupportSynthesized =
+        (prev.strongSupportSynthesized ?? 0) + (r.strongSupportSynthesized ?? 0);
       prev.numDials += r.numDials;
       prev.totalCallSeconds += r.totalCallSeconds;
       prev.totalDialerSeconds += r.totalDialerSeconds;

@@ -1,4 +1,4 @@
-import { makeSliceKey } from "./slice-key";
+import { dailyCallerSliceKey } from "./slice-key";
 import {
   SCRIPT_BLOCK_EXCLUSION_REGEX_BODY,
   TRACI_SCRIPT_EXCLUSION_REGEX_BODY,
@@ -104,7 +104,7 @@ export function aggregateFilledFinalResults(
   opts: { sliceKeys: ReadonlySet<string>; dateFilter: string | null }
 ): AggregateAnswerLine[] {
   const filtered = rows.filter((r) => {
-    const sk = makeSliceKey(r.campaignName, r.callDate);
+    const sk = dailyCallerSliceKey(r);
     if (!opts.sliceKeys.has(sk)) return false;
     if (opts.dateFilter && r.callDate !== opts.dateFilter) return false;
     return true;

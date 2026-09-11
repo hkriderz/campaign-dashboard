@@ -1,4 +1,4 @@
-import { makeSliceKey } from "./slice-key";
+import { dailyCallerSliceKey } from "./slice-key";
 import { isTraciViolationQuestionName, normalizeSurveyTextForMatching } from "./survey-i18n/rules";
 import type { PhonebankerQuestionResponseStat } from "./types";
 
@@ -72,7 +72,7 @@ export function mergeTraciViolationStatsFromBq(
 ): void {
   for (const row of rows) {
     if (!isTraciViolationQuestion(row.questionName)) continue;
-    const sk = makeSliceKey(row.campaignName, row.callDate);
+    const sk = dailyCallerSliceKey(row);
     const agg = sliceMap.get(sk);
     if (!agg) continue;
     const n = row.responseCount;

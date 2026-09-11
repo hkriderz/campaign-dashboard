@@ -1,6 +1,6 @@
 import type { CampaignTag, CandidateStats, PhoneBankSummary, TagDailyCallerStat } from "./types";
 import { canonicalizePhonebankerKey } from "./phonebanker-name";
-import { makeSliceKey, normalizeCampaignKey } from "./slice-key";
+import { campaignGroupKey, dailyCallerSliceKey, makeSliceKey } from "./slice-key";
 
 type Accumulator = {
   campaignId: string;
@@ -21,9 +21,14 @@ export function buildPhoneBankSummariesFromDailyCallerStats(
   const byCampaign = new Map<string, Accumulator>();
 
   for (const row of rows) {
-    if (hiddenSliceKeys.has(makeSliceKey(row.campaignName, row.callDate))) continue;
+    if (
+      hiddenSliceKeys.has(dailyCallerSliceKey(row)) ||
+      hiddenSliceKeys.has(makeSliceKey(row.campaignName, row.callDate))
+    ) {
+      continue;
+    }
 
-    const campaignKey = normalizeCampaignKey(row.campaignName);
+    const campaignKey = campaignGroupKey(row.campaignId, row.campaignName);
     const existing = byCampaign.get(campaignKey);
     const acc: Accumulator =
       existing ??
@@ -82,7 +87,12 @@ export function buildCandidateStatsFromDailyCallerStats(
   const sortedDates = [...dates].sort();
   const callerKeys = new Set<string>();
   for (const row of rows) {
-    if (hiddenSliceKeys.has(makeSliceKey(row.campaignName, row.callDate))) continue;
+    if (
+      hiddenSliceKeys.has(dailyCallerSliceKey(row)) ||
+      hiddenSliceKeys.has(makeSliceKey(row.campaignName, row.callDate))
+    ) {
+      continue;
+    }
     const key = canonicalizePhonebankerKey(row.phonebankerName);
     if (key) callerKeys.add(key);
   }
