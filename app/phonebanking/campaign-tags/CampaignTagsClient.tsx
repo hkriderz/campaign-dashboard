@@ -85,6 +85,7 @@ export default function CampaignTagsClient({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "err">("ok");
   const scrollNewCandidateIndexRef = useRef<number | null>(null);
+  const secretInputRef = useRef<HTMLInputElement>(null);
   const [removingIndex, setRemovingIndex] = useState<number | null>(null);
 
   const loadActive = useCallback(async (opts?: { showSpinner?: boolean }) => {
@@ -172,11 +173,16 @@ export default function CampaignTagsClient({
     });
   }
 
+  function showSecretError(text: string) {
+    setMessageTone("err");
+    setMessage(text);
+    secretInputRef.current?.focus();
+  }
+
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
     if (!secret.trim()) {
-      setMessageTone("err");
-      setMessage("Enter the snapshot secret to save.");
+      showSecretError("Enter the snapshot secret to save. It is required to write tags to disk.");
       return;
     }
 
@@ -228,6 +234,10 @@ export default function CampaignTagsClient({
       };
 
       if (!res.ok) {
+        if (res.status === 401 || data.error === "Unauthorized") {
+          showSecretError("That snapshot secret is incorrect. Check it and try again.");
+          return;
+        }
         setMessageTone("err");
         setMessage(data.error ?? res.statusText);
         return;
@@ -291,8 +301,8 @@ export default function CampaignTagsClient({
           <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">
             {configPath}
           </code>
-          . Saving requires the same secret as BigQuery snapshot refresh. When no file exists yet,
-          defaults are built in until you save once.
+          . Saving writes that file and uses the same snapshot secret as BigQuery refresh. When no
+          file exists yet, defaults are built in until you save once.
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
           Config source:{" "}
@@ -303,22 +313,88 @@ export default function CampaignTagsClient({
       </div>
 
       <form onSubmit={onSave} className="space-y-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={addCandidate}
-            disabled={removingIndex !== null}
-            className="rounded border border-gray-300 dark:border-gray-600 px-3 py-2 text-sm disabled:opacity-50"
-          >
-            Add candidate
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium"
-          >
-            {saving ? "Saving…" : "Save to disk"}
-          </button>
+        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4 bg-gray-50/50 dark:bg-gray-800/20">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              Save changes
+            </p>
+            <p className="text-xs text-gray-600 dark:text-gray-400">
+              Enter the snapshot secret, then save. The secret is required to write tags to disk
+              (same value as BigQuery snapshot refresh). Add candidate only adds a form row and
+              does not need the secret.
+            </p>
+          </div>
+          <SnapshotFreshnessLine
+            dataUpdatedAtIso={snapshotsMeta.dataUpdatedAt}
+            dataUpdatedAtLabel={snapshotsMeta.dataUpdatedAtLabel}
+            isStale={snapshotsMeta.isStale}
+            hasSnapshotData={snapshotsMeta.hasDailyCaller}
+            emptySnapshotHint="(no snapshots on disk for any tag yet)"
+          />
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="font-medium text-gray-800 dark:text-gray-200">
+              Snapshot secret <span className="text-red-600 dark:text-red-400">required to save</span>
+            </span>
+            <input
+              ref={secretInputRef}
+              type="password"
+              autoComplete="off"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder="Paste the snapshot secret"
+              aria-required="true"
+              aria-invalid={messageTone === "err" && message.toLowerCase().includes("secret")}
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm max-w-md"
+            />
+          </label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={refreshBq}
+                onChange={(e) => setRefreshBq(e.target.checked)}
+              />
+              Re-run BigQuery snapshot jobs for every active tag after save
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={clearSnapshots}
+                onChange={(e) => setClearSnapshots(e.target.checked)}
+                disabled={!refreshBq}
+              />
+              Clear existing snapshots first
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <button
+              type="button"
+              onClick={addCandidate}
+              disabled={removingIndex !== null}
+              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm disabled:opacity-50"
+            >
+              Add candidate
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium"
+            >
+              {saving ? "Saving…" : "Save to disk"}
+            </button>
+          </div>
+          {message ? (
+            <p
+              role="status"
+              className={
+                messageTone === "err"
+                  ? "text-sm text-red-700 dark:text-red-400"
+                  : "text-sm text-emerald-700 dark:text-emerald-400"
+              }
+            >
+              {message}
+            </p>
+          ) : null}
         </div>
 
         <section
@@ -377,48 +453,6 @@ export default function CampaignTagsClient({
             </p>
           ) : null}
         </section>
-
-        <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4 space-y-3 bg-gray-50/50 dark:bg-gray-800/20">
-          <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-            Save &amp; optional BQ refresh
-          </p>
-          <SnapshotFreshnessLine
-            dataUpdatedAtIso={snapshotsMeta.dataUpdatedAt}
-            dataUpdatedAtLabel={snapshotsMeta.dataUpdatedAtLabel}
-            isStale={snapshotsMeta.isStale}
-            hasSnapshotData={snapshotsMeta.hasDailyCaller}
-            emptySnapshotHint="(no snapshots on disk for any tag yet)"
-          />
-          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-            <label className="flex flex-col gap-1 text-xs flex-1 min-w-0">
-              <span className="text-gray-600 dark:text-gray-400">Snapshot secret</span>
-              <input
-                type="password"
-                autoComplete="off"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={refreshBq}
-                onChange={(e) => setRefreshBq(e.target.checked)}
-              />
-              Re-run BigQuery snapshot jobs for every active tag after save
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={clearSnapshots}
-                onChange={(e) => setClearSnapshots(e.target.checked)}
-                disabled={!refreshBq}
-              />
-              Clear existing snapshots first
-            </label>
-          </div>
-        </div>
 
         {rows.map((row, i) => (
           <fieldset
@@ -649,18 +683,6 @@ export default function CampaignTagsClient({
             </div>
           </fieldset>
         ))}
-
-        {message ? (
-          <p
-            className={
-              messageTone === "err"
-                ? "text-sm text-red-700 dark:text-red-400"
-                : "text-sm text-emerald-700 dark:text-emerald-400"
-            }
-          >
-            {message}
-          </p>
-        ) : null}
       </form>
     </div>
   );

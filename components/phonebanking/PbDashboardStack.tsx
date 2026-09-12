@@ -107,8 +107,13 @@ function synthesizedFilterForColumn(
   return { displayLabel: classifySurveyAnswerDisplayLabel(raw, profile) };
 }
 
-function formatPivotCount(total: number, synthesized: number, isFr: boolean): string {
-  if (!isFr || synthesized <= 0) return String(total);
+function formatPivotCount(
+  total: number,
+  synthesized: number,
+  isFr: boolean,
+  includeSynthesizedLabel = true
+): string {
+  if (!includeSynthesizedLabel || !isFr || synthesized <= 0) return String(total);
   return formatStrongSupportCell(total, synthesized);
 }
 
@@ -272,7 +277,8 @@ function buildQuestionResponsesPivotTsv(
   sortedBankers: string[],
   metricsByBanker: Map<string, TagDailyCallerStat>,
   rowsByPhonebanker: Map<string, PbQuestionAnswerRow[]>,
-  allRows: PbQuestionAnswerRow[]
+  allRows: PbQuestionAnswerRow[],
+  includeSynthesizedLabel = true
 ): string {
   const baseHeaders = [
     "Phonebanker",
@@ -319,7 +325,7 @@ function buildQuestionResponsesPivotTsv(
         total += r.responseCount;
         synthesized += r.synthesizedCount ?? 0;
       }
-      totalCells.push(formatPivotCount(total, synthesized, isFr));
+      totalCells.push(formatPivotCount(total, synthesized, isFr, includeSynthesizedLabel));
     }
   }
   lines.push(totalCells.map(escapeTsvCell).join("\t"));
@@ -346,7 +352,9 @@ function buildQuestionResponsesPivotTsv(
       for (const col of renderedColumns) {
         const total = valMap.get(col.key) ?? 0;
         const synthesized = synthMap.get(col.key) ?? 0;
-        rowCells.push(formatPivotCount(total, synthesized, isFinalResultPivotColumn(col)));
+        rowCells.push(
+          formatPivotCount(total, synthesized, isFinalResultPivotColumn(col), includeSynthesizedLabel)
+        );
       }
     }
     lines.push(rowCells.map(escapeTsvCell).join("\t"));
@@ -378,6 +386,7 @@ type SliceRenderModel = {
   finalResultPivotRawTotal: number;
   showFinalResultBucketSummary: boolean;
   pivotTsv: string;
+  pivotCopyTsv: string;
 };
 
 function buildObservedPivotColumnsByCampaign(
@@ -554,19 +563,19 @@ function computeSliceRenderModel(
   const showFinalResultBucketSummary =
     finalResultConsolidated.length > 0 && finalResultPivotRawTotal > 0;
 
-  const pivotTsv = showTable
-    ? buildQuestionResponsesPivotTsv(
-        surveyScriptProfile,
-        spanishSlice,
-        slice,
-        renderedColumns,
-        hasPivot,
-        sortedBankers,
-        metricsByBanker,
-        rowsByPhonebanker,
-        rows
-      )
-    : "";
+  const pivotTsvArgs = [
+    surveyScriptProfile,
+    spanishSlice,
+    slice,
+    renderedColumns,
+    hasPivot,
+    sortedBankers,
+    metricsByBanker,
+    rowsByPhonebanker,
+    rows,
+  ] as const;
+  const pivotTsv = showTable ? buildQuestionResponsesPivotTsv(...pivotTsvArgs, true) : "";
+  const pivotCopyTsv = showTable ? buildQuestionResponsesPivotTsv(...pivotTsvArgs, false) : "";
 
   return {
     slice,
@@ -589,6 +598,7 @@ function computeSliceRenderModel(
     finalResultPivotRawTotal,
     showFinalResultBucketSummary,
     pivotTsv,
+    pivotCopyTsv,
   };
 }
 
@@ -808,6 +818,7 @@ export default function PbDashboardStack({
           finalResultConsolidated,
           showFinalResultBucketSummary,
           pivotTsv,
+          pivotCopyTsv,
         } = model;
         const hasCsvSlice = csvKeySet.has(slice.sliceKey);
         const safeFile = `${slice.campaignName.replace(/[^\w\d-]+/g, "_")}_${slice.callDate}.csv`;
@@ -845,14 +856,14 @@ export default function PbDashboardStack({
                   <span className="text-sm font-semibold text-gray-700 dark:text-gray-100">
                     Question Responses by Phonebanker
                   </span>
-                  {showTable && pivotTsv ? (
+                  {showTable && pivotCopyTsv ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         className="dash-action-btn dash-action-btn-sm dash-action-btn-copy"
                         onClick={async () => {
                           try {
-                            await writeTextToClipboard(pivotTsv);
+                            await writeTextToClipboard(pivotCopyTsv);
                             setActionMsg("Pivot table copied to clipboard (TSV).");
                           } catch {
                             setActionMsg("Clipboard failed — try Download CSV.");
