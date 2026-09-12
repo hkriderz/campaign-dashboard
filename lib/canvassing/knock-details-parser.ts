@@ -384,20 +384,19 @@ export function parseDateTime(raw: string): { iso: string | null; confidence: nu
     const parsed = DateTime.fromFormat(value, format, { zone: LA_TIME_ZONE });
     if (parsed.isValid) {
       const hasMeridiem = /a$/.test(format) || value.toLowerCase().includes("am") || value.toLowerCase().includes("pm");
+      // Legacy workbook: unmarked times from 1:00:00 inclusive through 8:30:00 exclusive
+      // are afternoon PDI stamps (add 12 hours). Exact 1:00:00 is 1:00 PM, not AM.
+      const timeOfDayMinutes = parsed.hour * 60 + parsed.minute;
       const needsPdiAfternoonCorrection =
         !hasMeridiem &&
         UNMARKED_12_HOUR_CORRECTION_FORMATS.includes(format) &&
-        (parsed.hour > 1 || (parsed.hour === 1 && (parsed.minute > 0 || parsed.second > 0))) &&
-        (parsed.hour < 8 || (parsed.hour === 8 && parsed.minute < 30));
+        timeOfDayMinutes >= 60 &&
+        timeOfDayMinutes < 8 * 60 + 30;
       const corrected = needsPdiAfternoonCorrection ? parsed.plus({ hours: 12 }) : parsed;
       const confidence = hasMeridiem ? 0.95 : 0.9;
       return {
         iso: corrected.toISO(),
         confidence,
-        warning:
-          !hasMeridiem && parsed.hour === 1 && parsed.minute === 0 && parsed.second === 0
-            ? "Datetime is exactly 1:00 without AM/PM; the legacy sheet flags this boundary as ambiguous."
-            : undefined,
       };
     }
   }
