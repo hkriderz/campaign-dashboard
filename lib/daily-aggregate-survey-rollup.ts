@@ -10,6 +10,8 @@ import type { PhonebankerQuestionResponseStat, SurveyScriptProfile } from "./typ
 export type AggregateAnswerLine = {
   label: string;
   count: number;
+  /** Subset of `count` filled from polling/ID when Final Result was missing. */
+  synthesized?: number;
 };
 
 export function isFinalResultQuestionName(questionName: string): boolean {
@@ -60,19 +62,34 @@ export function isPollingQuestionName(
   return /\bpolling\b/.test(t);
 }
 
-function sortAnswerLineMap(m: Map<string, number>): AggregateAnswerLine[] {
-  const lines = [...m.entries()].map(([label, count]) => ({ label, count }));
+type AnswerLineAcc = { count: number; synthesized: number };
+
+function sortAnswerLineMap(m: Map<string, AnswerLineAcc>): AggregateAnswerLine[] {
+  const lines = [...m.entries()].map(([label, acc]) => ({
+    label,
+    count: acc.count,
+    synthesized: acc.synthesized > 0 ? acc.synthesized : undefined,
+  }));
   return sortAggregateAnswerLines(lines);
+}
+
+function addToLineAcc(map: Map<string, AnswerLineAcc>, label: string, count: number, synthesized = 0): void {
+  const prev = map.get(label) ?? { count: 0, synthesized: 0 };
+  prev.count += count;
+  prev.synthesized += synthesized;
+  map.set(label, prev);
 }
 
 /** One BQ or wide-synthetic row → final-result map (same rules as daily aggregate raw lines). */
 function addRowToFinalResultMap(
-  map: Map<string, number>,
-  r: Pick<PhonebankerQuestionResponseStat, "questionName" | "answerValue" | "responseCount">
+  map: Map<string, AnswerLineAcc>,
+  r: Pick<PhonebankerQuestionResponseStat, "questionName" | "answerValue" | "responseCount"> & {
+    synthesizedCount?: number;
+  }
 ): void {
   const label = effectiveFinalResultAnswerLabelForRollup(r.questionName, r.answerValue);
   if (!label) return;
-  map.set(label, (map.get(label) ?? 0) + r.responseCount);
+  addToLineAcc(map, label, r.responseCount, r.synthesizedCount ?? 0);
 }
 
 /**
@@ -80,9 +97,13 @@ function addRowToFinalResultMap(
  * Use with `consolidateSurveyAnswerLines` to match Daily Aggregate buckets.
  */
 export function rollupFinalResultRawAnswerLines(
-  rows: ReadonlyArray<Pick<PhonebankerQuestionResponseStat, "questionName" | "answerValue" | "responseCount">>
+  rows: ReadonlyArray<
+    Pick<PhonebankerQuestionResponseStat, "questionName" | "answerValue" | "responseCount"> & {
+      synthesizedCount?: number;
+    }
+  >
 ): AggregateAnswerLine[] {
-  const finalMap = new Map<string, number>();
+  const finalMap = new Map<string, AnswerLineAcc>();
   for (const r of rows) {
     addRowToFinalResultMap(finalMap, r);
   }
@@ -105,8 +126,8 @@ export function rollupPollingAndFinalAnswers(
   finalResult: AggregateAnswerLine[];
 } {
   const profile = opts.surveyScriptProfile ?? "faizahTraci";
-  const pollMap = new Map<string, number>();
-  const finalMap = new Map<string, number>();
+  const pollMap = new Map<string, AnswerLineAcc>();
+  const finalMap = new Map<string, AnswerLineAcc>();
 
   for (const r of rows) {
     const sk = dailyCallerSliceKey(r);
@@ -122,7 +143,7 @@ export function rollupPollingAndFinalAnswers(
     }
 
     if (isPollingQuestionName(r.questionName, profile)) {
-      pollMap.set(av, (pollMap.get(av) ?? 0) + r.responseCount);
+      addToLineAcc(pollMap, av, r.responseCount);
     } else if (isFinalResultQuestionName(r.questionName)) {
       addRowToFinalResultMap(finalMap, r);
     }
@@ -140,12 +161,12 @@ export function sumAnswerLines(lines: AggregateAnswerLine[]): number {
 
 /** Combine independently rolled-up answer lists (e.g. per-tag polling) by label. */
 export function mergeAggregateAnswerLines(groups: readonly AggregateAnswerLine[][]): AggregateAnswerLine[] {
-  const map = new Map<string, number>();
+  const map = new Map<string, AnswerLineAcc>();
   for (const lines of groups) {
     for (const line of lines) {
       const label = line.label.trim();
       if (!label) continue;
-      map.set(label, (map.get(label) ?? 0) + line.count);
+      addToLineAcc(map, label, line.count, line.synthesized ?? 0);
     }
   }
   return sortAnswerLineMap(map);

@@ -17,15 +17,24 @@ import {
   mergeAggregateAnswerLines,
   rollupPollingAndFinalAnswers,
 } from "@/lib/daily-aggregate-survey-rollup";
-import type { AggregateScopeQuestionRow } from "@/lib/daily-aggregate-question-rollups";
+import {
+  aggregateScopeRowsFromQuestionSlices,
+  type AggregateScopeQuestionRow,
+} from "@/lib/daily-aggregate-question-rollups";
 import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
 import {
+  fetchTagCallSurveyRowsForFinalFill,
   fetchTagDailyCallerStats,
   fetchTagPhonebankerQuestionStats,
   isValidPhonebankingIsoDate,
   tagDailyCallerHasWorkBeyondLoggedHours,
-  fetchAllPhoneBankSummariesForDate,
+  fetchAllPhoneBankRawCallsByCampaignDay,
 } from "@/lib/queries/phonebanking";
+import { candidateTermsForTag, listSynthesizedFinalResults } from "@/lib/strong-support-from-survey";
+import {
+  applySynthesizedFinalResultsToQuestionRows,
+  preferredFinalResultQuestionByCampaign,
+} from "@/lib/final-result-synthesis-overlay";
 import { loadCsvData } from "@/lib/csv-store";
 import { loadExtraWideColumnOrder } from "@/lib/stw-extra-wide-column-order-store";
 import { loadWideHeaderFieldMap } from "@/lib/stw-wide-header-field-map-store";
@@ -36,7 +45,6 @@ import type {
   PbQuestionAnswerRow,
 } from "@/components/phonebanking/PbDashboardStack";
 import {
-  campaignGroupKey,
   csvSliceKeyAgainstBq,
   dailyCallerSliceKey,
   normalizeCampaignKey,
@@ -66,7 +74,11 @@ import {
   mergePhoneBankRowWithBqOutcomes,
 } from "@/lib/phonebanker-bq-outcomes";
 import { compareIsoDates, normalizeIsoDateRange } from "@/lib/validation/iso-date";
-import { rawStwCallsForCampaignDay } from "@/lib/raw-stw-calls";
+import {
+  indexPhoneBankDayRawCalls,
+  lookupPhoneBankDayRawCalls,
+  sessionRawStwCalls,
+} from "@/lib/raw-stw-calls";
 
 const ALL_CAMPAIGNS_PAGE_TAG: CampaignTag = {
   id: "_all_campaigns",
@@ -126,24 +138,29 @@ function isoDateInRange(value: string, startDate: string, endDate: string): bool
 }
 
 /**
- * When a date is selected, align overview list with slice + caller rows (same as tag page).
+ * One row per campaign-day (do not collapse a range into one row per campaign).
+ * Total Calls = raw STW session total (MAX of daily-caller, else per-day `calls.created_at` count).
  */
 function buildOverviewPhoneBankRowsForSelectedDate(
   filteredSlices: PbDashboardSlice[],
   callerMetricsBySlice: Record<string, TagDailyCallerStat[]>,
-  phoneBanksByCampaignKey: Map<string, PhoneBankSummary>
+  dayRawCallsByKey: ReadonlyMap<string, number>
 ): PhoneBankSummary[] {
   const out: PhoneBankSummary[] = [];
   for (const slice of filteredSlices) {
-    const ck = campaignGroupKey(slice.campaignId, slice.campaignName);
-    const base = phoneBanksByCampaignKey.get(ck);
     const dm = callerMetricsBySlice[slice.sliceKey] ?? [];
-    let totalCalls = base?.totalCalls ?? rawStwCallsForCampaignDay(dm);
+    const daySummaryCalls = lookupPhoneBankDayRawCalls(
+      dayRawCallsByKey,
+      slice.campaignId,
+      slice.campaignName,
+      slice.callDate
+    );
+    const totalCalls = sessionRawStwCalls(dm, daySummaryCalls);
     let totalDials = 0;
     let totalSurveyed = 0;
     let totalSeconds = 0;
     const bankerNames = new Set<string>();
-    let campaignId = base?.campaignId ?? "";
+    let campaignId = slice.campaignId ?? "";
     for (const r of dm) {
       totalDials += r.numDials;
       totalSurveyed += r.surveyed;
@@ -153,7 +170,6 @@ function buildOverviewPhoneBankRowsForSelectedDate(
     }
     let uniqueCallers = bankerNames.size;
     if (dm.length === 0) {
-      if (base == null) totalCalls = slice.totalCalls;
       totalDials = slice.numDials;
       totalSurveyed = slice.surveyed;
       totalSeconds = slice.callSeconds;
@@ -170,12 +186,14 @@ function buildOverviewPhoneBankRowsForSelectedDate(
       totalSeconds,
       firstCallDate: slice.callDate,
       lastCallDate: slice.callDate,
-      campaignCreatedDate: base?.campaignCreatedDate ?? "",
+      campaignCreatedDate: "",
     });
   }
-  return out.sort(
-    (a, b) => b.totalDials - a.totalDials || a.campaignName.localeCompare(b.campaignName)
-  );
+  return out.sort((a, b) => {
+    const dateCmp = compareIsoDates(b.firstCallDate ?? "", a.firstCallDate ?? "");
+    if (dateCmp !== 0) return dateCmp;
+    return a.campaignName.localeCompare(b.campaignName);
+  });
 }
 
 export async function buildAllCampaignsDayDashboard(
@@ -202,9 +220,10 @@ export async function buildAllCampaignsDayDashboard(
 
   const tagResults = await Promise.all(
     tags.map(async (tag) => {
-      const [daily, questions] = await Promise.all([
+      const [daily, questions, fill] = await Promise.all([
         fetchTagDailyCallerStats(tag.id),
         fetchTagPhonebankerQuestionStats(tag.id),
+        fetchTagCallSurveyRowsForFinalFill(tag.id),
       ]);
       const csv = (loadCsvData(tag.id) ?? []).map(withInferredContactMetrics);
       const wideExtraColumnOrder = loadExtraWideColumnOrder(tag.id);
@@ -218,6 +237,7 @@ export async function buildAllCampaignsDayDashboard(
         wideExtraColumnOrder,
         wideRefHeaders,
         wideHeaderFieldMap,
+        fill,
       };
     })
   );
@@ -268,6 +288,27 @@ export async function buildAllCampaignsDayDashboard(
     }))
   );
 
+  for (const tr of tagResults) {
+    tr.fill = tr.fill.map((r) => ({
+      ...r,
+      phonebankerName: resolvePhonebankerRep(
+        phonebankerRepBySlice,
+        r.campaignName,
+        r.callDate,
+        r.phonebankerName
+      ),
+    }));
+  }
+
+  const tagIdByCampaignId = new Map<string, string>();
+  const tagIdByCampaignName = new Map<string, string>();
+  for (const tr of tagResults) {
+    for (const row of tr.daily) {
+      if (row.campaignId) tagIdByCampaignId.set(row.campaignId, tr.tag.id);
+      tagIdByCampaignName.set(normalizeCampaignKey(row.campaignName), tr.tag.id);
+    }
+  }
+
   const bqSliceMap = new Map<string, PbDashboardSlice>();
   const bqSliceKeys = new Set<string>();
 
@@ -304,9 +345,13 @@ export async function buildAllCampaignsDayDashboard(
         finalSupport: 0,
         finalOppose: 0,
         canvassTotal: 0,
+        tagId: tagIdByCampaignId.get(row.campaignId) ?? tagIdByCampaignName.get(normalizeCampaignKey(row.campaignName)),
       });
     }
     const agg = bqSliceMap.get(sliceKey)!;
+    if (!agg.tagId) {
+      agg.tagId = tagIdByCampaignId.get(row.campaignId) ?? tagIdByCampaignName.get(normalizeCampaignKey(row.campaignName));
+    }
     agg.totalCalls = Math.max(agg.totalCalls, row.totalCalls ?? 0);
     agg.numDials += row.numDials;
     agg.pbers += 1;
@@ -358,9 +403,13 @@ export async function buildAllCampaignsDayDashboard(
         finalSupport: 0,
         finalOppose: 0,
         canvassTotal: 0,
+        tagId: tagIdByCampaignName.get(normalizeCampaignKey(row.phoneBankName)),
       });
     }
     const agg = bqSliceMap.get(sliceKey)!;
+    if (!agg.tagId) {
+      agg.tagId = tagIdByCampaignName.get(normalizeCampaignKey(row.phoneBankName));
+    }
     if (!bqSliceKeys.has(sliceKey)) {
       agg.surveyed += row.surveyed;
       agg.callsAnswered += row.callsAnswered;
@@ -517,6 +566,21 @@ export async function buildAllCampaignsDayDashboard(
     bqDailyCaller,
   });
 
+  for (const tr of tagResults) {
+    const profile = resolveSurveyScriptProfile(tr.tag);
+    const hits = listSynthesizedFinalResults(
+      tr.fill,
+      profile,
+      candidateTermsForTag(tr.tag)
+    ).filter((h) => isoDateInRange(h.callDate, startDate, endDate));
+    applySynthesizedFinalResultsToQuestionRows(
+      questionRowsBySlice,
+      hits,
+      profile,
+      preferredFinalResultQuestionByCampaign(tr.fill)
+    );
+  }
+
   const callerMetricsBySlice: Record<string, TagDailyCallerStat[]> = {};
   for (const row of bqDailyCaller) {
     const sk = dailyCallerSliceKey(row);
@@ -558,14 +622,11 @@ export async function buildAllCampaignsDayDashboard(
     callerMetricsBySlice[sk].push(stat);
   }
 
-  const phoneBanksDay = startDate === endDate ? await fetchAllPhoneBankSummariesForDate(startDate) : [];
-  const phoneBanksByCampaignKey = new Map(
-    phoneBanksDay.map((p) => [campaignGroupKey(p.campaignId, p.campaignName), p] as const)
-  );
+  const dayRawCalls = await fetchAllPhoneBankRawCallsByCampaignDay(startDate, endDate);
   const overviewPhoneBanks = buildOverviewPhoneBankRowsForSelectedDate(
     filteredSlices,
     callerMetricsBySlice,
-    phoneBanksByCampaignKey
+    indexPhoneBankDayRawCalls(dayRawCalls)
   );
 
   const extraWideColumnOrder = headerOrders
@@ -583,6 +644,24 @@ export async function buildAllCampaignsDayDashboard(
     });
     let polling = rollup.polling;
     let finalResult = rollup.finalResult;
+    const synthHits = listSynthesizedFinalResults(
+      tr.fill,
+      profile,
+      candidateTermsForTag(tr.tag)
+    ).filter(
+      (h) =>
+        isoDateInRange(h.callDate, startDate, endDate) && aggregateSliceKeys.has(dailyCallerSliceKey(h))
+    );
+    if (synthHits.length > 0) {
+      finalResult = [
+        ...finalResult,
+        ...synthHits.map((h) => ({
+          label: tagUsesVerbatimFinalResultAggregate(tr.tag) ? h.rawAnswer : h.displayLabel,
+          count: 1,
+          synthesized: 1,
+        })),
+      ];
+    }
     if (polling.length > 0) {
       polling = consolidateSurveyAnswerLines(polling, profile);
     }
@@ -593,17 +672,10 @@ export async function buildAllCampaignsDayDashboard(
     if (finalResult.length) finalGroups.push(finalResult);
   }
 
-  const aggregateScopeRows: AggregateScopeQuestionRow[] = [];
-  for (const [sk, rows] of Object.entries(questionRowsBySlice)) {
-    if (!aggregateSliceKeys.has(sk)) continue;
-    for (const r of rows) {
-      aggregateScopeRows.push({
-        questionName: r.questionName,
-        answerValue: r.answerValue,
-        responseCount: r.responseCount,
-      });
-    }
-  }
+  const aggregateScopeRows = aggregateScopeRowsFromQuestionSlices(
+    questionRowsBySlice,
+    aggregateSliceKeys
+  );
 
   return {
     overviewPhoneBanks,

@@ -59,9 +59,18 @@ import {
 } from "@/lib/types";
 import { normalizeName, parseTimeToSec, secToTime, sumRows } from "@/lib/csv-parser";
 import { rollupPollingAndFinalAnswers } from "@/lib/daily-aggregate-survey-rollup";
-import type { AggregateScopeQuestionRow } from "@/lib/daily-aggregate-question-rollups";
+import { aggregateScopeRowsFromQuestionSlices } from "@/lib/daily-aggregate-question-rollups";
 import { aggregateFilledFinalResults } from "@/lib/final-result-fill-aggregate";
 import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
+import {
+  candidateTermsForTag,
+  listSynthesizedFinalResults,
+} from "@/lib/strong-support-from-survey";
+import {
+  applySynthesizedFinalResultsToQuestionRows,
+  applySynthesizedHitsToAnswerLines,
+  preferredFinalResultQuestionByCampaign,
+} from "@/lib/final-result-synthesis-overlay";
 import { mergeTraciViolationStatsFromBq } from "@/lib/traci-violation-bq";
 import { withInferredContactMetrics } from "@/lib/infer-csv-contact-metrics";
 import { snapshotsDisabled } from "@/lib/bq-snapshot-store";
@@ -310,14 +319,11 @@ export default async function TagPage({ params, searchParams }: Props) {
   let bqCallSurveyForFill: CallSurveyRowForFill[] = [];
   let bqError: string | null = null;
   try {
-    const fillPromise = tag.useCallLevelFinalResultFill
-      ? fetchTagCallSurveyRowsForFinalFill(tagId)
-      : Promise.resolve([] as CallSurveyRowForFill[]);
     [phoneBanks, bqDailyCaller, bqQuestionStats, bqCallSurveyForFill] = await Promise.all([
       fetchPhoneBanksByTag(tagId),
       fetchTagDailyCallerStats(tagId),
       fetchTagPhonebankerQuestionStats(tagId),
-      fillPromise,
+      fetchTagCallSurveyRowsForFinalFill(tagId),
     ]);
   } catch (err) {
     bqError = err instanceof Error ? err.message : String(err);
@@ -633,6 +639,18 @@ export default async function TagPage({ params, searchParams }: Props) {
     bqDailyCaller,
   });
 
+  const synthesizedFrHits = listSynthesizedFinalResults(
+    bqCallSurveyForFill,
+    surveyScriptProfile,
+    candidateTermsForTag(tag)
+  );
+  applySynthesizedFinalResultsToQuestionRows(
+    questionRowsBySlice,
+    synthesizedFrHits,
+    surveyScriptProfile,
+    preferredFinalResultQuestionByCampaign(bqCallSurveyForFill)
+  );
+
   for (const sk of tombstonedSliceKeys) {
     delete questionRowsBySlice[sk];
   }
@@ -739,6 +757,25 @@ export default async function TagPage({ params, searchParams }: Props) {
       finalResultFromCallFill = true;
     }
   }
+  const scopedSynthHits = synthesizedFrHits.filter((h) =>
+    aggregateSliceKeys.has(dailyCallerSliceKey(h))
+  );
+  if (finalResultFromCallFill) {
+    bqFinalResultBreakdown = applySynthesizedHitsToAnswerLines(
+      bqFinalResultBreakdown,
+      scopedSynthHits,
+      { addCounts: false, verbatim: verbatimFinalResult, profile: surveyScriptProfile }
+    );
+  } else if (scopedSynthHits.length > 0) {
+    bqFinalResultBreakdown = [
+      ...bqFinalResultBreakdown,
+      ...scopedSynthHits.map((h) => ({
+        label: verbatimFinalResult ? h.rawAnswer : h.displayLabel,
+        count: 1,
+        synthesized: 1,
+      })),
+    ];
+  }
   if (bqPollingBreakdown.length > 0) {
     bqPollingBreakdown = consolidateSurveyAnswerLines(bqPollingBreakdown, surveyScriptProfile);
   }
@@ -746,16 +783,10 @@ export default async function TagPage({ params, searchParams }: Props) {
     bqFinalResultBreakdown = consolidateSurveyAnswerLines(bqFinalResultBreakdown, surveyScriptProfile);
   }
 
-  const aggregateScopeRows: AggregateScopeQuestionRow[] = [];
-  for (const r of bqQuestionStats) {
-    const sk = dailyCallerSliceKey(r);
-    if (!aggregateSliceKeys.has(sk)) continue;
-    aggregateScopeRows.push({
-      questionName: r.questionName,
-      answerValue: r.answerValue,
-      responseCount: r.responseCount,
-    });
-  }
+  const aggregateScopeRows = aggregateScopeRowsFromQuestionSlices(
+    questionRowsBySlice,
+    aggregateSliceKeys
+  );
 
   const uniquePbersForAggregate = countUniquePhonebankersForSliceKeys(
     bqDailyCaller,

@@ -20,6 +20,7 @@ const PhonebankerBarChart = dynamic(() => import("./PhonebankerBarChart"), {
 type Props = {
   detail: PhoneBankDetail;
   tagColor: string;
+  tagId?: string;
 };
 
 function formatDateRange(start: string | null, end: string | null): string {
@@ -28,7 +29,7 @@ function formatDateRange(start: string | null, end: string | null): string {
   return `${start} → ${end}`;
 }
 
-export default function PhoneBankDetailClient({ detail, tagColor: _tagColor }: Props) {
+export default function PhoneBankDetailClient({ detail, tagColor: _tagColor, tagId }: Props) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
@@ -141,7 +142,12 @@ export default function PhoneBankDetailClient({ detail, tagColor: _tagColor }: P
             <span className="ml-2 text-sm font-normal text-indigo-500">— {selectedDate}</span>
           ) : null}
         </h2>
-        <PhonebankerTable rows={scopedRows} selectedDate={selectedDate} />
+        <PhonebankerTable
+          rows={scopedRows}
+          selectedDate={selectedDate}
+          tagId={tagId}
+          campaignId={detail.campaign.campaignId}
+        />
       </div>
     </div>
   );

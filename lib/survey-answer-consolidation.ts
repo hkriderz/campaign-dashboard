@@ -260,6 +260,66 @@ const FINAL_RESULT_DISPLAY_BUCKETS = new Set([
   "Oppose current candidate",
 ]);
 
+export type FinalResultFamily = "strongSupport" | "undecided" | "strongOppose" | "other";
+
+/** Map a classified display label onto the three CSV-style Final Result families. */
+export function finalResultFamilyForDisplayLabel(displayLabel: string): FinalResultFamily {
+  if (STRONG_SUPPORT_DISPLAY_BUCKETS.has(displayLabel)) return "strongSupport";
+  if (
+    displayLabel === "Undecided" ||
+    displayLabel === "Undecided — won't vote for Traci" ||
+    displayLabel === "Undecided — won't vote opponent"
+  ) {
+    return "undecided";
+  }
+  if (displayLabel === "Support Traci" || displayLabel === "Oppose current candidate") {
+    return "strongOppose";
+  }
+  return "other";
+}
+
+function normalizedLabelKey(label: string): string {
+  return normalizeSurveyTextForMatching(label.trim().toLowerCase());
+}
+
+/**
+ * True when a synthesized-call hit belongs to a Daily Aggregate / pivot label.
+ * Preset slots send bucket names (`Support Faizah`); question slots send script text
+ * (`A. Strong Support for Nithya`). Exact match on either form is not enough.
+ */
+export function synthesizedHitMatchesLabel(
+  hit: { displayLabel: string; rawAnswer: string },
+  label: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  const want = label.trim();
+  if (!want) return true;
+  if (hit.displayLabel === want || hit.rawAnswer === want) return true;
+  const wantKey = normalizedLabelKey(want);
+  if (normalizedLabelKey(hit.displayLabel) === wantKey || normalizedLabelKey(hit.rawAnswer) === wantKey) {
+    return true;
+  }
+  const classifiedWant = classifySurveyAnswerDisplayLabel(want, profile);
+  if (classifiedWant === hit.displayLabel) return true;
+  if (classifySurveyAnswerDisplayLabel(hit.rawAnswer, profile) === classifiedWant) return true;
+  const familyWant = finalResultFamilyForDisplayLabel(classifiedWant);
+  if (familyWant === "other") return false;
+  return finalResultFamilyForDisplayLabel(hit.displayLabel) === familyWant;
+}
+
+export function csvAnswerForFinalResultFamily(family: FinalResultFamily): string | null {
+  switch (family) {
+    case "strongSupport":
+      return "Strong support";
+    case "undecided":
+      return "Undecided";
+    case "strongOppose":
+      return "Strong oppose";
+    default:
+      return null;
+  }
+}
+
 /** True when the classified label is a strong-support bucket for any script profile. */
 export function classifiedAnswerIsStrongSupport(
   rawLabel: string,
@@ -296,6 +356,22 @@ export function isSplitStrongSupportQuestionName(questionName: string): boolean 
   return isFinalOrPitch && isSsOption;
 }
 
+/** Split FR/pitch column whose question name *is* the Strong Oppose option. */
+export function isSplitStrongOpposeQuestionName(questionName: string): boolean {
+  const t = questionName.trim().toLowerCase();
+  if (/strong\s*support/.test(t)) return false;
+  const isFinalOrPitch = /\bfinal\s*result\b|resultado\s*final|\bpitch\b/.test(t);
+  const isSoOption = /strong\s*oppose|\bso\b|fuerte\s+oposici[oó]n|\boppose\b/.test(t);
+  return isFinalOrPitch && isSoOption;
+}
+
+/** Split FR/pitch column whose question name *is* the Undecided option. */
+export function isSplitUndecidedQuestionName(questionName: string): boolean {
+  const t = questionName.trim().toLowerCase();
+  const isFinalOrPitch = /\bfinal\s*result\b|resultado\s*final|\bpitch\b/.test(t);
+  return isFinalOrPitch && /\bundecided\b|indeciso/.test(t);
+}
+
 /**
  * True when this survey row should count as one strong-support hit
  * (Support Faizah / Ada / Eunisses, or a checked split SS column).
@@ -321,25 +397,38 @@ export function consolidateSurveyAnswerLines(
   lines: readonly AggregateAnswerLine[],
   profile: SurveyScriptProfile = "faizahTraci"
 ): AggregateAnswerLine[] {
-  const byDisplay = new Map<string, number>();
+  const byDisplay = new Map<string, { count: number; synthesized: number }>();
 
-  for (const { label, count } of lines) {
+  for (const { label, count, synthesized } of lines) {
     const display = classifySurveyAnswerDisplayLabel(label, profile);
-    byDisplay.set(display, (byDisplay.get(display) ?? 0) + count);
+    const prev = byDisplay.get(display) ?? { count: 0, synthesized: 0 };
+    prev.count += count;
+    prev.synthesized += synthesized ?? 0;
+    byDisplay.set(display, prev);
   }
 
   const ordered: AggregateAnswerLine[] = [];
   const order = bucketOrderForProfile(profile);
 
   for (const b of order) {
-    const c = byDisplay.get(b);
-    if (c != null && c > 0) ordered.push({ label: b, count: c });
+    const acc = byDisplay.get(b);
+    if (acc != null && acc.count > 0) {
+      ordered.push({
+        label: b,
+        count: acc.count,
+        synthesized: acc.synthesized > 0 ? acc.synthesized : undefined,
+      });
+    }
     byDisplay.delete(b);
   }
 
   const rest = [...byDisplay.entries()]
-    .filter(([, c]) => c > 0)
-    .map(([label, count]) => ({ label, count }))
+    .filter(([, acc]) => acc.count > 0)
+    .map(([label, acc]) => ({
+      label,
+      count: acc.count,
+      synthesized: acc.synthesized > 0 ? acc.synthesized : undefined,
+    }))
     .sort(
       (a, b) => b.count - a.count || a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
     );

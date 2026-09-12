@@ -6,8 +6,10 @@ import {
   campaignHasFinalResultTab,
   candidateTermsForTag,
   countStrongSupportBySession,
+  finalResultForCall,
   formatStrongSupportCell,
   isCandidateIdSupportQuestion,
+  listSynthesizedFinalResults,
   overlayStrongSupportCountsFromQuestionStats,
   questionTiesToCandidate,
   strongSupportForCall,
@@ -310,4 +312,88 @@ test("applyCallLevelStrongSupportToDailyCaller splits synthesized FR fills", () 
   );
   assert.equal(patched[0]?.strongSupport, 2);
   assert.equal(patched[0]?.strongSupportSynthesized, 1);
+});
+
+test("polling Undecided synthesizes when Final Result is missing", () => {
+  const rows = [
+    fillRow({
+      campaignId: "camp-f",
+      questionName: "01 Polling",
+      answerValue: "B. Undecided",
+    }),
+  ];
+  const outcome = finalResultForCall(rows, "faizahTraci", FAIZAH_TERMS, true);
+  assert.equal(outcome.kind, "synthesized");
+  assert.equal(outcome.displayLabel, "Undecided");
+  assert.equal(outcome.sourceQuestionName, "01 Polling");
+  assert.equal(outcome.sourceAnswerValue, "B. Undecided");
+  assert.deepEqual(strongSupportForCall(rows, "faizahTraci", FAIZAH_TERMS, true), {
+    hit: 0,
+    synthesized: false,
+  });
+});
+
+test("polling Strong oppose synthesizes when Final Result is missing", () => {
+  const rows = [
+    fillRow({
+      campaignId: "camp-f",
+      questionName: "01 Polling",
+      answerValue: "C. Strong oppose",
+    }),
+  ];
+  const outcome = finalResultForCall(rows, "faizahTraci", FAIZAH_TERMS, true);
+  assert.equal(outcome.kind, "synthesized");
+  assert.equal(outcome.displayLabel, "Oppose current candidate");
+  assert.equal(outcome.sourceQuestionName, "01 Polling");
+});
+
+test("explicit Final Result Undecided blocks polling SS synthesis", () => {
+  const rows = [
+    fillRow({
+      campaignId: "camp-f",
+      questionName: "01 Polling",
+      answerValue: "A. Strong Support",
+      surveyResultId: 1,
+    }),
+    fillRow({
+      campaignId: "camp-f",
+      questionName: "Final Result",
+      answerValue: "B. Undecided",
+      surveyResultId: 2,
+    }),
+  ];
+  const outcome = finalResultForCall(rows, "faizahTraci", FAIZAH_TERMS, true);
+  assert.equal(outcome.kind, "explicit");
+  assert.equal(outcome.displayLabel, "Undecided");
+  assert.deepEqual(strongSupportForCall(rows, "faizahTraci", FAIZAH_TERMS, true), {
+    hit: 0,
+    synthesized: false,
+  });
+  assert.equal(listSynthesizedFinalResults(rows, "faizahTraci", FAIZAH_TERMS).length, 0);
+});
+
+test("listSynthesizedFinalResults includes provenance for missing-FR fills", () => {
+  const rows = [
+    fillRow({
+      callId: "c-fr",
+      campaignId: "camp-f",
+      campaignName: "Faizah PB",
+      questionName: "Final Result",
+      answerValue: "A. Strong Support",
+    }),
+    fillRow({
+      callId: "c-u",
+      campaignId: "camp-f",
+      campaignName: "Faizah PB",
+      questionName: "01 Polling",
+      answerValue: "B. Undecided",
+    }),
+  ];
+  const hits = listSynthesizedFinalResults(rows, "faizahTraci", FAIZAH_TERMS);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0]?.callId, "c-u");
+  assert.equal(hits[0]?.displayLabel, "Undecided");
+  assert.equal(hits[0]?.sourceQuestionName, "01 Polling");
+  assert.equal(hits[0]?.sourceAnswerValue, "B. Undecided");
+  assert.equal(hits[0]?.reason, "missing_final_result_survey_fill");
 });

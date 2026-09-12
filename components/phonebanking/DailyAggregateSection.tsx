@@ -28,6 +28,13 @@ import { formatCallsPerLoggedInHour } from "@/lib/calls-rate";
 import type { PbDashboardSlice } from "./PbDashboardStack";
 import type { SurveyScriptProfile } from "@/lib/types";
 import { isTraciViolationLayoutCanonicalKey, isTraciViolationQuestionName } from "@/lib/survey-i18n/rules";
+import { isFinalResultPivotQuestion } from "@/lib/final-result-synthesis-overlay";
+import {
+  classifySurveyAnswerDisplayLabel,
+  finalResultFamilyForDisplayLabel,
+} from "@/lib/survey-answer-consolidation";
+import SynthesizedCountLabel from "./SynthesizedCountLabel";
+import SynthesizedCallsModal, { type SynthesizedCallsScope } from "./SynthesizedCallsModal";
 
 function secToTime(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
@@ -45,10 +52,12 @@ function AnswerBreakdownList({
   title,
   lines,
   denominatorHint,
+  onOpenSynthesized,
 }: {
   title: string;
   lines: AggregateAnswerLine[];
   denominatorHint?: number;
+  onOpenSynthesized?: (line: AggregateAnswerLine) => void;
 }) {
   const denom = sumAnswerLines(lines);
   const d = denom > 0 ? denom : denominatorHint ?? 0;
@@ -74,7 +83,15 @@ function AnswerBreakdownList({
               className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0 py-px border-b border-gray-100/80 dark:border-gray-700/50 last:border-b-0"
             >
               <span className="tabular-nums font-medium text-gray-900 dark:text-gray-100 shrink-0">
-                {line.count.toLocaleString()}
+                <SynthesizedCountLabel
+                  total={line.count}
+                  synthesized={line.synthesized}
+                  onOpen={
+                    (line.synthesized ?? 0) > 0 && onOpenSynthesized
+                      ? () => onOpenSynthesized(line)
+                      : undefined
+                  }
+                />
               </span>
               <span className="text-gray-800 dark:text-gray-100 min-w-0 flex-1">{line.label}</span>
               <span className="text-gray-600 dark:text-gray-400 tabular-nums shrink-0">
@@ -165,7 +182,17 @@ export default function DailyAggregateSection({
   const [layout, setLayout] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
   const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [synthScope, setSynthScope] = useState<SynthesizedCallsScope | null>(null);
   const [draft, setDraft] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
+  const synthesizedTagIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (tagId && !tagId.startsWith("_")) ids.add(tagId);
+    for (const slice of slices) {
+      const id = slice.tagId?.trim();
+      if (id && !id.startsWith("_")) ids.add(id);
+    }
+    return [...ids];
+  }, [tagId, slices]);
   const minAvailableDate = availableDates.length ? [...availableDates].sort((a, b) => a.localeCompare(b))[0] : undefined;
   const maxAvailableDate = availableDates.length ? [...availableDates].sort((a, b) => b.localeCompare(a))[0] : undefined;
 
@@ -200,6 +227,25 @@ export default function DailyAggregateSection({
       setModalOpen(false);
     }
   }, [draft, tagId]);
+
+  const openSynthesizedLine = useCallback(
+    (line: AggregateAnswerLine) => {
+      if (synthesizedTagIds.length === 0) return;
+      const family = finalResultFamilyForDisplayLabel(
+        classifySurveyAnswerDisplayLabel(line.label, surveyScriptProfile)
+      );
+      setSynthScope({
+        tagId: synthesizedTagIds[0]!,
+        tagIds: synthesizedTagIds,
+        callDate: activeDate || undefined,
+        endDate: activeEndDate && activeEndDate !== activeDate ? activeEndDate : undefined,
+        displayLabel: line.label,
+        family: family === "other" ? undefined : family,
+        title: `${(line.synthesized ?? 0).toLocaleString()} synthesized ${line.label} calls`,
+      });
+    },
+    [synthesizedTagIds, activeDate, activeEndDate, surveyScriptProfile]
+  );
 
   if (!slices.length) return null;
 
@@ -304,6 +350,9 @@ export default function DailyAggregateSection({
                 title="Final Result"
                 lines={bqFinalResultBreakdown}
                 denominatorHint={finalTotal > 0 ? finalTotal : undefined}
+                onOpenSynthesized={
+                  synthesizedTagIds.length > 0 ? openSynthesizedLine : undefined
+                }
               />
             </>
           ) : (
@@ -340,9 +389,16 @@ export default function DailyAggregateSection({
       const title = questionTitle(
         names.length ? pickDisplayQuestionName(names) : displayTitleFromCanonicalKey(config.canonicalKey)
       );
+      const isFrQuestion = names.some((n) => isFinalResultPivotQuestion(n));
       return (
         <div className={slotCellClass(traci)}>
-          <AnswerBreakdownList title={title} lines={lines} />
+          <AnswerBreakdownList
+            title={title}
+            lines={lines}
+            onOpenSynthesized={
+              isFrQuestion && synthesizedTagIds.length > 0 ? openSynthesizedLine : undefined
+            }
+          />
         </div>
       );
     }
@@ -584,6 +640,7 @@ export default function DailyAggregateSection({
           </div>
         </div>
       ) : null}
+      <SynthesizedCallsModal scope={synthScope} onClose={() => setSynthScope(null)} />
     </>
   );
 }

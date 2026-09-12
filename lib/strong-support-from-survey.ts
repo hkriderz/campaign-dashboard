@@ -1,8 +1,13 @@
-import { isFinalResultQuestionName, isPollingQuestionName } from "./daily-aggregate-survey-rollup";
+import {
+  effectiveFinalResultAnswerLabelForRollup,
+  isFinalResultQuestionName,
+  isPollingQuestionName,
+} from "./daily-aggregate-survey-rollup";
 import { canonicalizePhonebankerName } from "./phonebanker-name";
 import {
   classifiedAnswerIsFinalResultBucket,
   classifiedAnswerIsStrongSupport,
+  classifySurveyAnswerDisplayLabel,
   isSplitStrongSupportQuestionName,
   isStrongSupportSurveyHit,
 } from "./survey-answer-consolidation";
@@ -199,11 +204,13 @@ function callHasSubstantiveFinalResult(
   });
 }
 
-function synthesizedSupportAnswer(
+type SynthesisSource = { questionName: string; answerValue: string };
+
+function synthesizedSupportSource(
   rows: readonly { questionName: string; answerValue: string }[],
   profile: SurveyScriptProfile,
   terms: readonly string[]
-): string | null {
+): SynthesisSource | null {
   const eligible = rows.filter(
     (r) => isEligibleSynthesisSource(r.questionName, terms, profile) && isSubstantiveAnswer(r.answerValue)
   );
@@ -211,16 +218,115 @@ function synthesizedSupportAnswer(
     .filter((r) => looksLikeIdOrVoteQuestion(r.questionName, profile) || questionTiesToCandidate(r.questionName, terms))
     .sort((a, b) => a.questionName.localeCompare(b.questionName, undefined, { sensitivity: "base" }));
   for (const r of initial) {
-    if (classifiedAnswerIsFinalResultBucket(r.answerValue, profile)) return r.answerValue.trim();
+    if (classifiedAnswerIsFinalResultBucket(r.answerValue, profile)) {
+      return { questionName: r.questionName, answerValue: r.answerValue.trim() };
+    }
   }
   const rest = [...eligible].sort((a, b) =>
     a.questionName.localeCompare(b.questionName, undefined, { sensitivity: "base" })
   );
   for (let i = rest.length - 1; i >= 0; i--) {
     const r = rest[i]!;
-    if (classifiedAnswerIsFinalResultBucket(r.answerValue, profile)) return r.answerValue.trim();
+    if (classifiedAnswerIsFinalResultBucket(r.answerValue, profile)) {
+      return { questionName: r.questionName, answerValue: r.answerValue.trim() };
+    }
   }
   return null;
+}
+
+function explicitFinalResultSource(
+  rows: readonly { questionName: string; answerValue: string }[],
+  profile: SurveyScriptProfile
+): SynthesisSource | null {
+  for (const r of rows) {
+    if (isStrongSupportSurveyHit(r.questionName, r.answerValue, profile)) {
+      const label =
+        effectiveFrLabel(r.questionName, r.answerValue) ?? r.answerValue.trim();
+      return { questionName: r.questionName, answerValue: label };
+    }
+  }
+  for (const r of rows) {
+    if (isSplitStrongSupportQuestionName(r.questionName) && isAffirmativeSurveyAnswer(r.answerValue)) {
+      return { questionName: r.questionName, answerValue: r.answerValue.trim() };
+    }
+    if (isFinalResultQuestionName(r.questionName) && isSubstantiveAnswer(r.answerValue)) {
+      const label = effectiveFrLabel(r.questionName, r.answerValue) ?? r.answerValue.trim();
+      return { questionName: r.questionName, answerValue: label };
+    }
+    if (isSplitFinalOrPitchColumn(r.questionName) && isAffirmativeSurveyAnswer(r.answerValue)) {
+      return { questionName: r.questionName, answerValue: r.answerValue.trim() };
+    }
+  }
+  return null;
+}
+
+function effectiveFrLabel(questionName: string, answerValue: string): string | null {
+  return effectiveFinalResultAnswerLabelForRollup(questionName, answerValue);
+}
+
+export const SYNTHESIS_REASON_MISSING_FR = "missing_final_result_survey_fill" as const;
+
+export type SynthesizedFinalResultHit = {
+  callId: string;
+  campaignId: string;
+  campaignName: string;
+  callDate: string;
+  phonebankerName: string;
+  displayLabel: string;
+  rawAnswer: string;
+  sourceQuestionName: string;
+  sourceAnswerValue: string;
+  reason: typeof SYNTHESIS_REASON_MISSING_FR;
+};
+
+export type FinalResultCallOutcome = {
+  kind: "none" | "explicit" | "synthesized";
+  displayLabel: string | null;
+  rawAnswer: string | null;
+  sourceQuestionName: string | null;
+  sourceAnswerValue: string | null;
+};
+
+const FR_NONE: FinalResultCallOutcome = {
+  kind: "none",
+  displayLabel: null,
+  rawAnswer: null,
+  sourceQuestionName: null,
+  sourceAnswerValue: null,
+};
+
+/**
+ * Explicit Final Result wins. When the campaign has an FR tab and this call has none,
+ * fill from polling/ID. `synthesized` provenance is only for that missing-FR path.
+ */
+export function finalResultForCall(
+  rows: readonly Pick<CallSurveyRowForFill, "questionName" | "answerValue" | "surveyResultId">[],
+  profile: SurveyScriptProfile,
+  terms: readonly string[],
+  hasFinalResultTab: boolean
+): FinalResultCallOutcome {
+  if (rows.length === 0 || !hasFinalResultTab) return FR_NONE;
+  const collapsed = latestRowPerQuestion(rows);
+  const explicit = explicitFinalResultSource(collapsed, profile);
+  if (explicit) {
+    return {
+      kind: "explicit",
+      displayLabel: classifySurveyAnswerDisplayLabel(explicit.answerValue, profile),
+      rawAnswer: explicit.answerValue,
+      sourceQuestionName: explicit.questionName,
+      sourceAnswerValue: explicit.answerValue,
+    };
+  }
+  if (callHasSubstantiveFinalResult(collapsed)) return FR_NONE;
+  const filled = synthesizedSupportSource(collapsed, profile, terms);
+  if (!filled || !classifiedAnswerIsFinalResultBucket(filled.answerValue, profile)) return FR_NONE;
+  return {
+    kind: "synthesized",
+    displayLabel: classifySurveyAnswerDisplayLabel(filled.answerValue, profile),
+    rawAnswer: filled.answerValue,
+    sourceQuestionName: filled.questionName,
+    sourceAnswerValue: filled.answerValue,
+  };
 }
 
 export type StrongSupportCallHit = {
@@ -242,26 +348,82 @@ export function strongSupportForCall(
   hasFinalResultTab: boolean
 ): StrongSupportCallHit {
   if (rows.length === 0) return SS_MISS;
-  const collapsed = latestRowPerQuestion(rows);
 
   if (hasFinalResultTab) {
+    const collapsed = latestRowPerQuestion(rows);
     if (collapsed.some((r) => isStrongSupportSurveyHit(r.questionName, r.answerValue, profile))) {
       return { hit: 1, synthesized: false };
     }
-    if (callHasSubstantiveFinalResult(collapsed)) return SS_MISS;
-    const filled = synthesizedSupportAnswer(collapsed, profile, terms);
-    if (filled && classifiedAnswerIsStrongSupport(filled, profile)) {
+    const outcome = finalResultForCall(rows, profile, terms, true);
+    if (
+      outcome.kind === "synthesized" &&
+      outcome.rawAnswer &&
+      classifiedAnswerIsStrongSupport(outcome.rawAnswer, profile)
+    ) {
       return { hit: 1, synthesized: true };
     }
     return SS_MISS;
   }
 
+  const collapsed = latestRowPerQuestion(rows);
   const idHit = collapsed.some(
     (r) =>
       isCandidateIdSupportQuestion(r.questionName, terms, profile, [r.answerValue]) &&
       classifiedAnswerIsStrongSupport(r.answerValue, profile)
   );
   return idHit ? { hit: 1, synthesized: false } : SS_MISS;
+}
+
+/** Distinct-call synthesized FR fills (missing FR, filled from polling/ID). */
+export function listSynthesizedFinalResults(
+  rows: readonly CallSurveyRowForFill[],
+  profile: SurveyScriptProfile,
+  terms: readonly string[]
+): SynthesizedFinalResultHit[] {
+  const byCampaign = new Map<string, CallSurveyRowForFill[]>();
+  for (const r of rows) {
+    const list = byCampaign.get(r.campaignId) ?? [];
+    list.push(r);
+    byCampaign.set(r.campaignId, list);
+  }
+
+  const hits: SynthesizedFinalResultHit[] = [];
+  for (const [, campaignRows] of byCampaign) {
+    const hasFr = campaignHasFinalResultTab(campaignRows);
+    if (!hasFr) continue;
+    const byCall = new Map<string, CallSurveyRowForFill[]>();
+    for (const r of campaignRows) {
+      const list = byCall.get(r.callId) ?? [];
+      list.push(r);
+      byCall.set(r.callId, list);
+    }
+    for (const [callId, callRows] of byCall) {
+      const outcome = finalResultForCall(callRows, profile, terms, true);
+      if (outcome.kind !== "synthesized") continue;
+      if (!outcome.displayLabel || !outcome.rawAnswer || !outcome.sourceQuestionName) continue;
+      const head = callRows[0]!;
+      hits.push({
+        callId,
+        campaignId: head.campaignId,
+        campaignName: head.campaignName,
+        callDate: head.callDate,
+        phonebankerName: canonicalizePhonebankerName(head.phonebankerName),
+        displayLabel: outcome.displayLabel,
+        rawAnswer: outcome.rawAnswer,
+        sourceQuestionName: outcome.sourceQuestionName,
+        sourceAnswerValue: outcome.sourceAnswerValue ?? outcome.rawAnswer,
+        reason: SYNTHESIS_REASON_MISSING_FR,
+      });
+    }
+  }
+  return hits;
+}
+
+export function formatSynthesisReason(reason: string): string {
+  if (reason === SYNTHESIS_REASON_MISSING_FR) {
+    return "Missing Final Result; filled from polling/ID";
+  }
+  return reason;
 }
 
 export function sessionStrongSupportKey(

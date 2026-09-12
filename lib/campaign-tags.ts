@@ -283,6 +283,17 @@ export function getTagById(id: string): CampaignTag | undefined {
   return allTagsList().find((t) => t.id === id);
 }
 
+/** Primary (non-QC) tag whose search terms match this campaign display name. */
+export function resolvePhonebankingTagForCampaignName(
+  campaignName: string
+): CampaignTag | undefined {
+  const tags = getPhonebankingTags();
+  return (
+    tags.find((t) => !t.id.startsWith("qc-") && campaignNameMatchesTag(campaignName, t)) ??
+    tags.find((t) => campaignNameMatchesTag(campaignName, t))
+  );
+}
+
 /** Script profile for survey bucketing and labels (QC tags inherit from their primary candidate). */
 export function resolveSurveyScriptProfile(tag: CampaignTag): SurveyScriptProfile {
   if (tag.surveyScriptProfile) return tag.surveyScriptProfile;

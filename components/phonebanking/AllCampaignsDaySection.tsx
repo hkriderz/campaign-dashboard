@@ -9,6 +9,7 @@ import DailyAggregateSection from "@/components/phonebanking/DailyAggregateSecti
 import TabBar from "@/components/phonebanking/TabBar";
 import type { AllCampaignsDayDashboardPayload } from "@/lib/all-campaigns-day-dashboard";
 import type { PhoneBankSummary } from "@/lib/types";
+import { sumPhoneBankRawCalls } from "@/lib/raw-stw-calls";
 import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
 
 const PbDashboardStack = dynamic(() => import("@/components/phonebanking/PbDashboardStack"), {
@@ -223,7 +224,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           aggregateScopeRows={d.aggregateScopeRows}
           surveyScriptProfile={d.surveyScriptProfile}
           hideDatePicker
-          totalCalls={d.overviewPhoneBanks.reduce((sum, bank) => sum + bank.totalCalls, 0)}
+          totalCalls={sumPhoneBankRawCalls(d.overviewPhoneBanks)}
         />
       ) : null}
 

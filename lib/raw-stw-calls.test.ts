@@ -2,8 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   campaignDayRawCallTotals,
+  indexPhoneBankDayRawCalls,
   isFullDashboardDateWindow,
+  lookupPhoneBankDayRawCalls,
   rawStwCallsForCampaignDay,
+  sessionRawStwCalls,
   stampAndKeepCampaignDayRawCalls,
   stampCampaignDayRawCalls,
   sumRawStwCallsByCampaignDay,
@@ -76,4 +79,20 @@ test("sumRawStwCallsByCampaignDay adds MAX per day, not per banker", () => {
     row({ phonebankerName: "A", callDate: "2026-09-03", campaignId: "camp-a", totalCalls: 50, numDials: 1 }),
   ];
   assert.equal(sumRawStwCallsByCampaignDay(rows), 150);
+});
+
+test("sessionRawStwCalls prefers daily-caller MAX, then the day summary", () => {
+  assert.equal(sessionRawStwCalls([{ totalCalls: 0 }, { totalCalls: 12 }], 400), 12);
+  assert.equal(sessionRawStwCalls([{ totalCalls: 0 }, { totalCalls: 0 }], 400), 400);
+  assert.equal(sessionRawStwCalls([], 400), 400);
+  assert.equal(sessionRawStwCalls([{ totalCalls: 0 }], 0), 0);
+});
+
+test("lookupPhoneBankDayRawCalls matches campaign id, then name", () => {
+  const index = indexPhoneBankDayRawCalls([
+    { campaignId: "camp-a", campaignName: "Nithya PB 9.2", callDate: "2026-09-02", totalCalls: 54103 },
+  ]);
+  assert.equal(lookupPhoneBankDayRawCalls(index, "camp-a", "Nithya PB 9.2", "2026-09-02"), 54103);
+  assert.equal(lookupPhoneBankDayRawCalls(index, "", "Nithya PB 9.2", "2026-09-02"), 54103);
+  assert.equal(lookupPhoneBankDayRawCalls(index, "camp-a", "Nithya PB 9.2", "2026-09-03"), 0);
 });

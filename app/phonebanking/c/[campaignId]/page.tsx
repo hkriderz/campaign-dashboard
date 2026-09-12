@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { resolvePhonebankingTagForCampaignName } from "@/lib/campaign-tags";
 import { fetchPhoneBankDetail } from "@/lib/queries/phonebanking";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankDetailClient from "@/components/phonebanking/PhoneBankDetailClient";
@@ -69,7 +70,13 @@ export default async function PhoneBankCampaignOnlyPage({ params }: Props) {
       {error ? (
         <ErrorBanner message={error} />
       ) : (
-        detail && <PhoneBankDetailClient detail={detail} tagColor={NEUTRAL_COLOR} />
+        detail && (
+          <PhoneBankDetailClient
+            detail={detail}
+            tagColor={NEUTRAL_COLOR}
+            tagId={resolvePhonebankingTagForCampaignName(detail.campaign.campaignName)?.id}
+          />
+        )
       )}
     </div>
   );

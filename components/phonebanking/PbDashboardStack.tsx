@@ -13,7 +13,18 @@ import {
   sumAnswerLines,
 } from "@/lib/daily-aggregate-survey-rollup";
 import { questionLooksLikeDisclaimer } from "@/lib/survey-i18n/rules";
-import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
+import {
+  classifySurveyAnswerDisplayLabel,
+  consolidateSurveyAnswerLines,
+  isSplitStrongOpposeQuestionName,
+  isSplitStrongSupportQuestionName,
+  isSplitUndecidedQuestionName,
+  type FinalResultFamily,
+} from "@/lib/survey-answer-consolidation";
+import { formatStrongSupportCell } from "@/lib/strong-support-from-survey";
+import { isFinalResultPivotQuestion } from "@/lib/final-result-synthesis-overlay";
+import SynthesizedCountLabel from "./SynthesizedCountLabel";
+import SynthesizedCallsModal, { type SynthesizedCallsScope } from "./SynthesizedCallsModal";
 import { getCsvSyntheticPivotAnswersByQuestion, filterWidePivotImportHeaders, sortWidePivotQuestionKeysByImportOrder } from "@/lib/csv-slice-question-synthesis";
 import { parseWideScriptSortKey, sortPivotQuestionsByWideHeaderHint } from "@/lib/wide-csv-column-order";
 import type { SurveyScriptProfile, TagDailyCallerStat } from "@/lib/types";
@@ -63,6 +74,8 @@ export type PbDashboardSlice = {
   finalSupport: number;
   finalOppose: number;
   canvassTotal: number;
+  /** Source tag for all-campaigns-day slices (modal API). */
+  tagId?: string;
 };
 
 export type PbQuestionAnswerRow = {
@@ -70,6 +83,7 @@ export type PbQuestionAnswerRow = {
   questionName: string;
   answerValue: string;
   responseCount: number;
+  synthesizedCount?: number;
 };
 
 type PivotColumn = {
@@ -77,6 +91,26 @@ type PivotColumn = {
   questionName: string;
   answerValue: string;
 };
+
+function isFinalResultPivotColumn(col: PivotColumn): boolean {
+  return isFinalResultPivotQuestion(col.questionName);
+}
+
+function synthesizedFilterForColumn(
+  col: PivotColumn,
+  profile: SurveyScriptProfile
+): { displayLabel?: string; family?: FinalResultFamily } {
+  if (isSplitStrongSupportQuestionName(col.questionName)) return { family: "strongSupport" };
+  if (isSplitStrongOpposeQuestionName(col.questionName)) return { family: "strongOppose" };
+  if (isSplitUndecidedQuestionName(col.questionName)) return { family: "undecided" };
+  const raw = col.answerValue.trim() || col.questionName;
+  return { displayLabel: classifySurveyAnswerDisplayLabel(raw, profile) };
+}
+
+function formatPivotCount(total: number, synthesized: number, isFr: boolean): string {
+  if (!isFr || synthesized <= 0) return String(total);
+  return formatStrongSupportCell(total, synthesized);
+}
 
 const CSV_SYNTHETIC_PIVOT_SCHEMA = getCsvSyntheticPivotAnswersByQuestion();
 
@@ -277,10 +311,15 @@ function buildQuestionResponsesPivotTsv(
   ];
   if (hasPivot) {
     for (const col of renderedColumns) {
-      const total = allRows.reduce((s, r) => {
-        return s + (`${r.questionName}::${r.answerValue}` === col.key ? r.responseCount : 0);
-      }, 0);
-      totalCells.push(total);
+      const isFr = isFinalResultPivotColumn(col);
+      let total = 0;
+      let synthesized = 0;
+      for (const r of allRows) {
+        if (`${r.questionName}::${r.answerValue}` !== col.key) continue;
+        total += r.responseCount;
+        synthesized += r.synthesizedCount ?? 0;
+      }
+      totalCells.push(formatPivotCount(total, synthesized, isFr));
     }
   }
   lines.push(totalCells.map(escapeTsvCell).join("\t"));
@@ -289,9 +328,11 @@ function buildQuestionResponsesPivotTsv(
     const m = metricsByBanker.get(phonebankerName);
     const pRows = rowsByPhonebanker.get(phonebankerName) ?? [];
     const valMap = new Map<string, number>();
+    const synthMap = new Map<string, number>();
     for (const row of pRows) {
       const k = `${row.questionName}::${row.answerValue}`;
       valMap.set(k, (valMap.get(k) ?? 0) + row.responseCount);
+      synthMap.set(k, (synthMap.get(k) ?? 0) + (row.synthesizedCount ?? 0));
     }
     const rowCells: (string | number)[] = [
       phonebankerName,
@@ -303,7 +344,9 @@ function buildQuestionResponsesPivotTsv(
     ];
     if (hasPivot) {
       for (const col of renderedColumns) {
-        rowCells.push(valMap.get(col.key) ?? 0);
+        const total = valMap.get(col.key) ?? 0;
+        const synthesized = synthMap.get(col.key) ?? 0;
+        rowCells.push(formatPivotCount(total, synthesized, isFinalResultPivotColumn(col)));
       }
     }
     lines.push(rowCells.map(escapeTsvCell).join("\t"));
@@ -596,6 +639,7 @@ export default function PbDashboardStack({
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [pendingUndo, setPendingUndo] = useState<PendingSliceUndo | null>(null);
   const [undoBusy, setUndoBusy] = useState(false);
+  const [synthScope, setSynthScope] = useState<SynthesizedCallsScope | null>(null);
   const csvKeySet = useMemo(() => new Set(csvSliceKeys ?? []), [csvSliceKeys]);
   const observedPivotColumnsByCampaign = useMemo(
     () => buildObservedPivotColumnsByCampaign(slices, questionRowsBySlice),
@@ -1000,12 +1044,37 @@ export default function PbDashboardStack({
                           </td>
                           {hasPivot &&
                             renderedColumns.map((col) => {
-                              const total = rows.reduce((s, r) => {
-                                return s + (`${r.questionName}::${r.answerValue}` === col.key ? r.responseCount : 0);
-                              }, 0);
+                              const isFr = isFinalResultPivotColumn(col);
+                              let total = 0;
+                              let synthesized = 0;
+                              for (const r of rows) {
+                                if (`${r.questionName}::${r.answerValue}` !== col.key) continue;
+                                total += r.responseCount;
+                                synthesized += r.synthesizedCount ?? 0;
+                              }
+                              const scopeTagId = slice.tagId ?? tagId;
                               return (
                                 <td key={`total-${col.key}`} className="px-2 py-1 border border-gray-200 dark:border-gray-700 text-center">
-                                  {total}
+                                  {isFr ? (
+                                    <SynthesizedCountLabel
+                                      total={total}
+                                      synthesized={synthesized}
+                                      onOpen={
+                                        synthesized > 0 && scopeTagId
+                                          ? () =>
+                                              setSynthScope({
+                                                tagId: scopeTagId,
+                                                campaignId: slice.campaignId,
+                                                callDate: slice.callDate,
+                                                title: `${synthesized.toLocaleString()} synthesized ${synthesizedFilterForColumn(col, surveyScriptProfile).displayLabel ?? "Final Result"} calls`,
+                                                ...synthesizedFilterForColumn(col, surveyScriptProfile),
+                                              })
+                                          : undefined
+                                      }
+                                    />
+                                  ) : (
+                                    total
+                                  )}
                                 </td>
                               );
                             })}
@@ -1014,9 +1083,11 @@ export default function PbDashboardStack({
                           const m = metricsByBanker.get(phonebankerName);
                           const pRows = rowsByPhonebanker.get(phonebankerName) ?? [];
                           const valMap = new Map<string, number>();
+                          const synthMap = new Map<string, number>();
                           for (const row of pRows) {
                             const k = `${row.questionName}::${row.answerValue}`;
                             valMap.set(k, (valMap.get(k) ?? 0) + row.responseCount);
+                            synthMap.set(k, (synthMap.get(k) ?? 0) + (row.synthesizedCount ?? 0));
                           }
                           return (
                             <tr key={phonebankerName} className="hover:bg-indigo-50 dark:hover:bg-gray-800">
@@ -1039,11 +1110,37 @@ export default function PbDashboardStack({
                                 {m ? m.surveyed.toLocaleString() : "0"}
                               </td>
                               {hasPivot &&
-                                renderedColumns.map((col) => (
+                                renderedColumns.map((col) => {
+                                  const total = valMap.get(col.key) ?? 0;
+                                  const synthesized = synthMap.get(col.key) ?? 0;
+                                  const isFr = isFinalResultPivotColumn(col);
+                                  const scopeTagId = slice.tagId ?? tagId;
+                                  return (
                                   <td key={`${phonebankerName}-${col.key}`} className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center">
-                                    {valMap.get(col.key) ?? 0}
+                                    {isFr ? (
+                                      <SynthesizedCountLabel
+                                        total={total}
+                                        synthesized={synthesized}
+                                        onOpen={
+                                          synthesized > 0 && scopeTagId
+                                            ? () =>
+                                                setSynthScope({
+                                                  tagId: scopeTagId,
+                                                  campaignId: slice.campaignId,
+                                                  callDate: slice.callDate,
+                                                  phonebanker: phonebankerName,
+                                                  title: `${synthesized.toLocaleString()} synthesized ${synthesizedFilterForColumn(col, surveyScriptProfile).displayLabel ?? "Final Result"} calls`,
+                                                  ...synthesizedFilterForColumn(col, surveyScriptProfile),
+                                                })
+                                            : undefined
+                                        }
+                                      />
+                                    ) : (
+                                      total
+                                    )}
                                   </td>
-                                ))}
+                                  );
+                                })}
                             </tr>
                           );
                         })}
@@ -1077,12 +1174,32 @@ export default function PbDashboardStack({
                       column sums for Final Result)
                     </div>
                     <ul className="mt-1.5 space-y-0.5 list-none">
-                      {finalResultConsolidated.map((line) => (
+                      {finalResultConsolidated.map((line) => {
+                        const scopeTagId = slice.tagId ?? tagId;
+                        const synthesized = line.synthesized ?? 0;
+                        return (
                         <li key={line.label}>
-                          <span className="tabular-nums font-medium">{line.count.toLocaleString()}</span>{" "}
+                          <SynthesizedCountLabel
+                            total={line.count}
+                            synthesized={synthesized}
+                            className="tabular-nums font-medium"
+                            onOpen={
+                              synthesized > 0 && scopeTagId
+                                ? () =>
+                                    setSynthScope({
+                                      tagId: scopeTagId,
+                                      campaignId: slice.campaignId,
+                                      callDate: slice.callDate,
+                                      displayLabel: line.label,
+                                      title: `${synthesized.toLocaleString()} synthesized ${line.label} calls`,
+                                    })
+                                : undefined
+                            }
+                          />{" "}
                           {line.label}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   </div>
                 ) : null}
@@ -1091,6 +1208,7 @@ export default function PbDashboardStack({
           </section>
         );
       })}
+      <SynthesizedCallsModal scope={synthScope} onClose={() => setSynthScope(null)} />
     </div>
   );
 }

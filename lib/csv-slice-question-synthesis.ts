@@ -11,6 +11,7 @@ export type PbQuestionAnswerRowLike = {
   questionName: string;
   answerValue: string;
   responseCount: number;
+  synthesizedCount?: number;
 };
 
 /** (field, pivot question, pivot answer label) — only numeric counts > 0 are emitted. Contact metrics are omitted here (shown as fixed columns on the Data tab). */

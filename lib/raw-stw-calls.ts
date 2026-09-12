@@ -4,6 +4,8 @@
  * Always take MAX within a campaign-day. Never SUM across bankers.
  */
 
+import { campaignGroupKey } from "@/lib/slice-key";
+
 export function campaignDayRawCallKey(campaignId: string, callDate: string): string {
   return `${campaignId}::${callDate}`;
 }
@@ -67,4 +69,53 @@ export function isFullDashboardDateWindow(
 
 export function sumPhoneBankRawCalls(banks: readonly { totalCalls: number }[]): number {
   return banks.reduce((sum, bank) => sum + bank.totalCalls, 0);
+}
+
+/**
+ * One campaign-day's raw STW call count.
+ * Daily-caller snapshots often park 0 on banker rows; then use the per-day
+ * phone-bank summary (`COUNT` of `calls.created_at`). Never use CSV `callsAnswered`.
+ */
+export function sessionRawStwCalls(
+  dailyCallerRows: readonly { totalCalls?: number }[],
+  daySummaryCalls = 0
+): number {
+  const fromCaller = rawStwCallsForCampaignDay(dailyCallerRows);
+  if (fromCaller > 0) return fromCaller;
+  return daySummaryCalls > 0 ? daySummaryCalls : 0;
+}
+
+export function phoneBankDayLookupKey(
+  campaignId: string | undefined,
+  campaignName: string,
+  callDate: string
+): string {
+  return `${campaignGroupKey(campaignId, campaignName)}::${callDate}`;
+}
+
+export function indexPhoneBankDayRawCalls(
+  rows: readonly { campaignId: string; campaignName: string; callDate: string; totalCalls: number }[]
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const add = (key: string, n: number) => {
+    map.set(key, Math.max(map.get(key) ?? 0, n));
+  };
+  for (const row of rows) {
+    add(phoneBankDayLookupKey(row.campaignId, row.campaignName, row.callDate), row.totalCalls);
+    add(phoneBankDayLookupKey(undefined, row.campaignName, row.callDate), row.totalCalls);
+  }
+  return map;
+}
+
+export function lookupPhoneBankDayRawCalls(
+  index: ReadonlyMap<string, number>,
+  campaignId: string | undefined,
+  campaignName: string,
+  callDate: string
+): number {
+  if (campaignId?.trim()) {
+    const byId = index.get(phoneBankDayLookupKey(campaignId, campaignName, callDate)) ?? 0;
+    if (byId > 0) return byId;
+  }
+  return index.get(phoneBankDayLookupKey(undefined, campaignName, callDate)) ?? 0;
 }

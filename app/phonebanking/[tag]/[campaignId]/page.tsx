@@ -79,7 +79,7 @@ export default async function PhoneBankDetailPage({ params }: Props) {
         <ErrorBanner message={error} />
       ) : (
         detail && (
-          <PhoneBankDetailClient detail={detail} tagColor={tag.color} />
+          <PhoneBankDetailClient detail={detail} tagColor={tag.color} tagId={tagId} />
         )
       )}
     </div>

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isStrongSupportSurveyHit } from "./survey-answer-consolidation";
+import { isStrongSupportSurveyHit, synthesizedHitMatchesLabel } from "./survey-answer-consolidation";
 
 test("combined Final Result + Strong Support answer counts as SS", () => {
   assert.equal(isStrongSupportSurveyHit("Final Result", "A. Strong Support"), true);
@@ -39,4 +39,17 @@ test("Ada and Eunisses profiles map candidate support to SS", () => {
     isStrongSupportSurveyHit("Final Result", "Support Eunisses", "eunissesTwoWay"),
     true
   );
+});
+
+test("synthesizedHitMatchesLabel accepts script option text and bucket names", () => {
+  const hit = {
+    displayLabel: "Support Faizah",
+    rawAnswer: "A. Strong Support for Nithya",
+  };
+  assert.equal(synthesizedHitMatchesLabel(hit, "Support Faizah", "faizahTraci"), true);
+  assert.equal(
+    synthesizedHitMatchesLabel(hit, "A. Strong Support for Nithya", "faizahTraci"),
+    true
+  );
+  assert.equal(synthesizedHitMatchesLabel(hit, "B. Undecided", "faizahTraci"), false);
 });

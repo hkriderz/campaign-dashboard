@@ -295,6 +295,62 @@ async function fetchAllPhoneBankSummariesForDateUncached(isoDate: string): Promi
   return rows.map((r) => rowToPhoneBankSummary(r));
 }
 
+export type PhoneBankDayRawCalls = {
+  campaignId: string;
+  campaignName: string;
+  callDate: string;
+  totalCalls: number;
+};
+
+/**
+ * Raw STW `calls` counts at campaign-day grain (`COUNT` of `calls.created_at` in Pacific).
+ * Used when daily-caller snapshots parked 0 on banker rows.
+ */
+export async function fetchAllPhoneBankRawCallsByCampaignDay(
+  startDate: string,
+  endDate: string
+): Promise<PhoneBankDayRawCalls[]> {
+  requireDashboardDataAccess();
+  if (!isValidPhonebankingIsoDate(startDate) || !isValidPhonebankingIsoDate(endDate)) return [];
+  return cachedBq(
+    ["fetchAllPhoneBankRawCallsByCampaignDay", startDate, endDate],
+    () => fetchAllPhoneBankRawCallsByCampaignDayUncached(startDate, endDate)
+  );
+}
+
+async function fetchAllPhoneBankRawCallsByCampaignDayUncached(
+  startDate: string,
+  endDate: string
+): Promise<PhoneBankDayRawCalls[]> {
+  const lifecycleColumns = await getCampaignLifecycleColumns();
+  const lifecycleFilter = buildCampaignLifecycleFilter(lifecycleColumns);
+
+  const sql = `
+    SELECT
+      campaigns.id AS campaign_id,
+      campaigns.name AS campaign_name,
+      DATE(calls.created_at, 'America/Los_Angeles') AS call_date,
+      COUNT(*) AS total_calls
+    FROM \`${P}.${D}.campaigns\` AS campaigns
+    INNER JOIN \`${P}.${D}.calls\` AS calls
+      ON campaigns.id = calls.campaign_id
+    WHERE ${lifecycleFilter}
+      AND DATE(calls.created_at, 'America/Los_Angeles') BETWEEN '${startDate}' AND '${endDate}'
+    GROUP BY campaigns.id, campaigns.name, call_date
+    HAVING COUNT(*) > 0
+  `;
+
+  const rows = await runQuery<Record<string, unknown>>(sql);
+  return rows
+    .map((r) => ({
+      campaignId: toStr(r.campaign_id),
+      campaignName: toStr(r.campaign_name),
+      callDate: toDateString(r.call_date) ?? "",
+      totalCalls: toNum(r.total_calls),
+    }))
+    .filter((r) => r.callDate && r.totalCalls > 0);
+}
+
 /**
  * Per-phonebanker aggregates for **all** lifecycle-eligible campaigns, limited to one LA session day.
  * Mirrors {@link fetchPhonebankersByTag} date grain (`callers.created_at`) but without a candidate tag filter.
