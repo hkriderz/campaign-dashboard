@@ -56,12 +56,14 @@ export default async function TextingTagPage({ params }: Props) {
         <div className="mb-6">
           <Link
             href="/texting"
-            className="text-sm font-medium text-teal-700 dark:text-teal-300 hover:underline"
+            className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-accent)] hover:underline"
           >
             ← All texting
           </Link>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mt-2">{tag.label}</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+          <p className="section-kicker mt-4">Dispatch</p>
+          <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)] mt-1">{tag.label}</h1>
+          <hr className="section-hero__rule" />
+          <p className="section-hero__lede">
             {campaigns.length.toLocaleString()} campaign{campaigns.length !== 1 ? "s" : ""} ·{" "}
             {completeCount.toLocaleString()} complete · {totalContacts.toLocaleString()} contacts
           </p>
@@ -71,8 +73,8 @@ export default async function TextingTagPage({ params }: Props) {
 
         {!error ? (
           <>
-            <section className="mb-8 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-5 shadow-sm">
-              <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-3">Contact tags</h2>
+            <section className="mb-8 dash-card">
+              <h2 className="font-display text-xl font-semibold text-[var(--section-ink)] mb-3">Contact tags</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
                 Combined across this candidate’s text campaigns. Expand a row below for one send.
               </p>

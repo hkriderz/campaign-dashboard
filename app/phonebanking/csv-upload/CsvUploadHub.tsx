@@ -714,7 +714,9 @@ export default function CsvUploadHub({
             ← Phone banking
           </Link>
         </p>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">CSV upload</h1>
+        <p className="section-kicker">Import</p>
+        <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">CSV upload</h1>
+        <hr className="section-hero__rule" />
         <p className="text-gray-600 dark:text-gray-400 text-sm mt-2">
           Merge phone bank data into the per-candidate CSV store used with BigQuery. Convert a{" "}
           <strong>Scale-to-Win raw</strong> export, or upload a <strong>Google Sheets</strong> roster or wide crosstab —

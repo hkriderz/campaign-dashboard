@@ -7,7 +7,7 @@ export default function PdiLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col" data-section="pdi">
       <TopNav />
       <PdiSubNav />
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden">{children}</main>

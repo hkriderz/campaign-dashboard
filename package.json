@@ -4,12 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "refresh:local": "tsx scripts/local-snapshot-refresh.ts",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "analyze:non-contact": "tsx scripts/analyze-non-contact-patterns.ts",
     "test:non-contact": "tsx --test lib/canvassing/non-contact-patterns/analyzer.test.ts",
-    "test:doorknocks": "tsx --require ./scripts/stub-server-only.cjs --test lib/canvassing/doorknocks-results/helpers.test.ts lib/canvassing/display-names.test.ts lib/canvassing/knock-report-view.test.ts lib/canvassing/knock-details-parser.test.ts",
+    "test:doorknocks": "tsx --require ./scripts/stub-server-only.cjs --test lib/canvassing/doorknocks-results/helpers.test.ts lib/canvassing/display-names.test.ts lib/canvassing/knock-report-view.test.ts lib/canvassing/knock-details-parser.test.ts lib/canvassing/overview-tally.test.ts lib/qc-recontact/pair.test.ts",
+    "seed:knock-index": "tsx --require ./scripts/stub-server-only.cjs scripts/seed-knock-index.ts",
     "seed:non-contact-history": "tsx --require ./scripts/stub-server-only.cjs scripts/seed-non-contact-history.ts",
     "regression:knock": "tsx --require ./scripts/stub-server-only.cjs scripts/capture-knock-regression.ts",
     "regression:knock:compare": "tsx --require ./scripts/stub-server-only.cjs scripts/capture-knock-regression.ts --compare"

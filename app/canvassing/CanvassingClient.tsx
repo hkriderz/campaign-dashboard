@@ -1359,13 +1359,14 @@ export default function CanvassingClient() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <section>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-500 dark:text-violet-300">
-          Canvassing
+        <p className="section-kicker text-orange-800 dark:text-orange-300">
+          Street / Knock
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+        <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-[var(--section-ink)]">
           Knock Analysis
         </h1>
-        <p className="mt-3 max-w-3xl text-gray-600 dark:text-gray-400">
+        <hr className="section-hero__rule" />
+        <p className="mt-3 max-w-3xl text-[var(--section-muted)]">
           Upload PDI Canvasser Details (knock timeline) plus optional campaign result workbooks.
           Choose a Lunch or Final gap report, set shift times, and exclude leads from schedule
           sections while keeping them in the saved data.

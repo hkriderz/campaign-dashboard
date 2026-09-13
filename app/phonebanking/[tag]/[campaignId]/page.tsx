@@ -61,7 +61,7 @@ export default async function PhoneBankDetailPage({ params }: Props) {
             style={{ backgroundColor: tag.color }}
           />
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 leading-snug">
+            <h1 className="font-display text-2xl font-semibold text-[var(--section-ink)] leading-snug">
               {detail?.campaign.campaignName ?? "Phone Bank Details"}
             </h1>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{tag.label}</p>

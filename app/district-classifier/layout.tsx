@@ -1,3 +1,4 @@
+import SessionPasswordGate from "@/components/access/SessionPasswordGate";
 import TopNav from "@/components/layout/TopNav";
 
 export default function DistrictClassifierLayout({
@@ -6,9 +7,11 @@ export default function DistrictClassifierLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col" data-section="districts">
       <TopNav />
-      <main className="flex-1 bg-gray-50/50 dark:bg-gray-950">{children}</main>
+      <main className="flex-1 bg-[var(--section-paper)]">
+        <SessionPasswordGate>{children}</SessionPasswordGate>
+      </main>
     </div>
   );
 }

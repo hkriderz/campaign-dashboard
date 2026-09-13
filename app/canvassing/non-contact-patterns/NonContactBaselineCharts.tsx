@@ -111,14 +111,14 @@ export default function NonContactBaselineCharts({
           <div className="mt-4 h-72 w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={histData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#8f8778" vertical={false} />
                 <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
                 <YAxis tick={{ fontSize: 11 }} unit="%" width={40} />
                 <Tooltip formatter={(value: number) => `${value}%`} />
                 <Legend />
                 <ReferenceLine x="5-15s" stroke="#f59e0b" strokeDasharray="4 4" />
                 <Bar dataKey="teamPct" name="Team baseline" fill="#9ca3af" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="currentPct" name="Current file" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="currentPct" name="Current file" fill="#c2410c" radius={[3, 3, 0, 0]} />
                 {canvasserHistogramPct ? (
                   <Bar dataKey="canvasserPct" name="Selected canvasser" fill="#dc2626" radius={[3, 3, 0, 0]} />
                 ) : null}
@@ -143,7 +143,7 @@ export default function NonContactBaselineCharts({
                     if (id && onTrendClick) onTrendClick(id);
                   }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#8f8778" vertical={false} />
                   <XAxis dataKey="reportDate" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} width={40} />
                   <Tooltip />
@@ -186,7 +186,7 @@ export default function NonContactBaselineCharts({
             {topRates.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topRates} layout="vertical" margin={{ top: 8, right: 24, left: 8, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#8f8778" horizontal={false} />
                   <XAxis type="number" unit="%" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="shortName" width={100} tick={{ fontSize: 11 }} />
                   <Tooltip formatter={(value: number) => `${value}%`} labelFormatter={(_, payload) => payload?.[0]?.payload?.name ?? ""} />

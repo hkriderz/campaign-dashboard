@@ -32,7 +32,10 @@ import { isFinalResultPivotQuestion } from "@/lib/final-result-synthesis-overlay
 import {
   classifySurveyAnswerDisplayLabel,
   finalResultFamilyForDisplayLabel,
+  sumFinalResultFamilies,
+  type FinalResultFamilyCounts,
 } from "@/lib/survey-answer-consolidation";
+import OutcomeTallyStrip from "@/components/common/OutcomeTallyStrip";
 import SynthesizedCountLabel from "./SynthesizedCountLabel";
 import SynthesizedCallsModal, { type SynthesizedCallsScope } from "./SynthesizedCallsModal";
 
@@ -139,6 +142,8 @@ type Props = {
   finalResultUsesScriptOptionLabels: boolean;
   aggregateScopeRows: AggregateScopeQuestionRow[];
   surveyScriptProfile: SurveyScriptProfile;
+  /** Per-campaign SS / U / SO (FR when that bank has it, else ID/polling). */
+  outcomeTally?: FinalResultFamilyCounts;
   /** When true, the parent owns date filtering — do not render an inner date picker. */
   hideDatePicker?: boolean;
   /**
@@ -175,6 +180,7 @@ export default function DailyAggregateSection({
   finalResultUsesScriptOptionLabels,
   aggregateScopeRows,
   surveyScriptProfile,
+  outcomeTally,
   hideDatePicker = false,
   totalCalls,
 }: Props) {
@@ -278,6 +284,17 @@ export default function DailyAggregateSection({
 
   const useBqPolling = bqPollingBreakdown.length > 0;
   const useBqFinal = bqFinalResultBreakdown.length > 0;
+  const stripTally =
+    outcomeTally ??
+    (useBqFinal
+      ? sumFinalResultFamilies(bqFinalResultBreakdown, surveyScriptProfile)
+      : useBqPolling
+        ? sumFinalResultFamilies(bqPollingBreakdown, surveyScriptProfile)
+        : {
+            strongSupport: finalSS,
+            undecided: finalUndecided,
+            strongOppose: finalSO,
+          });
 
   const effectiveLayout = hydrated ? layout : DEFAULT_DAILY_AGGREGATE_LAYOUT;
 
@@ -498,6 +515,13 @@ export default function DailyAggregateSection({
             Daily Aggregate
           </div>
           <div className="text-[0.6875rem] text-gray-500 dark:text-gray-400">{dateLabel}</div>
+        </div>
+        <div className="px-3 sm:px-4 py-1.5 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900">
+          <OutcomeTallyStrip
+            strongSupport={stripTally.strongSupport}
+            undecided={stripTally.undecided}
+            strongOppose={stripTally.strongOppose}
+          />
         </div>
 
         <div className="daily-aggregate-card__metrics border-b border-gray-100 dark:border-gray-700 text-gray-900 dark:text-gray-100 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">

@@ -1,7 +1,15 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
-import { getTagById, resolveSurveyScriptProfile, tagUsesVerbatimFinalResultAggregate } from "@/lib/campaign-tags";
+import {
+  campaignBelongsInDailyAggregate,
+  getTagById,
+  isDerivedQcTagId,
+  resolveSurveyScriptProfile,
+  tagUsesVerbatimFinalResultAggregate,
+} from "@/lib/campaign-tags";
+import { filterPairsByQcDateRange, summarizeRecontactPairs } from "@/lib/qc-recontact";
+import { loadQcRecontactPairsForPage } from "@/lib/queries/qc-recontact";
 import { getDashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
 import {
   fetchPhoneBanksByTag,
@@ -22,6 +30,7 @@ import { loadWideHeaderFieldMap } from "@/lib/stw-wide-header-field-map-store";
 import { loadWideReferenceHeaders } from "@/lib/stw-wide-reference-store";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
+import QcRecontactSection from "@/components/phonebanking/QcRecontactSection";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import TabBar from "@/components/phonebanking/TabBar";
 import PhonebankerAggregateTable from "@/components/phonebanking/PhonebankerAggregateTable";
@@ -59,6 +68,7 @@ import {
 } from "@/lib/types";
 import { normalizeName, parseTimeToSec, secToTime, sumRows } from "@/lib/csv-parser";
 import { rollupPollingAndFinalAnswers } from "@/lib/daily-aggregate-survey-rollup";
+import { tallySupportOutcomesByCampaign } from "@/lib/daily-aggregate-outcome-tally";
 import { aggregateScopeRowsFromQuestionSlices } from "@/lib/daily-aggregate-question-rollups";
 import { aggregateFilledFinalResults } from "@/lib/final-result-fill-aggregate";
 import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
@@ -306,6 +316,8 @@ export default async function TagPage({ params, searchParams }: Props) {
   const tag = getTagById(tagId);
   if (!tag) notFound();
 
+  const isQcTag = isDerivedQcTagId(tagId);
+  const pageMembership = isQcTag ? "qc" : "primary";
   const surveyScriptProfile = resolveSurveyScriptProfile(tag);
   const verbatimFinalResult = tagUsesVerbatimFinalResultAggregate(tag);
   const aggregateLexicon = getDashboardAggregateLexicon(tag, surveyScriptProfile);
@@ -325,9 +337,15 @@ export default async function TagPage({ params, searchParams }: Props) {
       fetchTagPhonebankerQuestionStats(tagId),
       fetchTagCallSurveyRowsForFinalFill(tagId),
     ]);
+    phoneBanks = phoneBanks.filter((p) =>
+      campaignBelongsInDailyAggregate(p.campaignName, pageMembership)
+    );
   } catch (err) {
     bqError = err instanceof Error ? err.message : String(err);
   }
+  phoneBanks = phoneBanks.filter((p) =>
+    campaignBelongsInDailyAggregate(p.campaignName, pageMembership)
+  );
 
   const snapshotMeta = getTagDashboardSnapshotMeta(tagId);
 
@@ -565,6 +583,7 @@ export default async function TagPage({ params, searchParams }: Props) {
   const dashboardSlices = Array.from(bqSliceMap.values())
     .filter(
       (s) =>
+        campaignBelongsInDailyAggregate(s.campaignName, pageMembership) &&
         !tombstonedSliceKeys.has(s.sliceKey) &&
         !tombstonedSliceKeys.has(makeSliceKey(s.campaignName, s.callDate))
     )
@@ -609,6 +628,7 @@ export default async function TagPage({ params, searchParams }: Props) {
 
   const bqOutcomeByCallerSlice = buildPhonebankerBqOutcomeMap(bqQuestionStats, surveyScriptProfile);
   const mergedRowsForPhonebankers = mergedRowsFromBqAndCsv
+    .filter((r) => campaignBelongsInDailyAggregate(r.phoneBankName, pageMembership))
     .filter((r) => {
       const iso = normalizeDateToIso(r.date);
       if (!iso) return true;
@@ -711,9 +731,26 @@ export default async function TagPage({ params, searchParams }: Props) {
       : false;
   const activeStartDate = hasAvailableDateInRange ? requestedStartDate : "";
   const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
+  const recontactPayload = isQcTag ? await loadQcRecontactPairsForPage(tagId) : null;
+  const recontactPairs = recontactPayload
+    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate)
+    : [];
+  const recontactStats = summarizeRecontactPairs(recontactPairs);
+  const recontactHref = (() => {
+    const params = new URLSearchParams({ tab: "overview" });
+    if (activeStartDate) {
+      params.set("date", activeStartDate);
+      if (activeEndDate && activeEndDate !== activeStartDate) params.set("endDate", activeEndDate);
+    }
+    return `/phonebanking/${tagId}?${params.toString()}#qc-recontacts`;
+  })();
   const filteredSlices = activeStartDate
     ? dashboardSlices.filter((s) => isoDateInRange(s.callDate, activeStartDate, activeEndDate))
     : dashboardSlices;
+  const aggregateMembership = isQcTag ? "qc" : "primary";
+  const aggregateSlices = filteredSlices.filter((s) =>
+    campaignBelongsInDailyAggregate(s.campaignName, aggregateMembership)
+  );
   const filteredRowsForPhonebankers = activeStartDate
     ? mergedRowsForPhonebankers.filter((r) => {
         const iso = normalizeDateToIso(r.date);
@@ -734,7 +771,7 @@ export default async function TagPage({ params, searchParams }: Props) {
         callerMetricsBySlice,
         phoneBanksByCampaignKey
       );
-  const aggregateSliceKeys = new Set(filteredSlices.map((s) => s.sliceKey));
+  const aggregateSliceKeys = new Set(aggregateSlices.map((s) => s.sliceKey));
   const rollupPf = rollupPollingAndFinalAnswers(bqQuestionStats, {
     sliceKeys: aggregateSliceKeys,
     dateFilter: null,
@@ -782,6 +819,16 @@ export default async function TagPage({ params, searchParams }: Props) {
   if (bqFinalResultBreakdown.length > 0 && !verbatimFinalResult) {
     bqFinalResultBreakdown = consolidateSurveyAnswerLines(bqFinalResultBreakdown, surveyScriptProfile);
   }
+  const outcomeTally = tallySupportOutcomesByCampaign(bqQuestionStats, {
+    sliceKeys: aggregateSliceKeys,
+    profile: surveyScriptProfile,
+    terms: candidateTermsForTag(tag),
+    extraLines: scopedSynthHits.map((h) => ({
+      label: verbatimFinalResult ? h.rawAnswer : h.displayLabel,
+      count: 1,
+      synthesized: 1,
+    })),
+  });
 
   const aggregateScopeRows = aggregateScopeRowsFromQuestionSlices(
     questionRowsBySlice,
@@ -816,18 +863,19 @@ export default async function TagPage({ params, searchParams }: Props) {
   return (
     <div className="max-w-7xl mx-auto">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm text-gray-500 dark:text-gray-400 mb-5">
-        <Link href="/phonebanking" className="hover:text-indigo-600 transition-colors">
+      <nav className="flex items-center gap-1.5 text-sm text-[var(--section-muted)] mb-5">
+        <Link href="/phonebanking" className="hover:text-[var(--section-accent)] transition-colors">
           Phone Banking
         </Link>
         <span>/</span>
-        <span className="text-gray-700 dark:text-gray-200 font-medium">{tag.label}</span>
+        <span className="text-[var(--section-ink)] font-medium">{tag.label}</span>
       </nav>
 
       <div className="mb-4">
         <TagDataRefreshBar
           tagId={tagId}
           enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
+          localDev={process.env.NODE_ENV === "development"}
           dataUpdatedAtIso={snapshotMeta.dataUpdatedAt}
           dataUpdatedAtLabel={snapshotMeta.dataUpdatedAtLabel}
           isStale={snapshotMeta.isStale}
@@ -854,42 +902,63 @@ export default async function TagPage({ params, searchParams }: Props) {
       <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <span
-            className="w-4 h-4 rounded-full flex-shrink-0"
+            className="w-3 h-8 flex-shrink-0"
             style={{ backgroundColor: tag.color }}
           />
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{tag.label}</h1>
+            <p className="section-kicker">War room</p>
+            <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">{tag.label}</h1>
             {tag.navGroup ? (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{tag.navGroup}</p>
+              <p className="text-sm text-[var(--section-muted)] mt-0.5">{tag.navGroup}</p>
             ) : null}
           </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 min-w-0 lg:w-auto">
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+        <div
+          className={`grid grid-cols-2 md:grid-cols-3 gap-2 min-w-0 lg:w-auto ${
+            isQcTag ? "xl:grid-cols-6" : "xl:grid-cols-5"
+          }`}
+        >
+          <div className="dash-card px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Phone Banks</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{phoneBankCountBox}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+          <div className="dash-card px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Total Calls</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{totalCalls.toLocaleString()}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+          <div className="dash-card px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Surveyed</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{totalSurveyed.toLocaleString()}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+          <div className="dash-card px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Call Time</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{fmtHours(totalHours)}</div>
           </div>
-          <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs">
+          <div className="dash-card px-3 py-2 text-xs">
             <div className="text-gray-500 dark:text-gray-400">Callers</div>
             <div className="font-semibold text-gray-900 dark:text-gray-100">{uniqueCallers.toLocaleString()}</div>
           </div>
+          {isQcTag ? (
+            <Link
+              href={recontactHref}
+              className="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 px-3 py-2 text-xs hover:border-indigo-400 dark:hover:border-indigo-600 transition-colors"
+            >
+              <div className="text-indigo-700 dark:text-indigo-300">Matched</div>
+              <div className="font-semibold text-gray-900 dark:text-gray-100">
+                {recontactPayload?.hasSnapshot ? recontactStats.matched.toLocaleString() : "—"}
+              </div>
+              <div className="text-gray-500 dark:text-gray-400 mt-0.5">
+                {recontactPayload?.hasSnapshot
+                  ? `${recontactStats.flipped.toLocaleString()} flipped · ${recontactStats.unmatched.toLocaleString()} unmatched`
+                  : "Refresh to match"}
+              </div>
+            </Link>
+          ) : null}
         </div>
       </div>
 
       <div className="space-y-3 mb-5">
-        {filteredSlices.length > 0 && (
+        {aggregateSlices.length > 0 && (
           <DailyAggregateSection
             tagId={tagId}
             basePath={`/phonebanking/${tagId}`}
@@ -898,7 +967,7 @@ export default async function TagPage({ params, searchParams }: Props) {
             activeDate={activeStartDate}
             activeEndDate={activeEndDate}
             dateLabel={activeDateLabel}
-            slices={filteredSlices}
+            slices={aggregateSlices}
             uniquePhonebankers={uniquePbersForAggregate}
             showPollingAggregate={tag.showPollingAggregate !== false}
             bqPollingBreakdown={bqPollingBreakdown}
@@ -908,7 +977,8 @@ export default async function TagPage({ params, searchParams }: Props) {
             finalResultUsesScriptOptionLabels={verbatimFinalResult}
             aggregateScopeRows={aggregateScopeRows}
             surveyScriptProfile={surveyScriptProfile}
-            totalCalls={totalCalls}
+            outcomeTally={outcomeTally}
+            totalCalls={aggregateSlices.reduce((s, x) => s + x.totalCalls, 0)}
           />
         )}
         {process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET ? (
@@ -938,11 +1008,18 @@ export default async function TagPage({ params, searchParams }: Props) {
       {/* ── TAB: Overview ─────────────────────────────────────────────────────── */}
       {tab === "overview" && (
         <div className="space-y-8">
-          {/* Phone bank list from BigQuery */}
           <section>
             <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">All Phone Banks</h2>
             <PhoneBankTable phoneBanks={overviewPhoneBanks} tagId={tagId} tagColor={tag.color} />
           </section>
+          {recontactPayload ? (
+            <QcRecontactSection
+              tagId={tagId}
+              pairs={recontactPairs}
+              hasSnapshot={recontactPayload.hasSnapshot}
+              surveyScriptProfile={surveyScriptProfile}
+            />
+          ) : null}
         </div>
       )}
 

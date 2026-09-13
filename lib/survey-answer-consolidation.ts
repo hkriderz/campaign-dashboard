@@ -262,6 +262,19 @@ const FINAL_RESULT_DISPLAY_BUCKETS = new Set([
 
 export type FinalResultFamily = "strongSupport" | "undecided" | "strongOppose" | "other";
 
+export type FinalResultFamilyCounts = {
+  strongSupport: number;
+  undecided: number;
+  strongOppose: number;
+};
+
+/** Generic outcome copy for tally strips — never a candidate name. */
+export const GENERIC_OUTCOME_LABELS = {
+  strongSupport: "Strong support",
+  undecided: "Undecided",
+  strongOppose: "Strong oppose",
+} as const;
+
 /** Map a classified display label onto the three CSV-style Final Result families. */
 export function finalResultFamilyForDisplayLabel(displayLabel: string): FinalResultFamily {
   if (STRONG_SUPPORT_DISPLAY_BUCKETS.has(displayLabel)) return "strongSupport";
@@ -276,6 +289,29 @@ export function finalResultFamilyForDisplayLabel(displayLabel: string): FinalRes
     return "strongOppose";
   }
   return "other";
+}
+
+/**
+ * Sum breakdown lines into SS / U / SO. Classification may use a script profile
+ * (including Faizah buckets) for matching only — returned keys stay generic.
+ */
+export function sumFinalResultFamilies(
+  lines: readonly AggregateAnswerLine[],
+  profile: SurveyScriptProfile = "faizahTraci"
+): FinalResultFamilyCounts {
+  const out: FinalResultFamilyCounts = {
+    strongSupport: 0,
+    undecided: 0,
+    strongOppose: 0,
+  };
+  for (const line of lines) {
+    const display = classifySurveyAnswerDisplayLabel(line.label, profile);
+    const family = finalResultFamilyForDisplayLabel(display);
+    if (family === "strongSupport") out.strongSupport += line.count;
+    else if (family === "undecided") out.undecided += line.count;
+    else if (family === "strongOppose") out.strongOppose += line.count;
+  }
+  return out;
 }
 
 function normalizedLabelKey(label: string): string {

@@ -416,10 +416,12 @@ export default function SyncerClient({ channel = "dialer" }: { channel?: PdiSync
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <p className="section-kicker">Console</p>
+        <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">
           {isText ? "PDI Text Syncer" : "PDI Syncer"}
         </h1>
-        <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
+        <hr className="section-hero__rule" />
+        <p className="section-hero__lede">
           {isText ? (
             <>
               Posts mapped Nithya text tags to PDI flags. Uses{" "}

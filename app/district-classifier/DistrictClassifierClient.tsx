@@ -207,13 +207,14 @@ export default function DistrictClassifierClient() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       <section>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-500 dark:text-indigo-300 mb-3">
-          District Classifier
+        <p className="section-kicker mb-3">
+          Atlas / Specification
         </p>
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+        <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--section-ink)]">
           CSV district classification
         </h1>
-        <p className="mt-3 text-gray-600 dark:text-gray-400 max-w-3xl">
+        <hr className="section-hero__rule" />
+        <p className="mt-3 text-[var(--section-muted)] max-w-3xl">
           Upload a CSV, map its columns, select target districts, and run the lightweight Python
           district engine. Progress is polled from the Next.js app, with outputs written as CSV files.
         </p>
@@ -234,7 +235,7 @@ export default function DistrictClassifierClient() {
             </span>
           </label>
 
-          <div className="rounded-xl border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 p-4">
+          <div className="border border-[var(--section-rule)] bg-[color-mix(in_srgb,var(--section-paper)_80%,#fff)] dark:bg-[color-mix(in_srgb,var(--section-paper)_80%,#000)] p-4">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Processing model</p>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Next.js saves the upload, starts Python with `child_process`, then polls job status.

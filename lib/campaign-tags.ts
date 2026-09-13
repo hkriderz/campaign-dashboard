@@ -45,6 +45,7 @@ const DEFAULT_CORE_CANDIDATE_TAGS: CampaignTag[] = [
     color: "#4f46e5",
     textColor: "#ffffff",
     mode: "both",
+    includeInTexting: true,
   },
   {
     id: "eunisses",
@@ -54,6 +55,7 @@ const DEFAULT_CORE_CANDIDATE_TAGS: CampaignTag[] = [
     color: "#7c3aed",
     textColor: "#ffffff",
     mode: "both",
+    includeInTexting: true,
     showPollingAggregate: false,
     useCallLevelFinalResultFill: true,
   },
@@ -65,6 +67,7 @@ const DEFAULT_CORE_CANDIDATE_TAGS: CampaignTag[] = [
     color: "#ea580c",
     textColor: "#ffffff",
     mode: "both",
+    includeInTexting: true,
   },
   {
     id: "nithya",
@@ -73,6 +76,7 @@ const DEFAULT_CORE_CANDIDATE_TAGS: CampaignTag[] = [
     color: "#0d9488",
     textColor: "#ffffff",
     mode: "both",
+    includeInTexting: true,
   },
 ];
 
@@ -95,6 +99,7 @@ function buildQcBucketTag(primary: CampaignTag): CampaignTag {
     color: primary.color,
     textColor: primary.textColor,
     mode: "phonebanking",
+    includeInTexting: false,
     showPollingAggregate: primary.showPollingAggregate,
     useCallLevelFinalResultFill: primary.useCallLevelFinalResultFill,
     surveyScriptProfile: primary.surveyScriptProfile,
@@ -121,6 +126,7 @@ export function getBuiltInDefaultStoredTags(): StoredCampaignTagV1[] {
     color: t.color,
     textColor: t.textColor,
     mode: t.mode,
+    includeInTexting: t.includeInTexting ?? true,
     showPollingAggregate: t.showPollingAggregate,
     useCallLevelFinalResultFill: t.useCallLevelFinalResultFill,
     verbatimFinalResultAggregate: t.verbatimFinalResultAggregate,
@@ -245,9 +251,11 @@ export function campaignNameMatchesTag(campaignName: string, tag: CampaignTag): 
   return termHit || codeHit;
 }
 
-/** Same candidate list as phone banking (includes Nithya once present in defaults or config). */
+/** Candidates opted into texting. Derived QC buckets are phone-banking only. */
 export function getTextingTags(): CampaignTag[] {
-  return getPhonebankingTags();
+  return allTagsList().filter(
+    (t) => !isDerivedQcTagId(t.id) && t.includeInTexting === true
+  );
 }
 
 /** Resolved phone-banking tags for UI (includes derived `qc-*` slugs). */
@@ -276,6 +284,28 @@ export function getCanvassingTags(): CampaignTag[] {
 /** True when `id` is a derived QC slug (`qc-<candidateId>`). */
 export function isDerivedQcTagId(tagId: string): boolean {
   return tagId.startsWith("qc-") && tagId.length > 3;
+}
+
+/** STW list names that belong on QC Calls pages (`LIKE '%qc%'`). */
+export function campaignNameLooksLikeQc(campaignName: string): boolean {
+  const n = campaignName.trim().toLowerCase();
+  if (!n) return false;
+  return QC_CAMPAIGN_NAME_MARKERS.some((raw) => {
+    const marker = raw.trim().toLowerCase();
+    return Boolean(marker) && n.includes(marker);
+  });
+}
+
+/** Daily Aggregate membership: candidate pages exclude QC lists; QC pages keep only QC; All Campaigns keeps both. */
+export type DailyAggregateMembership = "primary" | "qc" | "all";
+
+export function campaignBelongsInDailyAggregate(
+  campaignName: string,
+  membership: DailyAggregateMembership
+): boolean {
+  if (membership === "all") return true;
+  const isQc = campaignNameLooksLikeQc(campaignName);
+  return membership === "qc" ? isQc : !isQc;
 }
 
 /** Look up a tag by its slug ID */

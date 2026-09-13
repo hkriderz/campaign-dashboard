@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { attachSessionCookie, runWithRequestCredentialContext } from "@/lib/credentials";
+import { authorizeSnapshotRefresh } from "@/lib/phonebanking-snapshot-refresh-auth";
 import { runPhonebankingBqSnapshotRefresh } from "@/lib/phonebanking-bq-snapshot-refresh";
 
 /**
@@ -13,8 +14,7 @@ import { runPhonebankingBqSnapshotRefresh } from "@/lib/phonebanking-bq-snapshot
  * Set `clear: true` to delete existing snapshot files for each affected tag before rebuilding.
  */
 export async function POST(req: Request) {
-  const secret = process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET;
-  if (!secret || req.headers.get("x-snapshot-secret") !== secret) {
+  if (!authorizeSnapshotRefresh(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

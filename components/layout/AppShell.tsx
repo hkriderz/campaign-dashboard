@@ -4,15 +4,18 @@ import { useCallback, useEffect, useState } from "react";
 import TopNav from "@/components/layout/TopNav";
 import { SidebarCloseContext } from "@/components/layout/SidebarCloseContext";
 
+export type AppSection = "phone" | "text" | "canvass";
+
 type Props = {
   sidebar: React.ReactNode;
   children: React.ReactNode;
+  section?: AppSection;
 };
 
 /**
  * Phone banking / canvassing shell: fixed sidebar on lg+, slide-over drawer on smaller screens.
  */
-export default function AppShell({ sidebar, children }: Props) {
+export default function AppShell({ sidebar, children, section }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
@@ -33,7 +36,7 @@ export default function AppShell({ sidebar, children }: Props) {
 
   return (
     <SidebarCloseContext.Provider value={closeSidebar}>
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen flex flex-col" data-section={section}>
         <TopNav onOpenSidebar={() => setSidebarOpen(true)} showSidebarToggle />
         <div className="flex flex-1 min-h-0">
           <div className="hidden lg:block flex-shrink-0">{sidebar}</div>
@@ -50,7 +53,7 @@ export default function AppShell({ sidebar, children }: Props) {
               </div>
             </>
           ) : null}
-          <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 bg-gray-50/50 dark:bg-gray-950">
+          <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 lg:p-8 bg-[var(--section-paper)]">
             {children}
           </main>
         </div>

@@ -29,7 +29,12 @@ export type CampaignTag = {
   campaignCodes?: string[];
   color: string;
   textColor: string;
-  mode: AppMode | "both";
+  mode: AppMode | "both" | "texting";
+  /**
+   * When true, this candidate appears in the texting sidebar and grid.
+   * Set from the Mode dropdown (not a separate checkbox). Derived QC tags are never included.
+   */
+  includeInTexting?: boolean;
   /** When false, hide the Polling block on the daily aggregate (e.g. scripts without a Polling question). */
   showPollingAggregate?: boolean;
   /**

@@ -143,7 +143,7 @@ export default function DateRangePicker({
             max={maxDate}
             onChange={(event) => updateInput("start", event.target.value)}
             onFocus={() => setOpen(true)}
-            className={`mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-current focus:outline-none focus:ring-2 ${toneClass.ring} dark:border-white/10 dark:bg-gray-950 dark:text-gray-100`}
+            className={`dash-input mt-1 w-full px-3 py-2 text-sm focus:ring-2 ${toneClass.ring}`}
           />
         </label>
         <label className="block text-sm">
@@ -155,19 +155,19 @@ export default function DateRangePicker({
             max={maxDate}
             onChange={(event) => updateInput("end", event.target.value)}
             onFocus={() => setOpen(true)}
-            className={`mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-current focus:outline-none focus:ring-2 ${toneClass.ring} dark:border-white/10 dark:bg-gray-950 dark:text-gray-100`}
+            className={`dash-input mt-1 w-full px-3 py-2 text-sm focus:ring-2 ${toneClass.ring}`}
           />
         </label>
       </div>
       {helpText ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helpText}</p> : null}
 
       {open ? (
-        <div className="absolute left-0 top-full z-30 mt-2 w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-gray-900">
+        <div className="absolute left-0 top-full z-30 mt-2 w-full max-w-sm border border-[var(--section-rule)] bg-[var(--section-paper)] p-3 shadow-sm">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={() => setMonthIso(shiftMonth(monthIso, -1))}
-              className={`rounded-lg px-2 py-1 text-sm font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
+              className={`rounded-sm px-2 py-1 text-sm font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
             >
               Prev
             </button>
@@ -175,7 +175,7 @@ export default function DateRangePicker({
             <button
               type="button"
               onClick={() => setMonthIso(shiftMonth(monthIso, 1))}
-              className={`rounded-lg px-2 py-1 text-sm font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
+              className={`rounded-sm px-2 py-1 text-sm font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
             >
               Next
             </button>
@@ -199,7 +199,7 @@ export default function DateRangePicker({
                   onMouseEnter={() => setHoverDate(date)}
                   onClick={() => chooseDate(date)}
                   className={[
-                    "rounded-lg px-2 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-2",
+                    "rounded-sm px-2 py-1.5 text-sm transition-all focus-visible:outline-none focus-visible:ring-2",
                     toneClass.ring,
                     selected ? toneClass.active : highlighted ? toneClass.range : "text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-white/10",
                     disabled ? "cursor-not-allowed opacity-40" : "active:scale-[0.96]",
@@ -219,7 +219,7 @@ export default function DateRangePicker({
                   setDraftStart("");
                   setOpen(false);
                 }}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
+                className={`rounded-sm px-3 py-1.5 text-xs font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
               >
                 Clear
               </button>
@@ -230,7 +230,7 @@ export default function DateRangePicker({
                 setDraftStart("");
                 setOpen(false);
               }}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
+              className={`rounded-sm px-3 py-1.5 text-xs font-semibold text-gray-600 transition-all hover:bg-gray-100 active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 ${toneClass.ring} dark:text-gray-300 dark:hover:bg-white/10`}
             >
               Close
             </button>

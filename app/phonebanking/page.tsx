@@ -13,6 +13,7 @@ import { getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
 import { getTombstonedSliceKeys } from "@/lib/csv-slice-tombstones";
 import { buildCandidateStatsFromDailyCallerStats } from "@/lib/phonebanking-candidate-stats";
 import type { CandidateStats, PhoneBankSummary } from "@/lib/types";
+import SectionHero from "@/components/brand/SectionHero";
 
 export const dynamic = "force-dynamic";
 
@@ -53,17 +54,16 @@ export default async function PhoneBankingPage() {
 
   return (
     <div className="max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Phone Banking</h1>
-        <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-          Active, complete, and archived campaigns since Dec 1, 2025, grouped by candidate. Click a candidate to see
-          individual phone banks.
-        </p>
-      </div>
+      <SectionHero
+        kicker="Field / Phone"
+        title="Phone Banking"
+        lede="Active, complete, and archived campaigns since Dec 1, 2025, grouped by candidate. Click a candidate to see individual phone banks."
+      />
 
       <div className="mb-6">
         <TagDataRefreshBar
           enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
+          localDev={process.env.NODE_ENV === "development"}
           dataUpdatedAtIso={snapshotsMeta.dataUpdatedAt}
           dataUpdatedAtLabel={snapshotsMeta.dataUpdatedAtLabel}
           isStale={snapshotsMeta.isStale}
@@ -87,7 +87,7 @@ export default async function PhoneBankingPage() {
       )}
 
       <section id="all-campaigns" className="mt-12 scroll-mt-6">
-        <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">All campaigns</h2>
+        <h2 className="font-display text-2xl font-semibold text-[var(--section-ink)] mb-1">All campaigns</h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
           Same lifecycle and date window as candidate views, without filtering by name. Includes campaigns that
           do not match any candidate tag (e.g. Ada). Use <strong className="font-medium">Filter by day</strong> to load

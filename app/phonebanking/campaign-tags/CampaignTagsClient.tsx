@@ -3,6 +3,14 @@
 import SnapshotFreshnessLine from "@/components/phonebanking/SnapshotFreshnessLine";
 import type { SurveyScriptProfile } from "@/lib/types";
 import type { StoredCampaignTagV1 } from "@/lib/campaign-tags-file";
+import {
+  editorModeFromStored,
+  isCampaignTagMode,
+  isEditorChannelMode,
+  modeAllowsQc,
+  resolveIncludeInTexting,
+  storedFromEditorMode,
+} from "@/lib/campaign-tag-mode";
 import type { SnapshotFreshnessMeta } from "@/lib/tag-dashboard-snapshot";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -40,6 +48,7 @@ function cloneRow(r: StoredCampaignTagV1): StoredCampaignTagV1 {
     oppositionSearchTerms: r.oppositionSearchTerms
       ? [...r.oppositionSearchTerms]
       : undefined,
+    includeInTexting: resolveIncludeInTexting(r.includeInTexting, r.mode),
   };
 }
 
@@ -55,6 +64,7 @@ function newEmptyRow(): StoredCampaignTagV1 {
     color: "#4f46e5",
     textColor: "#ffffff",
     mode: "both",
+    includeInTexting: true,
   };
 }
 
@@ -285,17 +295,25 @@ export default function CampaignTagsClient({
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-1 flex flex-wrap gap-x-4 gap-y-1">
           <Link
             href="/phonebanking"
             className="text-indigo-600 dark:text-indigo-400 hover:underline"
           >
             ← Phone banking
           </Link>
+          <Link
+            href="/texting"
+            className="text-teal-700 dark:text-teal-300 hover:underline"
+          >
+            ← Texting
+          </Link>
         </p>
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <p className="section-kicker">Config</p>
+        <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">
           Campaign tags
         </h1>
+        <hr className="section-hero__rule" />
         <p className="text-gray-600 dark:text-gray-400 text-sm mt-2">
           Tags are stored in{" "}
           <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">
@@ -564,17 +582,29 @@ export default function CampaignTagsClient({
               <label className="flex flex-col gap-1 text-xs">
                 <span className="text-gray-600 dark:text-gray-400">Mode</span>
                 <select
-                  value={row.mode}
-                  onChange={(e) =>
+                  value={editorModeFromStored(
+                    isCampaignTagMode(row.mode) ? row.mode : "both",
+                    row.includeInTexting === true
+                  )}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (!isEditorChannelMode(next)) return;
+                    const { mode, includeInTexting } = storedFromEditorMode(next);
                     updateRow(i, {
-                      mode: e.target.value as StoredCampaignTagV1["mode"],
-                    })
-                  }
+                      mode,
+                      includeInTexting,
+                      enableQc: modeAllowsQc(mode) ? row.enableQc : false,
+                    });
+                  }}
                   className="rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1.5 text-sm"
                 >
-                  <option value="both">Both phone banking &amp; canvassing</option>
+                  <option value="all">Phone banking, canvassing &amp; texting</option>
+                  <option value="both">Phone banking &amp; canvassing</option>
+                  <option value="phonebanking-texting">Phone banking &amp; texting</option>
+                  <option value="canvassing-texting">Canvassing &amp; texting</option>
                   <option value="phonebanking">Phone banking only</option>
                   <option value="canvassing">Canvassing only</option>
+                  <option value="texting">Texting only</option>
                 </select>
               </label>
               <label className="flex items-center gap-2 text-xs mt-6 sm:mt-0">
@@ -582,7 +612,7 @@ export default function CampaignTagsClient({
                   type="checkbox"
                   checked={row.enableQc}
                   onChange={(e) => updateRow(i, { enableQc: e.target.checked })}
-                  disabled={row.mode === "canvassing"}
+                  disabled={!modeAllowsQc(row.mode)}
                 />
                 <span className="text-gray-700 dark:text-gray-300">
                   QC bucket (<code className="text-[10px]">qc-…</code> ∧ candidate)

@@ -91,14 +91,15 @@ export default function SessionCredentialsGateClient({
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="mb-8 rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-amber-50 dark:bg-amber-950/30 p-6">
-        <h1 className="text-xl font-bold text-amber-950 dark:text-amber-100">{title}</h1>
-        <p className="text-sm text-amber-900/90 dark:text-amber-200/90 mt-2">{description}</p>
-        <ul className="mt-3 text-sm text-amber-800 dark:text-amber-300 list-disc list-inside space-y-1">
+      <div className="mb-8 dash-card">
+        <p className="section-kicker mb-2">Credentials</p>
+        <h1 className="font-display text-2xl font-semibold text-[var(--section-ink)]">{title}</h1>
+        <p className="text-sm text-[var(--section-muted)] mt-2">{description}</p>
+        <ul className="mt-3 text-sm text-[var(--section-ink)] list-disc list-inside space-y-1">
           {needsGcp ? <li>GCP service account JSON (BigQuery access)</li> : null}
           {needsPdi ? <li>PDI username, password, and API token</li> : null}
         </ul>
-        <p className="mt-3 text-xs text-amber-700 dark:text-amber-400">
+        <p className="mt-3 text-xs text-[var(--section-muted)]">
           Credentials are stored only for this browser session on the server and are not visible to other users.
         </p>
       </div>

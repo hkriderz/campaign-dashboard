@@ -4,6 +4,8 @@ import { runServerWithCredentialContext } from "@/lib/credentials";
 import TextCandidateGrid from "@/components/texting/TextCandidateGrid";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import type { TextCandidateStats } from "@/lib/types";
+import Link from "next/link";
+import SectionHero from "@/components/brand/SectionHero";
 
 export const dynamic = "force-dynamic";
 
@@ -33,12 +35,19 @@ export default async function TextingPage() {
 
     return (
       <div className="max-w-6xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Texting</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm mt-1">
-            Scale to Win Text campaigns since Dec 1, 2025, grouped by candidate. Support and moved tags
-            are shown on each candidate page.
-          </p>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+          <SectionHero
+            className="mb-0"
+            kicker="Dispatch / Text"
+            title="Texting"
+            lede="Scale to Win Text campaigns since Dec 1, 2025, grouped by candidate. Support and moved tags are shown on each candidate page."
+          />
+          <Link
+            href="/phonebanking/campaign-tags"
+            className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-accent)] hover:underline mt-1"
+          >
+            Campaign tags
+          </Link>
         </div>
 
         {error ? (

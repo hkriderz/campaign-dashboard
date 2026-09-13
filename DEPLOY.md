@@ -39,6 +39,7 @@ Ensure these are **not** committed: `.env.local`, `credentials/*.json`, `starlit
 | `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS` | Multi-user | Set to `1` so each browser must upload its own GCP/PDI keys |
 | `CAMPAIGN_DASHBOARD_ALLOW_GLOBAL_CREDENTIALS` | Optional | Default `1`; set `0` to disable env/global fallback for sessions |
 | `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS` | Optional | Prune idle session credential folders (default `72`) |
+| `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` | Recommended | Long random staff password (20+ chars). Locks Canvassing and District Classifier until one unlock per browser session |
 | `NODE_ENV` | Auto | `production` in image |
 
 ### Multi-user session credentials (recommended for shared Dokploy URL)
@@ -58,6 +59,17 @@ Idle session folders are deleted automatically after `CAMPAIGN_DASHBOARD_SESSION
 **HTTP (no TLS):** leave `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE` unset or set `0` so the `cd_session` cookie is stored. If it is missing, every refresh creates a new session and uploads appear to vanish.
 
 **HTTPS:** set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
+
+### Section access password (Canvassing + District Classifier)
+
+Phonebanking / texting / PDI tools stay on the GCP/PDI upload gate. Canvassing and District Classifier use a simpler shared password:
+
+1. Set `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` to a long random value in Dokploy only — never commit it.
+2. Visitors enter it once; the HttpOnly `cd_access` cookie unlocks **both** sections for that browser session (same `cd_session` identity).
+3. `/api/canvassing/*` and `/api/district-classifier/*` return `401` until unlocked.
+4. Failed unlocks are limited to **10 tries per 15 minutes** per session and IP. Rotating the env password invalidates every existing unlock.
+
+Leave the variable unset for local `next dev`. On HTTPS, set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1` so the unlock POST is not sent over cleartext.
 
 ### GCP JSON via env (single-tenant / cron only)
 

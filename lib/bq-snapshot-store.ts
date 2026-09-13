@@ -6,6 +6,7 @@
  */
 import fs from "fs";
 import path from "path";
+import type { QcRecontactPair } from "./qc-recontact/types";
 import type {
   CallSurveyRowForFill,
   PhoneBankSummary,
@@ -54,6 +55,13 @@ export type PhoneBanksSnapshotFile = {
   tagId: string;
   savedAt: string;
   rows: PhoneBankSummary[];
+};
+
+export type RecontactPairsSnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  pairs: QcRecontactPair[];
 };
 
 function readJson<T>(fp: string): T | null {
@@ -184,6 +192,31 @@ export function savePhoneBanksSnapshot(
   fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
 }
 
+export function loadRecontactPairsSnapshot(tagId: string): RecontactPairsSnapshotFile | null {
+  const fp = path.join(DATA_DIR, safeTag(tagId), "recontact-pairs.json");
+  const data = readJson<RecontactPairsSnapshotFile>(fp);
+  if (!data || data.version !== SNAPSHOT_VERSION || data.tagId !== tagId) return null;
+  if (!Array.isArray(data.pairs)) return null;
+  return data;
+}
+
+export function saveRecontactPairsSnapshot(
+  tagId: string,
+  pairs: QcRecontactPair[],
+  options?: SnapshotSaveOptions
+): void {
+  const dir = ensureDir(tagId);
+  const fp = path.join(dir, "recontact-pairs.json");
+  if (!options?.touchEvenIfUnchanged && stableRowsUnchanged(fp, pairs)) return;
+  const payload: RecontactPairsSnapshotFile = {
+    version: SNAPSHOT_VERSION,
+    tagId,
+    savedAt: new Date().toISOString(),
+    pairs,
+  };
+  fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
+}
+
 /** Delete all snapshot JSON files for a tag (e.g. before full rebuild). */
 export function clearTagSnapshots(tagId: string): void {
   const dir = path.join(DATA_DIR, safeTag(tagId));
@@ -193,6 +226,7 @@ export function clearTagSnapshots(tagId: string): void {
     "question-stats.json",
     "call-survey-fill.json",
     "phone-banks.json",
+    "recontact-pairs.json",
   ]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) {

@@ -14,7 +14,7 @@ import {
   snapshotsDisabled,
 } from "../bq-snapshot-store";
 import { cachedBq } from "../bq-cache";
-import { buildTagWhereClause, campaignNameMatchesTag, getPhonebankingTags, getTagById, resolveSurveyScriptProfile } from "../campaign-tags";
+import { buildTagWhereClause, campaignNameMatchesTag, getPhonebankingTags, getTagById, isDerivedQcTagId, resolveSurveyScriptProfile } from "../campaign-tags";
 import { phonebankingPhoneBanksTag } from "../phonebanking-data-cache";
 import {
   phonebankerDailyStatHasVisibleWork,
@@ -1598,4 +1598,8 @@ export async function rebuildTagBqSnapshotsFromBigQuery(tagId: string): Promise<
   }
   const banks = await fetchPhoneBanksByTagUncached(tagId);
   savePhoneBanksSnapshot(tagId, banks, { touchEvenIfUnchanged: true });
+  if (isDerivedQcTagId(tagId)) {
+    const { rebuildQcRecontactSnapshot } = await import("./qc-recontact");
+    await rebuildQcRecontactSnapshot(tagId);
+  }
 }

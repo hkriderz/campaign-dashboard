@@ -223,6 +223,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           finalResultUsesScriptOptionLabels={false}
           aggregateScopeRows={d.aggregateScopeRows}
           surveyScriptProfile={d.surveyScriptProfile}
+          outcomeTally={d.outcomeTally}
           hideDatePicker
           totalCalls={sumPhoneBankRawCalls(d.overviewPhoneBanks)}
         />

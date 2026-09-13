@@ -10,6 +10,7 @@ import {
   writeCampaignTagsConfigToDisk,
   type StoredCampaignTagV1,
 } from "@/lib/campaign-tags-file";
+import { isCampaignTagMode } from "@/lib/campaign-tag-mode";
 
 function canAppend(req: NextRequest): boolean {
   if (process.env.ALLOW_INSECURE_TAG_APPEND === "1") return true;
@@ -44,11 +45,7 @@ export async function POST(req: NextRequest) {
 
   const id = typeof body?.id === "string" ? body.id.trim() : "";
   const label = typeof body?.label === "string" ? body.label.trim() : "";
-  const modeRaw = body?.mode;
-  const mode =
-    modeRaw === "both" || modeRaw === "phonebanking" || modeRaw === "canvassing"
-      ? modeRaw
-      : "phonebanking";
+  const mode = isCampaignTagMode(body?.mode) ? body.mode : "phonebanking";
 
   if (!id || !isValidTagId(id)) {
     return NextResponse.json(
@@ -82,6 +79,7 @@ export async function POST(req: NextRequest) {
     color: "#4f46e5",
     textColor: "#ffffff",
     mode,
+    includeInTexting: true,
   };
 
   const merged = [...existing, entry];

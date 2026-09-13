@@ -6,6 +6,11 @@ import {
   writeFileSync,
 } from "fs";
 import path from "path";
+import {
+  isCampaignTagMode,
+  modeAllowsQc,
+  resolveIncludeInTexting,
+} from "./campaign-tag-mode";
 import type { CampaignTag, SurveyScriptProfile } from "./types";
 
 export const CAMPAIGN_TAGS_FILE_VERSION = 1 as const;
@@ -29,6 +34,11 @@ export type StoredCampaignTagV1 = {
   color: string;
   textColor: string;
   mode: CampaignTag["mode"];
+  /**
+   * When true, show this candidate in the texting sidebar and grid.
+   * Driven by the Mode dropdown. Omitted values default to true for phonebanking/both/texting, false for canvassing.
+   */
+  includeInTexting?: boolean;
   showPollingAggregate?: boolean;
   useCallLevelFinalResultFill?: boolean;
   verbatimFinalResultAggregate?: boolean;
@@ -92,6 +102,7 @@ export function storedEntryToPrimaryCampaignTag(
     color: entry.color,
     textColor: entry.textColor,
     mode: entry.mode,
+    includeInTexting: resolveIncludeInTexting(entry.includeInTexting, entry.mode),
     showPollingAggregate: entry.showPollingAggregate,
     useCallLevelFinalResultFill: entry.useCallLevelFinalResultFill,
     verbatimFinalResultAggregate: entry.verbatimFinalResultAggregate,
@@ -182,23 +193,19 @@ export function validateStoredTags(
       };
     }
 
-    const modeRaw = r.mode;
-    const mode =
-      modeRaw === "both" || modeRaw === "phonebanking" || modeRaw === "canvassing"
-        ? modeRaw
-        : null;
+    const mode = isCampaignTagMode(r.mode) ? r.mode : null;
     if (!mode) {
       return {
         ok: false,
-        error: `tags[${i}].mode must be "both", "phonebanking", or "canvassing".`,
+        error: `tags[${i}].mode must be "both", "phonebanking", "canvassing", or "texting".`,
       };
     }
 
     const enableQc = r.enableQc === true;
-    if (enableQc && mode === "canvassing") {
+    if (enableQc && !modeAllowsQc(mode)) {
       return {
         ok: false,
-        error: `tags[${i}]: QC buckets apply to phone banking only; set mode to "both" or "phonebanking", or disable QC.`,
+        error: `tags[${i}]: QC buckets apply to phone banking only; include phone banking in Mode, or disable QC.`,
       };
     }
 
@@ -239,6 +246,7 @@ export function validateStoredTags(
       color,
       textColor,
       mode,
+      includeInTexting: resolveIncludeInTexting(r.includeInTexting, mode),
       showPollingAggregate:
         typeof r.showPollingAggregate === "boolean"
           ? r.showPollingAggregate

@@ -11,7 +11,7 @@ export default function TextingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AppShell sidebar={<Sidebar tags={getTextingTags()} basePath="/texting" />}>
+    <AppShell section="text" sidebar={<Sidebar tags={getTextingTags()} basePath="/texting" />}>
       <SessionCredentialsGate requirements={{ gcp: true }}>{children}</SessionCredentialsGate>
     </AppShell>
   );

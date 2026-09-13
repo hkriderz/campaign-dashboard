@@ -1,139 +1,104 @@
 import Link from "next/link";
-import FeatureIconBox from "@/components/brand/FeatureIconBox";
 import WhaleMark from "@/components/brand/WhaleMark";
 import ThemeToggle from "@/components/layout/ThemeToggle";
 
 const MODES = [
   {
     href: "/phonebanking",
-    icon: "📞",
+    index: "01",
     title: "Phone Banking",
     description:
       "View hours, surveys, and phonebanker stats for every STW campaign, organized by candidate.",
-    color: "indigo",
+    kicker: "War room",
   },
   {
     href: "/texting",
-    icon: "💬",
+    index: "02",
     title: "Texting",
     description:
       "View Scale to Win Text campaigns, send status, contacts, and support / moved tags by candidate.",
-    color: "teal",
+    kicker: "Dispatch",
   },
   {
-    href: "/canvassing",
-    icon: "🚶",
+    href: "/canvassing/overview",
+    index: "03",
     title: "Canvassing",
     description:
-      "Run Knock Analysis, save reports, and build Doorknocks Results pivots from uploaded PDI files.",
-    color: "violet",
+      "Review saved knocks by canvasser, run Knock Analysis, and build Doorknocks Results pivots from uploaded PDI files.",
+    kicker: "Field",
   },
   {
     href: "/district-classifier",
-    icon: "🗺",
+    index: "04",
     title: "District Classifier",
     description:
       "Upload address CSVs and classify signups into political districts with a Python GIS pipeline.",
-    color: "sky",
+    kicker: "Atlas",
   },
   {
     href: "/pdi",
-    icon: "🔧",
+    index: "05",
     title: "PDI Tools",
     description:
       "Map STW survey answers to PDI flags and run the BigQuery → PDI sync workflow.",
-    color: "mint",
+    kicker: "Console",
   },
 ] as const;
 
-const colorMap = {
-  indigo: {
-    ring: "ring-indigo-400/50 dark:ring-indigo-500/40",
-    glow: "from-indigo-500/20",
-    icon: "bg-indigo-500/15 text-indigo-600 dark:text-indigo-300 border border-indigo-500/20",
-    btn: "dash-btn-primary",
-  },
-  violet: {
-    ring: "ring-violet-400/50 dark:ring-violet-500/40",
-    glow: "from-violet-500/20",
-    icon: "bg-violet-500/15 text-violet-600 dark:text-violet-300 border border-violet-500/20",
-    btn: "bg-violet-600 hover:bg-violet-500 text-white rounded-full font-semibold",
-  },
-  sky: {
-    ring: "ring-sky-400/50 dark:ring-sky-500/40",
-    glow: "from-sky-500/20",
-    icon: "bg-sky-500/15 text-sky-600 dark:text-sky-300 border border-sky-500/20",
-    btn: "bg-sky-600 hover:bg-sky-500 text-white rounded-full font-semibold",
-  },
-  mint: {
-    ring: "ring-mint-500/40",
-    glow: "from-mint-500/25",
-    icon: "bg-mint-500/15 text-mint-600 dark:text-mint-400 border border-mint-500/25",
-    btn: "bg-mint-600 hover:bg-mint-500 text-white rounded-full font-semibold shadow-[0_0_24px_rgba(69,211,153,0.35)]",
-  },
-  teal: {
-    ring: "ring-teal-400/50 dark:ring-teal-500/40",
-    glow: "from-teal-500/20",
-    icon: "bg-teal-500/15 text-teal-600 dark:text-teal-300 border border-teal-500/20",
-    btn: "bg-teal-600 hover:bg-teal-500 text-white rounded-full font-semibold",
-  },
-};
-
 export default function LandingPage() {
   return (
-    <main className="relative min-h-screen overflow-hidden bg-gray-50 dark:bg-gray-950 flex flex-col items-center justify-center px-4 py-16">
+    <main
+      data-section="home"
+      className="relative min-h-screen bg-[var(--section-paper)] text-[var(--section-ink)] px-4 py-10 sm:px-8 sm:py-16"
+    >
       <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50">
         <ThemeToggle />
       </div>
 
-      <div
-        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_50%_at_20%_0%,rgba(124,108,240,0.18),transparent_55%),radial-gradient(ellipse_50%_40%_at_80%_100%,rgba(69,211,153,0.12),transparent_50%)]"
-        aria-hidden
-      />
-
-      <div className="relative w-full max-w-6xl">
-        <div className="mb-10 text-center sm:mb-12">
-          <WhaleMark
-            variant="boxed"
-            size="hero"
-            className="mx-auto mb-5"
-            alt=""
-          />
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 dark:text-gray-50 mb-3">
+      <div className="mx-auto w-full max-w-5xl">
+        <header className="border-b border-[var(--section-rule)] pb-8 mb-10">
+          <div className="flex items-end justify-between gap-4 mb-8">
+            <WhaleMark variant="plain" size="hero" alt="" />
+            <p className="section-kicker hidden sm:block" style={{ color: "var(--section-gold)" }}>
+              Operations
+            </p>
+          </div>
+          <p className="section-kicker mb-3">Campaign HQ</p>
+          <h1 className="font-display text-4xl sm:text-5xl font-semibold tracking-tight leading-[1.1] max-w-3xl">
             Campaign Operations Dashboard
           </h1>
-          <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg max-w-xl mx-auto">
+          <hr className="section-hero__rule" style={{ background: "var(--section-gold)", width: "6rem" }} />
+          <p className="section-hero__lede text-base">
             Phone banking, texting, canvassing, and PDI tools — all in one place.
           </p>
-        </div>
+        </header>
 
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 xl:gap-6">
-          {MODES.map((mode) => {
-            const c = colorMap[mode.color];
-            return (
-              <div
-                key={mode.href}
-                className={`relative dash-card dash-card-glow flex flex-col gap-4 transition-all duration-200 hover:ring-2 ${c.ring} hover:shadow-[0_0_40px_rgba(124,108,240,0.15)]`}
+        <ol className="divide-y divide-[var(--section-rule)] border-y border-[var(--section-rule)]">
+          {MODES.map((mode) => (
+            <li key={mode.href}>
+              <Link
+                href={mode.href}
+                className="group grid grid-cols-[auto_1fr_auto] gap-4 sm:gap-8 items-baseline py-6 sm:py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--section-accent)]"
               >
-                <FeatureIconBox toneClassName={c.icon}>{mode.icon}</FeatureIconBox>
-
-                <div className="flex-1 relative z-[1]">
-                  <h2 className="text-lg font-bold tracking-tight text-gray-900 dark:text-gray-50 mb-1">
+                <span className="font-display text-2xl sm:text-3xl text-[var(--section-gold)] tabular-nums w-10">
+                  {mode.index}
+                </span>
+                <span className="min-w-0">
+                  <span className="section-kicker block mb-1">{mode.kicker}</span>
+                  <span className="font-display text-xl sm:text-2xl font-semibold group-hover:underline underline-offset-4 decoration-[var(--section-gold)]">
                     {mode.title}
-                  </h2>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{mode.description}</p>
-                </div>
-
-                <Link
-                  href={mode.href}
-                  className={`block text-center w-full py-2.5 text-sm ${c.btn} transition-all active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 relative z-[1]`}
-                >
-                  Open {mode.title} →
-                </Link>
-              </div>
-            );
-          })}
-        </div>
+                  </span>
+                  <span className="block text-sm text-[var(--section-muted)] mt-1 max-w-xl">
+                    {mode.description}
+                  </span>
+                </span>
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-muted)] group-hover:text-[var(--section-ink)] whitespace-nowrap">
+                  Open
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
       </div>
     </main>
   );

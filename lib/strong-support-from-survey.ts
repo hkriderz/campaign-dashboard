@@ -264,6 +264,26 @@ function effectiveFrLabel(questionName: string, answerValue: string): string | n
   return effectiveFinalResultAnswerLabelForRollup(questionName, answerValue);
 }
 
+/**
+ * Same checker as Daily Aggregate / SS fill: explicit Final Result, else the next
+ * ID / candidate-named question whose answer maps to SS / Undecided / Oppose.
+ * Donation, pledge, and other script blocks are excluded.
+ */
+export function comparableSupportResultFromRows(
+  rows: readonly { questionName: string; answerValue: string }[],
+  profile: SurveyScriptProfile,
+  terms: readonly string[] = []
+): string {
+  const explicit = explicitFinalResultSource(rows, profile);
+  if (explicit?.answerValue) {
+    return classifySurveyAnswerDisplayLabel(explicit.answerValue, profile);
+  }
+  if (!terms.length) return "";
+  const filled = synthesizedSupportSource(rows, profile, terms);
+  if (!filled?.answerValue) return "";
+  return classifySurveyAnswerDisplayLabel(filled.answerValue, profile);
+}
+
 export const SYNTHESIS_REASON_MISSING_FR = "missing_final_result_survey_fill" as const;
 
 export type SynthesizedFinalResultHit = {

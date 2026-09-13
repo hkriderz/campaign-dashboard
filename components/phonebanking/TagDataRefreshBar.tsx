@@ -18,6 +18,7 @@ import { dispatchTombstoneOverlapCheck } from "@/lib/tombstone-overlap-events";
 export default function TagDataRefreshBar({
   tagId,
   enabled,
+  localDev = false,
   dataUpdatedAtIso,
   dataUpdatedAtLabel,
   isStale,
@@ -26,6 +27,8 @@ export default function TagDataRefreshBar({
   /** When set, shows “this tag” refresh and per-tag snapshot timestamps. Omit on the landing page for global-only UI. */
   tagId?: string;
   enabled: boolean;
+  /** `next dev` only — one-click refresh without the snapshot secret. Production stays secret-gated. */
+  localDev?: boolean;
   dataUpdatedAtIso?: string | null;
   dataUpdatedAtLabel?: string;
   isStale?: boolean;
@@ -44,7 +47,7 @@ export default function TagDataRefreshBar({
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
-        "x-snapshot-secret": secret,
+        ...(secret.trim() ? { "x-snapshot-secret": secret } : {}),
       },
       body: JSON.stringify(body),
     });
@@ -53,7 +56,8 @@ export default function TagDataRefreshBar({
   }
 
   async function onRefreshThisTag() {
-    if (!secret.trim() || !tagId) return;
+    if (!localDev && !secret.trim()) return;
+    if (!tagId) return;
     setLoading("tag");
     setMessage("");
     setProgress({
@@ -91,7 +95,7 @@ export default function TagDataRefreshBar({
   }
 
   async function onRefreshAllTags() {
-    if (!secret.trim()) return;
+    if (!localDev && !secret.trim()) return;
     setLoading("all");
     setMessage("");
     setProgress({
@@ -116,7 +120,7 @@ export default function TagDataRefreshBar({
       const { refreshed, errors } = await refreshPhonebankingTagsSequential({
         tagIds,
         tagLabels,
-        secret: secret.trim(),
+        secret: localDev ? secret.trim() : secret.trim(),
         clearFirst: false,
         onProgress: setProgress,
       });
@@ -149,7 +153,7 @@ export default function TagDataRefreshBar({
     ? "(no snapshot — refresh to populate)"
     : "(no snapshots on disk for any tag yet)";
 
-  if (!enabled) {
+  if (!enabled && !localDev) {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-3 py-2 text-xs text-gray-500 dark:text-gray-400 space-y-1.5">
         <SnapshotFreshnessLine
@@ -210,6 +214,12 @@ export default function TagDataRefreshBar({
           />
           <span className="block mt-1 text-[11px] text-gray-500 dark:text-gray-500 leading-snug">
             Dashboards read JSON on disk.{" "}
+            {localDev ? (
+              <>
+                <strong>Local testing:</strong> refresh does not need a secret on this machine. Production still
+                requires the snapshot secret.{" "}
+              </>
+            ) : null}
             {tagId ? (
               <>
                 <strong>Refresh this tag</strong> updates only the open candidate;{" "}
@@ -220,33 +230,35 @@ export default function TagDataRefreshBar({
           </span>
         </div>
         <div className="flex flex-col gap-2 shrink-0 sm:items-end">
-          <input
-            type="password"
-            autoComplete="off"
-            aria-label="Snapshot secret"
-            placeholder="Secret"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            className="w-full sm:w-32 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
-          />
+          {localDev ? null : (
+            <input
+              type="password"
+              autoComplete="off"
+              aria-label="Snapshot secret"
+              placeholder="Secret"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              className="w-full sm:w-32 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
+            />
+          )}
           <div className="flex flex-wrap gap-2 justify-end">
             {tagId ? (
               <button
                 type="button"
                 onClick={onRefreshThisTag}
-                disabled={busy || !secret.trim()}
+                disabled={busy || (!localDev && !secret.trim())}
                 className="rounded bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-3 py-2 min-h-10 text-xs font-medium"
               >
-                {loading === "tag" ? "Refreshing…" : "Refresh this tag"}
+                {loading === "tag" ? "Refreshing…" : localDev ? "Refresh this tag (local)" : "Refresh this tag"}
               </button>
             ) : null}
             <button
               type="button"
               onClick={onRefreshAllTags}
-              disabled={busy || !secret.trim()}
+              disabled={busy || (!localDev && !secret.trim())}
               className="rounded bg-violet-700 hover:bg-violet-800 disabled:opacity-50 text-white px-3 py-2 min-h-10 text-xs font-medium"
             >
-              {loading === "all" ? "Refreshing all…" : "Refresh all tags"}
+              {loading === "all" ? "Refreshing all…" : localDev ? "Refresh all tags (local)" : "Refresh all tags"}
             </button>
           </div>
         </div>

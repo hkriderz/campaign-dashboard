@@ -18,76 +18,75 @@ function fmtHours(h: number) {
 export default function CandidateGrid({ candidates }: Props) {
   if (!candidates.length) {
     return (
-      <p className="text-gray-500 dark:text-gray-400 text-sm py-10 text-center">
+      <p className="text-[var(--section-muted)] text-sm py-10 text-center">
         No campaign data found. Check your BigQuery connection and campaign tags.
       </p>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
       {candidates.map((c) => (
         <Link
           key={c.tag.id}
           href={`/phonebanking/${c.tag.id}`}
-          className="group block dash-card dash-card-glow p-0 overflow-hidden hover:border-indigo-400/40 dark:hover:border-indigo-500/40 transition-all duration-200 hover:shadow-[0_0_32px_rgba(124,108,240,0.12)]"
+          className="group block dash-card p-0 overflow-hidden hover:border-[var(--section-accent)] transition-colors"
         >
-          <div
-            className="h-1"
-            style={{ backgroundColor: c.tag.color }}
-          />
+          <div className="flex">
+            <div
+              className="w-1 flex-shrink-0"
+              style={{ backgroundColor: c.tag.color }}
+              aria-hidden
+            />
 
-          <div className="p-5 relative z-[1]">
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <div className="min-w-0">
-                <h2 className="font-bold text-lg tracking-tight text-gray-900 dark:text-gray-50 group-hover:text-indigo-600 dark:group-hover:text-indigo-300 transition-colors">
-                  {c.tag.label}
-                </h2>
-                {c.tag.navGroup ? (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {c.tag.navGroup}
-                  </p>
-                ) : null}
-              </div>
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-full border border-white/10"
-                style={{
-                  backgroundColor: c.tag.color + "22",
-                  color: c.tag.color,
-                }}
-              >
-                {c.phoneBankCount} phone bank{c.phoneBankCount !== 1 ? "s" : ""}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
-              {[
-                { val: fmt(c.totalCalls), label: "Total Calls", wide: true },
-                { val: fmt(c.totalSurveyed), label: "Surveyed" },
-                { val: fmtHours(c.totalHours), label: "Call Time" },
-                { val: fmt(c.uniqueCallers), label: "Callers" },
-              ].map((stat) => (
-                <div
-                  key={stat.label}
-                  className={`flex min-h-[72px] flex-col items-center justify-center rounded-xl border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-3 text-center ${
-                    stat.wide ? "col-span-2 sm:col-span-2" : ""
-                  }`}
-                >
-                  <p className="w-full text-center text-lg sm:text-xl font-bold leading-tight tracking-tight tabular-nums text-gray-900 dark:text-gray-50">
-                    {stat.val}
-                  </p>
-                  <p className="w-full text-center text-xs leading-snug text-gray-500 dark:text-gray-400 mt-1">
-                    {stat.label}
-                  </p>
+            <div className="p-5 min-w-0 flex-1">
+              <div className="flex items-start justify-between mb-4 gap-2">
+                <div className="min-w-0">
+                  <h2 className="font-display text-xl font-semibold tracking-tight text-[var(--section-ink)] group-hover:underline underline-offset-4">
+                    {c.tag.label}
+                  </h2>
+                  {c.tag.navGroup ? (
+                    <p className="section-kicker mt-1">
+                      {c.tag.navGroup}
+                    </p>
+                  ) : null}
                 </div>
-              ))}
-            </div>
+                <span
+                  className="text-[10px] font-semibold uppercase tracking-[0.12em] px-2 py-1 border"
+                  style={{
+                    backgroundColor: c.tag.color + "22",
+                    color: c.tag.color,
+                    borderColor: c.tag.color + "44",
+                  }}
+                >
+                  {c.phoneBankCount} phone bank{c.phoneBankCount !== 1 ? "s" : ""}
+                </span>
+              </div>
 
-            {c.firstCallDate && (
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-right">
-                {c.firstCallDate} → {c.lastCallDate ?? "present"}
-              </p>
-            )}
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm border-t border-[var(--section-rule)] pt-3">
+                {[
+                  { val: fmt(c.totalCalls), label: "Total Calls" },
+                  { val: fmt(c.totalSurveyed), label: "Surveyed" },
+                  { val: fmtHours(c.totalHours), label: "Call Time" },
+                  { val: fmt(c.uniqueCallers), label: "Callers" },
+                ].map((stat) => (
+                  <div key={stat.label} className="min-h-0">
+                    <dt className="text-[10px] uppercase tracking-[0.12em] text-[var(--section-muted)]">
+                      {stat.label}
+                    </dt>
+                    <dd className="font-display text-lg font-semibold tabular-nums text-[var(--section-ink)]">
+                      {stat.val}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              {c.firstCallDate && (
+                <p className="text-xs text-[var(--section-muted)] mt-3 text-right">
+                  {c.firstCallDate} → {c.lastCallDate ?? "present"}
+                </p>
+              )}
+            </div>
           </div>
         </Link>
       ))}

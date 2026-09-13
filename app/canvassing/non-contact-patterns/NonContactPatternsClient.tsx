@@ -597,13 +597,14 @@ export default function NonContactPatternsClient() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <section>
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-500 dark:text-orange-300">
-          Canvassing
+        <p className="section-kicker text-amber-800 dark:text-amber-300">
+          Review / Non-contact
         </p>
-        <h1 className="mt-2 text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+        <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight text-[var(--section-ink)]">
           Non-Contact Patterns
         </h1>
-        <p className="mt-3 max-w-3xl text-gray-600 dark:text-gray-400">
+        <hr className="section-hero__rule bg-amber-700 dark:bg-amber-300" />
+        <p className="mt-3 max-w-3xl text-[var(--section-muted)]">
           Flag rapid consecutive non-contact marks that can suggest mass-marking doors without contact, then compare
           canvassers to recent team baselines. Scores prioritize review only — they are not findings of fact; human
           verification is required before any personnel action.

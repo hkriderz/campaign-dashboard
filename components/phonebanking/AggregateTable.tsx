@@ -199,11 +199,11 @@ function ssRateLabel(row: PhoneBankCsvRow): string {
 // ─── Row type styles ──────────────────────────────────────────────────────────
 
 const ROW_STYLES = {
-  total: "bg-gray-900 text-white font-bold text-xs sticky top-[4rem] z-10",
-  subtotal: "bg-gray-700 text-white font-semibold text-xs",
+  total: "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-950 font-bold text-xs sticky top-[var(--app-header-height)] z-10",
+  subtotal: "bg-gray-700 text-white dark:bg-gray-600 dark:text-gray-50 font-semibold text-xs",
   groupHeader: "bg-indigo-800 text-white font-bold text-xs cursor-pointer select-none",
-  data: "bg-white hover:bg-indigo-50 text-xs text-gray-700",
-  dataAlt: "bg-gray-50 hover:bg-indigo-50 text-xs text-gray-700",
+  data: "bg-white dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-200",
+  dataAlt: "bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 text-xs text-gray-700 dark:text-gray-200",
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -273,10 +273,10 @@ export default function AggregateTable({ rows, campaignLabel }: Props) {
   }));
 
   return (
-    <div className="rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+    <div className="border border-[var(--section-rule)] overflow-hidden">
       {/* Controls */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex-wrap">
-        <p className="text-xs text-gray-500">
+      <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-b border-[var(--section-rule)] flex-wrap">
+        <p className="text-xs text-[var(--section-muted)]">
           {rows.length} rows · {groups.length} phone bank{groups.length !== 1 ? "s" : ""}
         </p>
         <div className="flex gap-2 flex-wrap">

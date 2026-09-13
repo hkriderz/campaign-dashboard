@@ -11,7 +11,7 @@ export default function PhoneBankingLayout({
   children: React.ReactNode;
 }) {
   return (
-    <AppShell sidebar={<Sidebar tags={getPhonebankingTags()} basePath="/phonebanking" />}>
+    <AppShell section="phone" sidebar={<Sidebar tags={getPhonebankingTags()} basePath="/phonebanking" />}>
       <SessionCredentialsGate requirements={{ gcp: true }}>{children}</SessionCredentialsGate>
     </AppShell>
   );

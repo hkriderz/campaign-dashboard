@@ -42,6 +42,8 @@ data/district-sort-cache/
 
 # Non-contact pattern reports (voter PII + canvasser scores)
 data/canvassing-non-contact-patterns/
+# Knock index + gap reports (PRIMARYID / voter PII)
+data/canvassing-reports/
 data/regression/
 output/
 

@@ -22,7 +22,7 @@ A unified Next.js dashboard for phone banking analytics, texting support tags, c
 
 - **Candidate overview** — All campaigns grouped by candidate tag, with total dials, call hours, and unique callers
 - **Phone bank list** — All STW campaigns matching a candidate's name, sorted by date
-- **All campaigns** — Same 2‑month / lifecycle rules as tag lists, but **no name filter**; flat table on `/phonebanking` and detail at `/phonebanking/c/[campaignId]`
+- **All campaigns** — Same 2‑month / lifecycle rules as tag lists, but **no name filter**; flat table on `/phonebanking` and detail at `/phonebanking/c/[campaignId]`. A selected date loads Daily Aggregate from **primary** candidate tags only (not derived `qc-*` slugs — those lists are already in the candidate snapshot). Candidate pages hide QC-named lists from Daily Aggregate, All Phone Banks, and By Phone Bank. QC Calls pages keep only QC lists. All Campaigns includes both. Header strip shows generic Strong support / Undecided / Strong oppose, counted **per phone bank** (Final Result when that list has it, otherwise the ID/polling question).
 - **Phone bank detail** — Full per-phonebanker breakdown with session-merged hours (same logic as `phonebanker_daily_hours.py`)
 - **Bar chart** — Dials and call hours per phonebanker, filterable by day
 - **Day filter** — Click any date to narrow the chart and table to that session
@@ -131,26 +131,74 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Adding or Editing Campaign Tags
 
-All candidates and their name-matching rules live in one file:
+Candidates and their name-matching rules are edited in the shared **Campaign tags** page at `/phonebanking/campaign-tags`. The same menu is linked from the phone banking and texting sidebars (and from the texting landing page). Saving writes `data/campaign-tags.json` (or `CAMPAIGN_TAGS_CONFIG_PATH`). When that file is missing or empty, built-in defaults in `lib/campaign-tags.ts` are used.
 
-```
-lib/campaign-tags.ts
-```
+Membership is chosen in the **Mode** dropdown (QC stays a separate checkbox, and only applies when phone banking is included):
 
-To add a new candidate:
+| Mode option | Stored `mode` | `includeInTexting` | Appears in |
+|---|---|---|---|
+| Phone banking, canvassing & texting | `both` | `true` | Phone bank, canvassing, texting |
+| Phone banking & canvassing | `both` | `false` | Phone bank, canvassing |
+| Phone banking & texting | `phonebanking` | `true` | Phone bank, texting |
+| Canvassing & texting | `canvassing` | `true` | Canvassing, texting |
+| Phone banking only | `phonebanking` | `false` | Phone bank |
+| Canvassing only | `canvassing` | `false` | Canvassing |
+| Texting only | `texting` | `true` | Texting |
+
+When `includeInTexting` is omitted from an older config row, it defaults to `true` for `phonebanking` / `both` / `texting` and `false` for `canvassing`. Derived QC buckets (`qc-*`) stay phone-banking only.
+
+Built-in default shape (used only when no config file exists):
 
 ```typescript
 {
-  id: "newcandidate",          // used in URLs: /phonebanking/newcandidate
+  id: "newcandidate",          // used in URLs: /phonebanking/newcandidate and /texting/newcandidate
   label: "New Candidate Name", // shown in the UI
   searchTerms: ["newcandidate", "othertag"], // matched against campaigns.name in BQ
   color: "#0ea5e9",
   textColor: "#ffffff",
-  mode: "both",                // "phonebanking" | "canvassing" | "both"
+  mode: "both",                // "phonebanking" | "canvassing" | "both" | "texting"
+  includeInTexting: true,      // set by Mode when the selection includes texting
 },
 ```
 
 The `searchTerms` are matched case-insensitively using `LIKE '%term%'` against the `campaigns.name` column in BigQuery. This is the same pattern used in `qc_phonebank_analysis.py` for `%QC%`.
+
+---
+
+## Canvassing Overview and knock index
+
+`/canvassing/overview` tallies **all saved Canvasser Details knocks** (not gap-report JSON). Sidebar **Overview** is the first Canvassing tools link. Knock Analysis, Doorknocks and Results, and Non-Contact Patterns stay as they are.
+
+**Knock index:** `data/canvassing-reports/knock-index.json` stores compact rows (`PRIMARYID`, canvasser, assignment, time, question, response). Dedup key is `primaryId + occurredAt + question + response`. Overview imports and Knock Analysis saves both **append** to this file. Gap reports still drop raw knocks and are not the source of truth.
+
+**Import the campaign files** already in `canvassref/`:
+
+```
+npm run seed:knock-index
+```
+
+Defaults:
+
+- `canvassref/Canvasser Details - (Beginning to 9_6_2026).csv`
+- `canvassref/Canvasser Details - (9_7 to_9_12_2026).csv`
+
+Or upload the same CSV/XLSX on Overview. Re-uploads skip duplicate rows.
+
+**Filters:** knock date in `America/Los_Angeles` (clear = all days) and candidate chips from `getCanvassingTags()`, matching `ASSIGNMENTNAME` with `campaignNameMatchesTag`.
+
+**Tally:** knocks are unique PRIMARYID×day. Contacts exclude `Non-Contact Mobile`. Support / Undecided / Oppose use bilingual labels (`strong support` / `fuerte apoyo`, etc.). One outcome per canvasser per voter per day; the last ID/support question wins. Prop 40 pledge answers stay in the index for QC “how” but do not steal the support tally unless they are the only classified row. The table toolbar repeats **Doors knocked / Contacts / Strong support / Undecided / Strong oppose** for the current date + candidate chip — never a candidate name as a default outcome label.
+
+**QC matching:** refreshing a QC tag (`qc-*`, including local one-click) rebuilds Recontacts against this index. Canvass priors use `PRIMARYID` = callee PDI.
+
+---
+
+## QC Recontacts (QC Calls Overview)
+
+On sidebar **QC Calls** tags (`/phonebanking/qc-<candidate>` only), Overview adds a **Recontacts** section above All Phone Banks, plus a **Matched** header card. Regular `/phonebanking/<candidate>` pages are unchanged.
+
+Each QC call is paired to prior contacts for the same callee PDI (from `callees.data`, preferring `v1_pdiID`, then `pdi_id` / `PDI ID`). Phone-bank priors come from regular (non-QC) banks. Canvass priors come from the saved knock index (`PRIMARYID` = PDI, assignment name via `campaignNameMatchesTag`). Channels stay separate; **change** uses the latest prior of either channel. A canvass-only match is still `matched`. Click a row for side-by-side answers. Refresh the QC tag to rebuild `data/bq-snapshots/qc-<candidate>/recontact-pairs.json` against the current knock index.
+
+Filter chips show row counts: All | Phone bank | Canvass | Changed | Held | Unmatched | No PDI. **Hide no QC contact** drops QC calls that have no Final Result.
 
 ---
 
@@ -163,17 +211,21 @@ campaign-dashboard/
 │   ├── layout.tsx                       # Root layout
 │   ├── globals.css
 │   ├── texting/
-│   │   ├── layout.tsx                   # Same sidebar candidates as phone banking
+│   │   ├── layout.tsx                   # Sidebar candidates from getTextingTags()
 │   │   ├── page.tsx                     # Candidate overview for STW Text
 │   │   └── [tag]/page.tsx               # Campaign table + contact-tag rollups
 │   ├── phonebanking/
 │   │   ├── layout.tsx                   # TopNav + Sidebar wrapper
+│   │   ├── campaign-tags/               # Shared add/remove candidate editor
 │   │   ├── page.tsx                     # Candidate overview grid
 │   │   └── [tag]/
 │   │       ├── page.tsx                 # Phone bank list for one candidate
 │   │       └── [campaignId]/
 │   │           └── page.tsx             # Phone bank detail (chart + table)
-│   ├── canvassing/                      # Placeholder (Phase 2)
+│   ├── canvassing/
+│   │   ├── overview/                    # Saved-knock Overview (date + candidate filters)
+│   │   ├── doorknocks-results/          # Doors / contact / support workbook
+│   │   └── non-contact-patterns/        # Rapid non-contact flags
 │   ├── pdi/                             # Placeholder (Phase 3)
 │   └── api/
 │       ├── phonebanking/
@@ -205,9 +257,11 @@ campaign-dashboard/
 └── lib/
     ├── bigquery.ts                      # Singleton BQ client
     ├── campaign-tags.ts                 # Tag config + SQL helpers
+    ├── qc-recontact/                    # QC vs phone-bank / canvass PDI pair builder
     ├── types.ts                         # All TypeScript types
     └── queries/
         ├── phonebanking.ts             # Dialer BQ queries
+        ├── qc-recontact.ts             # QC recontact BQ + snapshot load
         └── texting.ts                  # STW Text BQ queries
 ```
 
@@ -246,14 +300,32 @@ Heavy tag queries (`fetchTagDailyCallerStats`, `fetchTagPhonebankerQuestionStats
 - **Stable:** rows with `call_date` **strictly before yesterday** in LA are stored under `data/bq-snapshots/<tag>/` after each successful load.
 - **Disable:** set `BQ_SNAPSHOTS_DISABLED=1` to always run full BigQuery (debug).
 
+QC tags (`qc-<candidate>`) also write `recontact-pairs.json` on refresh. That file is the Overview **Recontacts** table: each QC call is paired to the latest prior regular phone bank and/or canvass knock for the same callee PDI (`PRIMARYID` on the knock index). Regular candidate pages do not load or show this file.
+
 **Manual historical rebuild** (e.g. after STW backfills older dates):
 
-1. Set `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` in `.env.local`.
+1. Set `CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET` in `.env.local` (required in production).
 2. On the candidate tag page, use **Rebuild history** (or `POST /api/phonebanking/bq-snapshot-refresh` with header `x-snapshot-secret` and JSON `{ "tagId": "faizah", "clear": true }`).
+
+On `next dev` only, **Refresh this tag (local)** / **Refresh all tags (local)** skip the secret so you can rebuild snapshots without typing a password. Production still requires `x-snapshot-secret`.
 
 **Scheduled refresh (e.g. 9pm Pacific):** call the same HTTPS endpoint from Cloud Scheduler / cron with the secret; use timezone `America/Los_Angeles` when defining the schedule.
 
 **Dev server:** snapshot files are excluded from webpack’s file watcher (`next.config.ts`) so saving them does not trigger a compile loop. If you change `next.config.ts`, restart `npm run dev`.
+
+---
+
+## Section access password (Canvassing + District Classifier)
+
+Phonebanking, texting, and PDI mapper/syncer keep the existing GCP/PDI credential upload. Canvassing and District Classifier can be locked with a shared staff password:
+
+- Set `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` on the VPS (long random string, 20+ characters). Leave it unset locally so `next dev` stays open.
+- Entering the password once unlocks **both** sections for that browser session (HttpOnly `cd_access` cookie bound to `cd_session`).
+- Canvassing and district API routes return `401` until the session is unlocked.
+- Failed unlocks: **10 tries per 15 minutes** per session and IP, then “Too many attempts. Try again later.”
+- Changing the env password invalidates every existing unlock. Use HTTPS in production and set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
+
+This is a staff door code, not per-user login. Do not commit the password.
 
 ---
 
@@ -262,8 +334,8 @@ Heavy tag queries (`fetchTagDailyCallerStats`, `fetchTagPhonebankerQuestionStats
 | Phase | Feature | Status |
 |---|---|---|
 | 1 | Phone banking dashboard | ✅ Done |
-| 2 | Canvassing — Google Sheets integration | 🔜 Next |
-| 2 | Canvassing — CSV file upload | 🔜 Next |
+| 2 | Canvassing Overview + knock index | ✅ Done |
+| 2 | Canvassing — Knock Analysis / Doorknocks CSV upload | ✅ Done |
 | 3 | Google Drive folder auto-ingest | 🔜 Planned |
 | 4 | PDI Mapper (embedded in dashboard) | 🔜 Planned |
 | 4 | PDI Syncer with live log stream | 🔜 Planned |

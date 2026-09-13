@@ -9,10 +9,8 @@ export default function EmptyState({
 }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
-      <span className="text-4xl opacity-80" aria-hidden="true">
-        📭
-      </span>
-      <p className="font-semibold text-gray-800 dark:text-gray-100">{title}</p>
+      <p className="section-kicker">Empty</p>
+      <p className="font-display text-xl font-semibold text-[var(--section-ink)]">{title}</p>
       <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm">
         {description}
       </p>

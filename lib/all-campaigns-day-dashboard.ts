@@ -2,11 +2,15 @@
  * Builds the same dashboard structures as `/phonebanking/[tag]` (slice map, merges, phonebanker rows)
  * but aggregates **all** phonebanking tags for a single Pacific calendar day.
  *
- * Uses per-tag BigQuery snapshots/APIs and merges CSV rows from every tag’s upload — matching candidate pages.
+ * Uses per-tag BigQuery snapshots/APIs and merges CSV rows from every **primary**
+ * phone-banking tag — matching candidate pages. Derived `qc-*` tags are omitted
+ * because those campaigns are already in the primary snapshot (`LIKE '%nithya%'`
+ * includes “Nithya QC …”). Loading both would double the overlap.
  */
 
 import {
   getPhonebankingTags,
+  isDerivedQcTagId,
   resolveSurveyScriptProfile,
   tagUsesVerbatimFinalResultAggregate,
 } from "@/lib/campaign-tags";
@@ -31,6 +35,11 @@ import {
   fetchAllPhoneBankRawCallsByCampaignDay,
 } from "@/lib/queries/phonebanking";
 import { candidateTermsForTag, listSynthesizedFinalResults } from "@/lib/strong-support-from-survey";
+import {
+  addOutcomeTallies,
+  tallySupportOutcomesByCampaign,
+} from "@/lib/daily-aggregate-outcome-tally";
+import type { FinalResultFamilyCounts } from "@/lib/survey-answer-consolidation";
 import {
   applySynthesizedFinalResultsToQuestionRows,
   preferredFinalResultQuestionByCampaign,
@@ -101,6 +110,7 @@ export type AllCampaignsDayDashboardPayload = {
   uniquePhonebankers: number;
   bqPollingBreakdown: AggregateAnswerLine[];
   bqFinalResultBreakdown: AggregateAnswerLine[];
+  outcomeTally: FinalResultFamilyCounts;
   finalResultFromCallFill: boolean;
   syntheticPivotAllowlistByQuestion?: Record<string, readonly string[]>;
   widePivotHeaderOrderHint?: readonly string[];
@@ -210,7 +220,7 @@ export async function buildAllCampaignsDayDashboard(
   const startDate = normalizedRange.startDate;
   const endDate = normalizedRange.endDate;
 
-  const tags = getPhonebankingTags();
+  const tags = getPhonebankingTags().filter((t) => !isDerivedQcTagId(t.id));
   if (!tags.length) {
     return { error: "No phonebanking tags configured" };
   }
@@ -634,6 +644,11 @@ export async function buildAllCampaignsDayDashboard(
 
   const pollingGroups: AggregateAnswerLine[][] = [];
   const finalGroups: AggregateAnswerLine[][] = [];
+  let outcomeTally: FinalResultFamilyCounts = {
+    strongSupport: 0,
+    undecided: 0,
+    strongOppose: 0,
+  };
   for (const tr of tagResults) {
     const profile = resolveSurveyScriptProfile(tr.tag);
     const tagRows = tr.questions.filter((r) => isoDateInRange(r.callDate, startDate, endDate));
@@ -670,6 +685,19 @@ export async function buildAllCampaignsDayDashboard(
     }
     if (polling.length) pollingGroups.push(polling);
     if (finalResult.length) finalGroups.push(finalResult);
+    outcomeTally = addOutcomeTallies(
+      outcomeTally,
+      tallySupportOutcomesByCampaign(tagRows, {
+        sliceKeys: aggregateSliceKeys,
+        profile,
+        terms: candidateTermsForTag(tr.tag),
+        extraLines: synthHits.map((h) => ({
+          label: tagUsesVerbatimFinalResultAggregate(tr.tag) ? h.rawAnswer : h.displayLabel,
+          count: 1,
+          synthesized: 1,
+        })),
+      })
+    );
   }
 
   const aggregateScopeRows = aggregateScopeRowsFromQuestionSlices(
@@ -689,6 +717,7 @@ export async function buildAllCampaignsDayDashboard(
     uniquePhonebankers: countUniquePhonebankersForSliceKeys(bqDailyCaller, aggregateSliceKeys),
     bqPollingBreakdown: mergeAggregateAnswerLines(pollingGroups),
     bqFinalResultBreakdown: mergeAggregateAnswerLines(finalGroups),
+    outcomeTally,
     finalResultFromCallFill: false,
     syntheticPivotAllowlistByQuestion,
     widePivotHeaderOrderHint: bestWideRef.length ? bestWideRef : undefined,

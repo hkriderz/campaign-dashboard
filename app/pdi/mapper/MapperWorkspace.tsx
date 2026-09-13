@@ -22,7 +22,7 @@ function MapperBody() {
   return (
     <>
       {state.isRefreshing && !state.dataLoaded ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-gray-50 dark:bg-zinc-950 min-h-[50vh]">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-gray-50 dark:bg-[var(--section-paper)] min-h-[50vh]">
           <div className="w-6 h-6 border-2 border-green-500 border-t-transparent rounded-full animate-spin" />
           <p className="text-[11px] text-gray-400 dark:text-zinc-500">Loading data…</p>
         </div>
@@ -30,7 +30,7 @@ function MapperBody() {
 
       {state.dataLoaded ? (
         <>
-          <div className="lg:hidden flex border-b border-gray-200 dark:border-zinc-700/50 bg-white dark:bg-zinc-900 shrink-0">
+          <div className="lg:hidden flex border-b border-gray-200 dark:border-[var(--section-rule)] bg-white dark:bg-[color-mix(in_srgb,var(--section-paper)_80%,#000)] shrink-0">
             {MOBILE_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -38,8 +38,8 @@ function MapperBody() {
                 onClick={() => setMobilePane(tab.id)}
                 className={`flex-1 min-h-11 text-xs sm:text-sm font-medium py-2 px-2 border-b-2 transition-colors ${
                   mobilePane === tab.id
-                    ? "border-green-500 text-green-700 dark:text-green-400 bg-green-50/80 dark:bg-green-950/30"
-                    : "border-transparent text-gray-500 dark:text-zinc-500"
+                    ? "border-[var(--section-accent)] text-[var(--section-ink)] bg-[color-mix(in_srgb,var(--section-accent)_10%,transparent)]"
+                    : "border-transparent text-[var(--section-muted)]"
                 }`}
               >
                 {tab.label}
@@ -115,7 +115,7 @@ function MapperBody() {
 export default function MapperWorkspace() {
   return (
     <AppProvider>
-      <div className="flex flex-col flex-1 min-h-0 bg-gray-100 dark:bg-zinc-950">
+      <div className="flex flex-col flex-1 min-h-0 bg-gray-100 dark:bg-[var(--section-paper)]">
         <DataLoader />
         <MapperBody />
       </div>

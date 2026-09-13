@@ -38,12 +38,12 @@ export default function ThemeToggle() {
   return (
     <button
       onClick={toggle}
-      className="min-h-11 min-w-11 px-3 py-2 rounded-full text-xs font-semibold border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 bg-white/80 dark:bg-white/5 hover:bg-gray-100 dark:hover:bg-white/10 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 transition-all inline-flex items-center justify-center"
+      className="min-h-11 min-w-11 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] border border-[var(--section-rule)] text-[var(--section-ink)] bg-transparent hover:bg-[color-mix(in_srgb,var(--section-accent)_8%,transparent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--section-accent)] transition-colors inline-flex items-center justify-center"
       aria-label="Toggle dark mode"
       title="Toggle dark mode"
       type="button"
     >
-      {theme === null ? "Theme" : theme === "dark" ? "☀ Light" : "🌙 Night"}
+      {theme === null ? "Theme" : theme === "dark" ? "Light" : "Night"}
     </button>
   );
 }

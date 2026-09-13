@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
-import { Inter } from "next/font/google";
+import { IBM_Plex_Sans, Newsreader } from "next/font/google";
 import {
   DEFAULT_THEME,
   THEME_INIT_SCRIPT,
@@ -9,9 +9,17 @@ import {
 } from "@/lib/theme";
 import "./globals.css";
 
-const inter = Inter({
+const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-inter",
+  weight: ["400", "500", "600"],
+  variable: "--font-sans-plex",
+  display: "swap",
+});
+
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  weight: ["400", "600"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -41,7 +49,7 @@ export default async function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable}${isDark ? " dark" : ""}`}
+      className={`${plexSans.variable} ${newsreader.variable}${isDark ? " dark" : ""}`}
     >
       <head>
         <script

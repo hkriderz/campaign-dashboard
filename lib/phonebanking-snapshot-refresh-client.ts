@@ -35,13 +35,14 @@ async function postTagSnapshotRefresh(
   secret: string,
   body: { tagId: string; clear?: boolean }
 ): Promise<{ ok: boolean; error?: string }> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (secret) headers["x-snapshot-secret"] = secret;
   const res = await fetch("/api/phonebanking/bq-snapshot-refresh", {
     method: "POST",
     credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      "x-snapshot-secret": secret,
-    },
+    headers,
     body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as RefreshApiResponse;

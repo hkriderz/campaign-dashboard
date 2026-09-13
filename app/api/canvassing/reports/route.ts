@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { analyzeCanvassingUploads } from "@/lib/canvassing/engine";
+import { analyzeCanvassingParsedFiles } from "@/lib/canvassing/engine";
+import { appendKnockEventsToIndex } from "@/lib/canvassing/knock-index-store";
+import { buildKnockEvents, parseCanvassingUploadFile } from "@/lib/canvassing/knock-details-parser";
 import { listCanvassingReports, saveCanvassingReport } from "@/lib/canvassing/store";
 import { readCanvassingUploadFormFiles } from "@/lib/canvassing/upload-form";
 
@@ -25,11 +27,17 @@ export async function POST(req: Request) {
   try {
     const form = await req.formData();
     const files = await readCanvassingUploadFormFiles(form);
-    const result = await analyzeCanvassingUploads(files);
+    const parsed = (await Promise.all(files.map((file) => parseCanvassingUploadFile(file)))).flat();
+    const result = analyzeCanvassingParsedFiles(parsed);
     const report = saveCanvassingReport({
       name: cleanReportName(form.get("name")),
       reportDate: cleanReportDate(form.get("reportDate")),
       result,
+    });
+    appendKnockEventsToIndex(buildKnockEvents(parsed).events, {
+      source: "knock-analysis",
+      reportId: report.id,
+      fileNames: files.map((file) => file.fileName),
     });
 
     return NextResponse.json({ ok: true, data: { report } }, { status: 201 });

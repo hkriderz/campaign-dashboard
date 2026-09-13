@@ -15,17 +15,17 @@ export default function StatCard({
     <div
       className={[
         "dash-card flex flex-col gap-1 relative",
-        accent ? "dash-card-glow border-indigo-500/30" : "",
+        accent ? "border-[var(--section-accent)]" : "",
       ].join(" ")}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-400 dark:text-gray-500">
+      <p className="section-kicker">
         {label}
       </p>
-      <p className="text-2xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+      <p className="font-display text-2xl font-semibold tracking-tight text-[var(--section-ink)]">
         {value}
       </p>
       {sub && (
-        <p className="text-xs text-gray-500 dark:text-gray-400">{sub}</p>
+        <p className="text-xs text-[var(--section-muted)]">{sub}</p>
       )}
     </div>
   );

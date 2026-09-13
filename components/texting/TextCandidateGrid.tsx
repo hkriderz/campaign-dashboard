@@ -14,66 +14,62 @@ function fmt(n: number) {
 export default function TextCandidateGrid({ candidates }: Props) {
   if (!candidates.length) {
     return (
-      <p className="text-gray-500 dark:text-gray-400 text-sm py-10 text-center">
+      <p className="text-[var(--section-muted)] text-sm py-10 text-center">
         No text campaign data found. Check your BigQuery connection and campaign tags.
       </p>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+    <ul className="divide-y divide-[var(--section-rule)] border-y border-[var(--section-rule)]">
       {candidates.map((c) => (
-        <Link
-          key={c.tag.id}
-          href={`/texting/${c.tag.id}`}
-          className="group block dash-card dash-card-glow p-0 overflow-hidden hover:border-teal-400/40 dark:hover:border-teal-500/40 transition-all duration-200 hover:shadow-[0_0_32px_rgba(13,148,136,0.12)]"
-        >
-          <div className="h-1" style={{ backgroundColor: c.tag.color }} />
-
-          <div className="p-5 relative z-[1]">
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <div className="min-w-0">
-                <h2 className="font-bold text-lg tracking-tight text-gray-900 dark:text-gray-50 group-hover:text-teal-600 dark:group-hover:text-teal-300 transition-colors">
-                  {c.tag.label}
-                </h2>
-                {c.tag.navGroup ? (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{c.tag.navGroup}</p>
-                ) : null}
-              </div>
-              <span
-                className="text-xs font-semibold px-2.5 py-1 rounded-full border border-white/10"
-                style={{
-                  backgroundColor: `${c.tag.color}22`,
-                  color: c.tag.color,
-                }}
-              >
-                {c.campaignCount} campaign{c.campaignCount !== 1 ? "s" : ""}
-              </span>
+        <li key={c.tag.id}>
+          <Link
+            href={`/texting/${c.tag.id}`}
+            className="group flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6 py-4 px-1 hover:bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)] transition-colors"
+          >
+            <div
+              className="hidden sm:block w-1 self-stretch flex-shrink-0"
+              style={{ backgroundColor: c.tag.color }}
+              aria-hidden
+            />
+            <div className="min-w-0 sm:w-48 flex-shrink-0">
+              <h2 className="font-display text-xl font-semibold text-[var(--section-ink)] group-hover:underline underline-offset-4">
+                {c.tag.label}
+              </h2>
+              {c.tag.navGroup ? (
+                <p className="section-kicker mt-1">{c.tag.navGroup}</p>
+              ) : null}
             </div>
-
-            <div className="grid grid-cols-2 gap-3 text-center">
+            <span
+              className="text-[10px] font-semibold uppercase tracking-[0.12em] px-2 py-1 border w-fit"
+              style={{
+                backgroundColor: `${c.tag.color}22`,
+                color: c.tag.color,
+                borderColor: `${c.tag.color}44`,
+              }}
+            >
+              {c.campaignCount} campaign{c.campaignCount !== 1 ? "s" : ""}
+            </span>
+            <dl className="grid grid-cols-3 gap-4 sm:ml-auto text-sm">
               {[
                 { val: fmt(c.contactCount), label: "Contacts" },
                 { val: fmt(c.completeCount), label: "Complete" },
                 { val: fmt(c.pendingCount), label: "Pending" },
-                { val: fmt(c.campaignCount), label: "Campaigns" },
               ].map((stat) => (
-                <div
-                  key={stat.label}
-                  className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-3 text-center"
-                >
-                  <p className="w-full text-center text-lg sm:text-xl font-bold leading-tight tracking-tight tabular-nums text-gray-900 dark:text-gray-50">
-                    {stat.val}
-                  </p>
-                  <p className="w-full text-center text-xs leading-snug text-gray-500 dark:text-gray-400 mt-1">
+                <div key={stat.label}>
+                  <dt className="text-[10px] uppercase tracking-[0.12em] text-[var(--section-muted)]">
                     {stat.label}
-                  </p>
+                  </dt>
+                  <dd className="font-display text-lg font-semibold tabular-nums text-[var(--section-ink)]">
+                    {stat.val}
+                  </dd>
                 </div>
               ))}
-            </div>
-          </div>
-        </Link>
+            </dl>
+          </Link>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
