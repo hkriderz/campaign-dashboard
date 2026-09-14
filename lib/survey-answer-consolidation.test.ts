@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   GENERIC_OUTCOME_LABELS,
   csvAnswerForFinalResultFamily,
+  genericOutcomeDisplayLabel,
   isStrongSupportSurveyHit,
   sumFinalResultFamilies,
   synthesizedHitMatchesLabel,
@@ -66,6 +67,16 @@ test("sumFinalResultFamilies counts raw Strong Support as generic SS, not a Faiz
   assert.equal(GENERIC_OUTCOME_LABELS.strongOppose, "Strong oppose");
   assert.equal(csvAnswerForFinalResultFamily("strongSupport"), "Strong support");
   assert.doesNotMatch(GENERIC_OUTCOME_LABELS.strongSupport, /faizah/i);
+});
+
+test("genericOutcomeDisplayLabel never returns a candidate name for FR families", () => {
+  assert.equal(genericOutcomeDisplayLabel("Support Faizah"), "Strong support");
+  assert.equal(genericOutcomeDisplayLabel("A. Strong Support"), "Strong support");
+  assert.equal(genericOutcomeDisplayLabel("Support Nithya"), "Strong support");
+  assert.equal(genericOutcomeDisplayLabel("Support Traci"), "Strong oppose");
+  assert.equal(genericOutcomeDisplayLabel("Undecided — won't vote for Traci"), "Undecided");
+  assert.equal(genericOutcomeDisplayLabel("Talking to Correct Person"), "Talking to Correct Person");
+  assert.doesNotMatch(genericOutcomeDisplayLabel("Support Faizah"), /faizah/i);
 });
 
 test("synthesizedHitMatchesLabel accepts script option text and bucket names", () => {

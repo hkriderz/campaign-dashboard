@@ -346,14 +346,29 @@ export function synthesizedHitMatchesLabel(
 export function csvAnswerForFinalResultFamily(family: FinalResultFamily): string | null {
   switch (family) {
     case "strongSupport":
-      return "Strong support";
+      return GENERIC_OUTCOME_LABELS.strongSupport;
     case "undecided":
-      return "Undecided";
+      return GENERIC_OUTCOME_LABELS.undecided;
     case "strongOppose":
-      return "Strong oppose";
+      return GENERIC_OUTCOME_LABELS.strongOppose;
     default:
       return null;
   }
+}
+
+/**
+ * Show SS / U / SO without a candidate name. Unclassified leftovers keep their label
+ * (e.g. canvass contact status). Used by Recontacts table, modal, and CSV.
+ */
+export function genericOutcomeDisplayLabel(
+  rawLabel: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): string {
+  const trimmed = rawLabel.trim();
+  if (!trimmed) return "";
+  const classified = classifySurveyAnswerDisplayLabel(trimmed, profile);
+  const generic = csvAnswerForFinalResultFamily(finalResultFamilyForDisplayLabel(classified));
+  return generic ?? classified;
 }
 
 /** True when the classified label is a strong-support bucket for any script profile. */

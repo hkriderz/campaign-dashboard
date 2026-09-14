@@ -13,7 +13,7 @@ export type {
 } from "./types";
 
 export { normalizeRecontactPersonId, callOccurredBefore } from "./ids";
-export { extractCallSurveyLabels } from "./labels";
+export { displayRecontactResultLabel, extractCallSurveyLabels } from "./labels";
 export { classifyRecontactChange } from "./change";
 export {
   callSummaryToPhonebankPrior,
@@ -25,3 +25,7 @@ export {
   resolvePhonebankPriors,
   summarizeRecontactPairs,
 } from "./pair";
+export {
+  buildRecontactPairsCsv,
+  recontactExportFilename,
+} from "./export";

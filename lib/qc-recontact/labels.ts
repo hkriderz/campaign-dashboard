@@ -3,7 +3,10 @@ import {
   isPollingQuestionName,
 } from "../daily-aggregate-survey-rollup";
 import { comparableSupportResultFromRows } from "../strong-support-from-survey";
-import { classifySurveyAnswerDisplayLabel } from "../survey-answer-consolidation";
+import {
+  classifySurveyAnswerDisplayLabel,
+  genericOutcomeDisplayLabel,
+} from "../survey-answer-consolidation";
 import { isCanvassResultColumnQuestion, questionLooksLikeDisclaimer } from "../survey-i18n/rules";
 import type { SurveyScriptProfile } from "../types";
 
@@ -11,6 +14,14 @@ export type RecontactSurveyRow = {
   questionName: string;
   answerValue: string;
 };
+
+/** Table / CSV / modal result cells — SS / U / SO, never a candidate name. */
+export function displayRecontactResultLabel(
+  label: string,
+  profile: SurveyScriptProfile
+): string {
+  return genericOutcomeDisplayLabel(label, profile);
+}
 
 export function extractCallSurveyLabels(
   rows: readonly RecontactSurveyRow[],

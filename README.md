@@ -198,7 +198,7 @@ On sidebar **QC Calls** tags (`/phonebanking/qc-<candidate>` only), Overview add
 
 Each QC call is paired to prior contacts for the same callee PDI (from `callees.data`, preferring `v1_pdiID`, then `pdi_id` / `PDI ID`). Phone-bank priors come from regular (non-QC) banks. Canvass priors come from the saved knock index (`PRIMARYID` = PDI, assignment name via `campaignNameMatchesTag`). Channels stay separate; **change** uses the latest prior of either channel. A canvass-only match is still `matched`. Click a row for side-by-side answers. Refresh the QC tag to rebuild `data/bq-snapshots/qc-<candidate>/recontact-pairs.json` against the current knock index.
 
-Filter chips show row counts: All | Phone bank | Canvass | Changed | Held | Unmatched | No PDI. **Hide no QC contact** drops QC calls that have no Final Result.
+Filter chips show row counts: All | Phone bank | Canvass | Changed | Held | Unmatched | No PDI. **Hide no QC contact** drops QC calls that have no Final Result. Result cells (table, modal, CSV) use generic **Strong support / Undecided / Strong oppose** — never a candidate name. **Copy CSV** / **Download CSV** export the visible filter: one row per QC call × prior, with PDI, change, both sides’ lists/results, and `Used for change` for the latest prior.
 
 ---
 

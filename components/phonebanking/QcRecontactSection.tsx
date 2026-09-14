@@ -1,18 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { formatShortUsDate } from "@/lib/slice-key";
-import type { SurveyScriptProfile } from "@/lib/types";
+import { writeTextToClipboard } from "@/lib/browser-clipboard";
+import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
+  buildRecontactPairsCsv,
   changeKindLabel,
+  displayRecontactResultLabel,
   pairHasQcContact,
   pairMatchesFilter,
   recontactChannelLabel,
+  recontactExportFilename,
   summarizeRecontactPairs,
   type QcRecontactChangeKind,
   type QcRecontactFilter,
   type QcRecontactPair,
 } from "@/lib/qc-recontact";
+import { formatShortUsDate } from "@/lib/slice-key";
+import type { SurveyScriptProfile } from "@/lib/types";
 import QcRecontactModal from "./QcRecontactModal";
 
 const CHIP_FILTERS: Array<{ id: QcRecontactFilter; label: string }> = [
@@ -56,6 +61,8 @@ export default function QcRecontactSection({
   const [filter, setFilter] = useState<QcRecontactFilter>("all");
   const [hideNoQcContact, setHideNoQcContact] = useState(false);
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const missingQcContactCount = useMemo(
     () => pairs.filter((pair) => !pairHasQcContact(pair)).length,
     [pairs]
@@ -77,6 +84,36 @@ export default function QcRecontactSection({
     return counts;
   }, [scopedPairs]);
 
+  function exportCsv(): string {
+    return buildRecontactPairsCsv(visible, surveyScriptProfile);
+  }
+
+  async function copyCsv() {
+    setExportMessage(null);
+    setExportError(null);
+    if (visible.length === 0) {
+      setExportError("No recontact rows to copy for this filter.");
+      return;
+    }
+    try {
+      await writeTextToClipboard(exportCsv());
+      setExportMessage(`Copied ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"} as CSV.`);
+    } catch {
+      setExportError("Unable to copy CSV. Your browser may be blocking clipboard access.");
+    }
+  }
+
+  function downloadCsv() {
+    setExportMessage(null);
+    setExportError(null);
+    if (visible.length === 0) {
+      setExportError("No recontact rows to download for this filter.");
+      return;
+    }
+    downloadCsvFile(exportCsv(), recontactExportFilename(tagId, visible));
+    setExportMessage(`Downloaded ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"}.`);
+  }
+
   const flipCells: Array<{ id: QcRecontactFilter; label: string; count: number }> = [
     { id: "held", label: "Held", count: stats.held },
     { id: "strengthened", label: "Strengthened", count: stats.strengthened },
@@ -86,12 +123,45 @@ export default function QcRecontactSection({
 
   return (
     <section id="qc-recontacts" className="scroll-mt-24 space-y-3">
-      <div>
-        <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200">Recontacts</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-          QC calls matched to prior phone-bank and canvass contacts for the same PDI. Change uses the latest prior.
-        </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200">Recontacts</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            QC calls matched to prior phone-bank and canvass contacts for the same PDI. Change uses the latest prior.
+          </p>
+        </div>
+        {hasSnapshot ? (
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => void copyCsv()}
+              disabled={visible.length === 0}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Copy CSV
+            </button>
+            <button
+              type="button"
+              onClick={downloadCsv}
+              disabled={visible.length === 0}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Download CSV
+            </button>
+          </div>
+        ) : null}
       </div>
+      {hasSnapshot ? (
+        exportError ? (
+          <p className="text-xs text-rose-700 dark:text-rose-300">{exportError}</p>
+        ) : exportMessage ? (
+          <p className="text-xs text-emerald-700 dark:text-emerald-300">{exportMessage}</p>
+        ) : (
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Copy or download the current filter as CSV (one row per prior; empty prior columns when unmatched).
+          </p>
+        )
+      ) : null}
 
       {!hasSnapshot ? (
         <div className="rounded-xl border border-dashed border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/25 px-3 py-3 text-sm text-amber-950 dark:text-amber-100">
@@ -232,7 +302,7 @@ export default function QcRecontactSection({
                           {priors.length
                             ? priors.map((item, index) => (
                                 <div key={`${item.resultLabel}-${index}`} className={index > 0 ? "mt-2" : undefined}>
-                                  {item.resultLabel || "—"}
+                                  {displayRecontactResultLabel(item.resultLabel, surveyScriptProfile) || "—"}
                                 </div>
                               ))
                             : "—"}
@@ -244,7 +314,9 @@ export default function QcRecontactSection({
                           </div>
                           <div className="text-gray-500 dark:text-gray-400">{pair.qc.campaignName}</div>
                         </td>
-                        <td className="px-3 py-2 text-xs">{pair.qc.finalResultLabel || "—"}</td>
+                        <td className="px-3 py-2 text-xs">
+                          {displayRecontactResultLabel(pair.qc.finalResultLabel, surveyScriptProfile) || "—"}
+                        </td>
                       </tr>
                     );
                   })}

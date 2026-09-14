@@ -7,6 +7,7 @@ import { questionLooksLikeDisclaimer } from "@/lib/survey-i18n/rules";
 import type { SurveyScriptProfile } from "@/lib/types";
 import {
   changeKindLabel,
+  displayRecontactResultLabel,
   recontactChannelLabel,
   type QcRecontactDetailPayload,
   type QcRecontactPair,
@@ -185,7 +186,7 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
                     </div>
                     <div>
                       <dt className="text-gray-500 dark:text-gray-400">Result</dt>
-                      <dd>{item.resultLabel || "—"}</dd>
+                      <dd>{displayRecontactResultLabel(item.resultLabel, surveyScriptProfile) || "—"}</dd>
                     </div>
                   </dl>
                 ))
@@ -212,7 +213,7 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
                 </div>
                 <div>
                   <dt className="text-gray-500 dark:text-gray-400">Result</dt>
-                  <dd>{pair.qc.finalResultLabel || "—"}</dd>
+                  <dd>{displayRecontactResultLabel(pair.qc.finalResultLabel, surveyScriptProfile) || "—"}</dd>
                 </div>
               </dl>
             </div>
