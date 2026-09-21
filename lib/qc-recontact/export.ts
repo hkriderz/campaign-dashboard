@@ -1,7 +1,7 @@
 import { escapeCsvCell } from "../pivot-csv-export";
 import type { SurveyScriptProfile } from "../types";
 import { displayRecontactResultLabel } from "./labels";
-import { changeKindLabel, recontactChannelLabel } from "./pair";
+import { changeKindLabel, firstClassifiablePrior, recontactChannelLabel } from "./pair";
 import type { PriorContactSummary, QcRecontactPair } from "./types";
 
 export const RECONTACT_CSV_HEADERS = [
@@ -102,8 +102,15 @@ export function recontactPairsToCsvRows(
       rows.push([...base, ...priorCells(undefined, false, profile), pair.pairId]);
       continue;
     }
-    priors.forEach((prior, index) => {
-      rows.push([...base, ...priorCells(prior, index === 0, profile), pair.pairId]);
+    const source = firstClassifiablePrior(priors);
+    priors.forEach((prior) => {
+      const usedForChange = Boolean(
+        source &&
+          prior.channel === source.channel &&
+          prior.occurredOn === source.occurredOn &&
+          (prior.callId ?? prior.campaignContactId ?? "") === (source.callId ?? source.campaignContactId ?? "")
+      );
+      rows.push([...base, ...priorCells(prior, usedForChange, profile), pair.pairId]);
     });
   }
   return rows;

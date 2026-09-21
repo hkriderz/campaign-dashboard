@@ -79,6 +79,18 @@ export function autoMatchAnswer(
     return { option: exactMatch, confidence: "auto", method: "desc-match" };
   }
 
+  // Text "Neither" IDs fold to Undecided on PDI Support questions.
+  if (normStw === "neither") {
+    const undecided = options.find((o) => {
+      const desc = normalizeMatchText(o.displayDescription);
+      const code = normalizeMatchText(o.displayCode);
+      return desc === "undecided" || code === "u";
+    });
+    if (undecided) {
+      return { option: undecided, confidence: "auto", method: "desc-match" };
+    }
+  }
+
   const containsMatch = options.find((o) => {
     const normPdi = normalizeMatchText(o.displayDescription);
     return normStw.includes(normPdi) || normPdi.includes(normStw);

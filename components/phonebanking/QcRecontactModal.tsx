@@ -12,6 +12,7 @@ import {
   type QcRecontactDetailPayload,
   type QcRecontactPair,
   type QcRecontactSurveyAnswer,
+  type QcRecontactTextMessage,
 } from "@/lib/qc-recontact";
 
 type AlignedRow = {
@@ -20,6 +21,13 @@ type AlignedRow = {
   priorAnswer: string;
   qcAnswer: string;
 };
+
+function formatThreadStamp(at: string): string {
+  const date = formatShortUsDate(at.slice(0, 10));
+  const tIndex = at.indexOf("T");
+  const time = tIndex >= 0 ? at.slice(tIndex + 1, tIndex + 6) : "";
+  return time ? `${date} ${time}` : date;
+}
 
 function usableAnswers(rows: readonly QcRecontactSurveyAnswer[]): QcRecontactSurveyAnswer[] {
   return rows.filter((row) => {
@@ -191,7 +199,7 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
                   </dl>
                 ))
               ) : (
-                <p className="mt-2 text-gray-500 dark:text-gray-400">No prior phone bank or canvass for this PDI.</p>
+                <p className="mt-2 text-gray-500 dark:text-gray-400">No prior phone bank, canvass, or text for this PDI.</p>
               )}
             </div>
             <div className="rounded-lg border border-indigo-200 dark:border-indigo-900/50 p-3 bg-indigo-50/40 dark:bg-indigo-950/20">
@@ -220,35 +228,71 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
           </div>
 
           {loading ? (
-            <p className="text-gray-500 dark:text-gray-400">Loading survey answers…</p>
+            <p className="text-gray-500 dark:text-gray-400">Loading details…</p>
           ) : error ? (
             <p className="text-rose-600 dark:text-rose-400">{error}</p>
-          ) : aligned.length === 0 ? (
-            <p className="text-gray-500 dark:text-gray-400">No survey answers on file for this pair.</p>
           ) : (
-            <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                    <th className="px-2 py-2 font-semibold">Question</th>
-                    <th className="px-2 py-2 font-semibold">Prior</th>
-                    <th className="px-2 py-2 font-semibold">QC</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {aligned.map((row) => {
-                    const changed = row.priorAnswer !== row.qcAnswer;
-                    return (
-                      <tr key={row.key} className={changed ? "bg-amber-50/70 dark:bg-amber-950/20" : undefined}>
-                        <td className="px-2 py-1.5 align-top">{row.question}</td>
-                        <td className="px-2 py-1.5 align-top">{row.priorAnswer}</td>
-                        <td className="px-2 py-1.5 align-top">{row.qcAnswer}</td>
+            <>
+              {(detail?.textThread ?? []).length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Text conversation
+                  </div>
+                  <ol className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                    {(detail?.textThread ?? []).map((msg: QcRecontactTextMessage, index) => {
+                      const fromTexter = msg.direction === "outbound";
+                      return (
+                        <li key={`${msg.at}-${index}`}>
+                          <div
+                            className={[
+                              "max-w-[90%] rounded-lg px-3 py-2",
+                              fromTexter
+                                ? "bg-indigo-50 dark:bg-indigo-950/40 ml-0"
+                                : "bg-gray-50 dark:bg-gray-800 ml-auto",
+                            ].join(" ")}
+                          >
+                            <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                              {fromTexter ? msg.actorName || "Texter" : "Voter"} · {formatThreadStamp(msg.at)}
+                            </div>
+                            <div className="mt-1 whitespace-pre-wrap break-words">{msg.body || "—"}</div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              ) : null}
+
+              {aligned.length === 0 ? (
+                (detail?.textThread ?? []).length === 0 ? (
+                  <p className="text-gray-500 dark:text-gray-400">No survey answers on file for this pair.</p>
+                ) : null
+              ) : (
+                <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+                  <table className="w-full text-xs text-left">
+                    <thead>
+                      <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                        <th className="px-2 py-2 font-semibold">Question</th>
+                        <th className="px-2 py-2 font-semibold">Prior</th>
+                        <th className="px-2 py-2 font-semibold">QC</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                      {aligned.map((row) => {
+                        const changed = row.priorAnswer !== row.qcAnswer;
+                        return (
+                          <tr key={row.key} className={changed ? "bg-amber-50/70 dark:bg-amber-950/20" : undefined}>
+                            <td className="px-2 py-1.5 align-top">{row.question}</td>
+                            <td className="px-2 py-1.5 align-top">{row.priorAnswer}</td>
+                            <td className="px-2 py-1.5 align-top">{row.qcAnswer}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

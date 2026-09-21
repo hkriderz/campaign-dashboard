@@ -8,6 +8,8 @@ export type SurveyResultRow = {
   question_name?: string;
   answer_value?: string;
   pdi_id?: string;
+  /** Raw STW text tag; set only on text-sync rows after classification. */
+  _source_answer?: string;
   _fill_source_question?: string;
   _synthetic_final_result?: boolean;
   _final_result_has_explicit_mapping?: boolean;

@@ -16,7 +16,9 @@ import { loadKnockIndexRows } from "../canvassing/knock-index-store";
 import { canonicalizePhonebankerName } from "../phonebanker-name";
 import { candidateTermsForTag } from "../strong-support-from-survey";
 import {
+  canvassResultIsTalkingToCorrectPerson,
   extractCallSurveyLabels,
+  fillMissingCanvassLabel,
   normalizeRecontactPersonId,
   resolvePhonebankPriors,
   type QcRecontactDetailPayload,
@@ -25,7 +27,9 @@ import {
   type RecontactCallSummary,
 } from "../qc-recontact";
 import { mergeCanvassPriorsIntoPairs } from "../qc-recontact/canvass";
+import { mergeTextPriorsIntoPairs } from "../qc-recontact/text";
 import { fetchTagCallSurveyRowsForFinalFill } from "./phonebanking";
+import { fetchTagTextContacts, fetchTextConversation } from "./text-recontact";
 import { toStr, toDateString } from "./bq-row-parsers";
 import type { CallSurveyRowForFill, CampaignTag, SurveyScriptProfile } from "../types";
 
@@ -49,7 +53,7 @@ export function primaryTagIdFromQc(qcTagId: string): string {
   return isDerivedQcTagId(qcTagId) ? qcTagId.slice(3) : qcTagId;
 }
 
-type PdiSurveyRow = {
+export type PdiSurveyRow = {
   callId: string;
   campaignId: string;
   campaignName: string;
@@ -61,7 +65,7 @@ type PdiSurveyRow = {
   answerValue: string;
 };
 
-function groupRowsIntoCallSummaries(
+export function groupRowsIntoCallSummaries(
   rows: readonly PdiSurveyRow[],
   profile: SurveyScriptProfile,
   terms: readonly string[]
@@ -91,7 +95,27 @@ function groupRowsIntoCallSummaries(
   return out;
 }
 
-async function fetchTagPdiSurveyRows(
+function hydrateRecontactPairsFromSurveyFill(
+  pairs: readonly QcRecontactPair[],
+  fillRows: readonly CallSurveyRowForFill[],
+  profile: SurveyScriptProfile,
+  terms: readonly string[]
+): QcRecontactPair[] {
+  if (!fillRows.length) return [...pairs];
+  const byCall = new Map<string, CallSurveyRowForFill[]>();
+  for (const row of fillRows) {
+    const list = byCall.get(row.callId) ?? [];
+    list.push(row);
+    byCall.set(row.callId, list);
+  }
+  return pairs.map((pair) => {
+    const rows = byCall.get(pair.qc.callId) ?? [];
+    const qc = fillMissingCanvassLabel(pair.qc, rows, profile, terms);
+    return qc === pair.qc ? pair : { ...pair, qc };
+  });
+}
+
+export async function fetchTagPdiSurveyRows(
   tag: CampaignTag,
   options: { requirePdi: boolean }
 ): Promise<PdiSurveyRow[]> {
@@ -151,18 +175,23 @@ export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promis
   if (!primaryTag) return [];
 
   const profile = resolveSurveyScriptProfile(qcTag);
-  const [qcRows, primaryRows] = await Promise.all([
+  const [qcRows, primaryRows, textContacts] = await Promise.all([
     fetchTagPdiSurveyRows(qcTag, { requirePdi: false }),
     fetchTagPdiSurveyRows(primaryTag, { requirePdi: true }),
+    fetchTagTextContacts(primaryTag, profile),
   ]);
 
   const terms = candidateTermsForTag(primaryTag);
+  const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, terms).filter((qc) =>
+    canvassResultIsTalkingToCorrectPerson(qc.canvassLabel)
+  );
   const phonePairs = resolvePhonebankPriors(
-    groupRowsIntoCallSummaries(qcRows, profile, terms),
+    qcCalls,
     groupRowsIntoCallSummaries(primaryRows, profile, terms),
     profile
   );
-  return mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, loadKnockIndexRows(), profile);
+  const withCanvass = mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, loadKnockIndexRows(), profile);
+  return mergeTextPriorsIntoPairs(withCanvass, primaryTag, textContacts, profile);
 }
 
 export async function rebuildQcRecontactSnapshot(qcTagId: string): Promise<QcRecontactPair[]> {
@@ -181,8 +210,13 @@ export type QcRecontactPagePayload = {
  * QC tag page only. Returns null for regular tags so that page never loads this data.
  */
 export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcRecontactPagePayload | null> {
-  if (!isDerivedQcTagId(tagId) || !getTagById(tagId)) return null;
+  const qcTag = getTagById(tagId);
+  if (!isDerivedQcTagId(tagId) || !qcTag) return null;
   requireDashboardDataAccess();
+
+  const primaryTag = getTagById(primaryTagIdFromQc(tagId)) ?? qcTag;
+  const profile = resolveSurveyScriptProfile(qcTag);
+  const terms = candidateTermsForTag(primaryTag);
 
   if (snapshotsDisabled()) {
     const pairs = await buildQcRecontactPairsFromBigQuery(tagId);
@@ -191,7 +225,11 @@ export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcReco
 
   const snap = loadRecontactPairsSnapshot(tagId);
   if (!snap) return { pairs: [], hasSnapshot: false };
-  return { pairs: snap.pairs, hasSnapshot: true };
+  const fillRows = loadCallSurveyFillSnapshot(tagId)?.rows ?? [];
+  return {
+    pairs: hydrateRecontactPairsFromSurveyFill(snap.pairs, fillRows, profile, terms),
+    hasSnapshot: true,
+  };
 }
 
 function answersForCall(rows: readonly CallSurveyRowForFill[], callId: string): QcRecontactSurveyAnswer[] {
@@ -222,8 +260,12 @@ export async function loadQcRecontactDetail(
 
   const primaryId = primaryTagIdFromQc(qcTagId);
   const priorCallId = pair.priors.find((p) => p.channel === "phonebank")?.callId ?? "";
+  const textContactId =
+    pair.priors.find((p) => p.channel === "text")?.campaignContactId ??
+    pair.priors.find((p) => p.channel === "text")?.callId ??
+    "";
 
-  const [qcFill, primaryFill] = await Promise.all([
+  const [qcFill, primaryFill, textThread] = await Promise.all([
     snapshotsDisabled()
       ? fetchTagCallSurveyRowsForFinalFill(qcTagId)
       : Promise.resolve(loadCallSurveyFillSnapshot(qcTagId)?.rows ?? []),
@@ -232,11 +274,13 @@ export async function loadQcRecontactDetail(
         ? fetchTagCallSurveyRowsForFinalFill(primaryId)
         : Promise.resolve(loadCallSurveyFillSnapshot(primaryId)?.rows ?? [])
       : Promise.resolve([] as CallSurveyRowForFill[]),
+    textContactId ? fetchTextConversation(textContactId) : Promise.resolve([]),
   ]);
 
   return {
     pair,
     qcAnswers: answersForCall(qcFill, pair.qc.callId),
     priorAnswers: priorCallId ? answersForCall(primaryFill, priorCallId) : [],
+    textThread,
   };
 }

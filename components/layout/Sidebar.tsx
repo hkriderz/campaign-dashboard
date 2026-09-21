@@ -43,7 +43,7 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 className={navLinkClass(pathname === "/canvassing/overview" || pathname.startsWith("/canvassing/overview/"))}
               >
                 <span className="w-1.5 h-1.5 rounded-none bg-sky-600 dark:bg-sky-400 flex-shrink-0" />
-                Overview
+                Unique IDs
               </Link>
               <Link
                 href="/canvassing"

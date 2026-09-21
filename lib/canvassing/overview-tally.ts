@@ -1,11 +1,19 @@
 /**
  * Pure Canvassing Overview tallies from the saved knock index.
  * One support outcome per canvasser per voter per day; header knocks are unique PRIMARYID×day.
+ * Outcomes come from Final Result or ID questions only — donate / pledge / volunteer do not steal the tally.
  */
 import { DateTime } from "luxon";
+import { isFinalResultQuestionName } from "../daily-aggregate-survey-rollup";
+import { normalizeRecontactPersonId } from "../qc-recontact/ids";
+import { isExcludedSupportSourceQuestion } from "../strong-support-from-survey";
+import {
+  classifySurveyAnswerDisplayLabel,
+  finalResultFamilyForDisplayLabel,
+} from "../survey-answer-consolidation";
+import type { SurveyScriptProfile } from "../types";
 import { answerMatches, canonical } from "./doorknocks-results/helpers";
 import { LA_TIME_ZONE } from "./knock-details-parser";
-import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 
 export type KnockSupportOutcome =
   | "strong_support"
@@ -71,23 +79,60 @@ export function isNonContactQuestion(question: string): boolean {
   return canonical(question).includes("non contact");
 }
 
-/** Prop 40 / pledge / other non-ID questions stay in the index but do not steal the support tally. */
+/** Prop 40 / pledge / donate / volunteer stay in the index but do not steal the ID tally. */
 export function isPledgeOrSecondaryQuestion(question: string): boolean {
   const q = canonical(question);
   return (
     q.includes("pledge") ||
     q.includes("prop 40") ||
     q.includes("billionaire tax") ||
-    q.includes("sign to")
+    q.includes("sign to") ||
+    q.includes("donate") ||
+    q.includes("donac") ||
+    q.includes("volunteer") ||
+    q.includes("vote plan") ||
+    q.includes("commitment")
   );
 }
 
-export function classifyKnockSupportResponse(response: string): KnockSupportOutcome | null {
-  if (answerMatches(response, STRONG_SUPPORT_LABELS)) return "strong_support";
-  if (answerMatches(response, STRONG_OPPOSE_LABELS)) return "strong_oppose";
-  if (answerMatches(response, SUPPORT_LABELS)) return "support";
-  if (answerMatches(response, UNDECIDED_LABELS)) return "undecided";
-  if (answerMatches(response, OPPOSE_LABELS)) return "oppose";
+/**
+ * Final Result, or an ID / horse-race question. Donate, pledge, canvass disposition,
+ * and other script chrome are not support checkers.
+ */
+export function isOverviewSupportQuestion(
+  question: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  if (isNonContactQuestion(question) || isPledgeOrSecondaryQuestion(question)) return false;
+  if (isFinalResultQuestionName(question)) return true;
+  if (isExcludedSupportSourceQuestion(question, profile)) return false;
+  return true;
+}
+
+function responseWithoutOptionPrefix(response: string): string {
+  const trimmed = response.trim();
+  const stripped = trimmed.replace(/^[0-9A-Za-z][.)\-:\s]+/, "").trim();
+  return stripped || trimmed;
+}
+
+export function classifyKnockSupportResponse(
+  response: string,
+  profile: SurveyScriptProfile = "faizahTraci"
+): KnockSupportOutcome | null {
+  const raw = response.trim();
+  if (!raw) return null;
+  const candidates = [raw, responseWithoutOptionPrefix(raw)];
+  for (const text of candidates) {
+    if (answerMatches(text, STRONG_SUPPORT_LABELS)) return "strong_support";
+    if (answerMatches(text, STRONG_OPPOSE_LABELS)) return "strong_oppose";
+    if (answerMatches(text, SUPPORT_LABELS)) return "support";
+    if (answerMatches(text, UNDECIDED_LABELS)) return "undecided";
+    if (answerMatches(text, OPPOSE_LABELS)) return "oppose";
+    const family = finalResultFamilyForDisplayLabel(classifySurveyAnswerDisplayLabel(text, profile));
+    if (family === "strongSupport") return "strong_support";
+    if (family === "undecided") return "undecided";
+    if (family === "strongOppose") return "strong_oppose";
+  }
   return null;
 }
 
@@ -124,7 +169,10 @@ function classifyRow(row: KnockIndexTallyRow): ClassifiedRow | null {
   const personId = normalizeRecontactPersonId(row.primaryId);
   if (!day || !personId) return null;
   const isContact = !isNonContactQuestion(row.question);
-  const outcome = isContact ? classifyKnockSupportResponse(row.response) : null;
+  const outcome =
+    isContact && isOverviewSupportQuestion(row.question)
+      ? classifyKnockSupportResponse(row.response)
+      : null;
   return { ...row, day, personId, outcome, isContact };
 }
 
@@ -133,17 +181,17 @@ function compareOccurredAt(a: string, b: string): number {
 }
 
 /**
- * Last classified ID/support question that day. Pledge rows only win when they are
- * the only classified answers.
+ * Latest Final Result that day, else the latest ID / horse-race answer.
+ * Donate, pledge, and volunteer answers never win.
  */
 export function pickSupportOutcome(rows: readonly ClassifiedRow[]): KnockSupportOutcome | null {
   const classified = [...rows]
-    .filter((row) => row.outcome && row.isContact)
+    .filter((row) => row.outcome && isOverviewSupportQuestion(row.question))
     .sort((a, b) => compareOccurredAt(a.occurredAt, b.occurredAt));
   if (!classified.length) return null;
 
-  const pool = classified.filter((row) => !isPledgeOrSecondaryQuestion(row.question));
-  const chosen = (pool.length ? pool : classified).at(-1);
+  const finalResults = classified.filter((row) => isFinalResultQuestionName(row.question));
+  const chosen = (finalResults.length ? finalResults : classified).at(-1);
   return chosen?.outcome ?? null;
 }
 
@@ -160,8 +208,7 @@ function emptyStats(): CanvassingOverviewStats {
 }
 
 function applyOutcome(stats: { strongSupport: number; support: number; undecided: number; oppose: number }, outcome: KnockSupportOutcome): void {
-  if (outcome === "strong_support") stats.strongSupport += 1;
-  else if (outcome === "support") stats.support += 1;
+  if (outcome === "strong_support" || outcome === "support") stats.strongSupport += 1;
   else if (outcome === "undecided") stats.undecided += 1;
   else stats.oppose += 1;
 }

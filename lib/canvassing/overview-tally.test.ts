@@ -4,6 +4,7 @@ import {
   classifyKnockSupportResponse,
   filterKnockIndexRows,
   isNonContactQuestion,
+  isOverviewSupportQuestion,
   isPledgeOrSecondaryQuestion,
   pickSupportOutcome,
   tallyCanvassingOverview,
@@ -28,9 +29,15 @@ test("classifies bilingual support labels and ignores non-contact questions", ()
   assert.equal(classifyKnockSupportResponse("UNDECIDED/INDECISO"), "undecided");
   assert.equal(classifyKnockSupportResponse("Strong Oppose"), "strong_oppose");
   assert.equal(classifyKnockSupportResponse("Oppose"), "oppose");
+  assert.equal(classifyKnockSupportResponse("Support Nithya"), "strong_support");
+  assert.equal(classifyKnockSupportResponse("A. Strong Support"), "strong_support");
+  assert.equal(classifyKnockSupportResponse("Support Faizah"), "strong_support");
   assert.equal(classifyKnockSupportResponse("Not Home, Left Flyer"), null);
   assert.equal(isNonContactQuestion("Non-Contact Mobile"), true);
   assert.equal(isPledgeOrSecondaryQuestion("Will you sign to pledge to vote yes on the billionaire tax Prop 40?"), true);
+  assert.equal(isPledgeOrSecondaryQuestion("Would you like to donate to Faizah?"), true);
+  assert.equal(isOverviewSupportQuestion("Can we count on you to support Nithya Raman for mayor?"), true);
+  assert.equal(isOverviewSupportQuestion("Would you like to donate to Faizah?"), false);
 });
 
 test("unique PRIMARYID x day knocks and one support outcome per canvasser per day", () => {
@@ -72,7 +79,7 @@ test("unique PRIMARYID x day knocks and one support outcome per canvasser per da
   assert.equal(sam?.surveyed, 1);
 });
 
-test("pledge answers do not steal the ID/support tally unless they are the only classified row", () => {
+test("pledge answers do not steal the ID/support tally", () => {
   const withId = [
     {
       ...row({ primaryId: "CA9", occurredAt: "2026-09-05T14:00:00.000-07:00", response: "Strong Support" }),
@@ -110,7 +117,57 @@ test("pledge answers do not steal the ID/support tally unless they are the only 
       isContact: true,
     },
   ];
-  assert.equal(pickSupportOutcome(pledgeOnly), "undecided");
+  assert.equal(pickSupportOutcome(pledgeOnly), null);
+});
+
+test("donate and volunteer answers do not overwrite an ID result", () => {
+  const tally = tallyCanvassingOverview([
+    row({
+      primaryId: "CA9",
+      occurredAt: "2026-09-05T14:00:00.000-07:00",
+      response: "Strong Support",
+    }),
+    row({
+      primaryId: "CA9",
+      occurredAt: "2026-09-05T14:05:00.000-07:00",
+      question: "Would you like to donate to Nithya?",
+      response: "Undecided",
+    }),
+    row({
+      primaryId: "CA7",
+      occurredAt: "2026-09-05T14:00:00.000-07:00",
+      question: "Can we count on you to support Faizah Malik?",
+      response: "Support Faizah",
+    }),
+    row({
+      primaryId: "CA7",
+      occurredAt: "2026-09-05T14:06:00.000-07:00",
+      question: "Would you volunteer this weekend?",
+      response: "Undecided",
+    }),
+  ]);
+  assert.equal(tally.stats.surveyed, 2);
+  assert.equal(tally.stats.strongSupport, 2);
+  assert.equal(tally.stats.undecided, 0);
+  assert.equal(tally.stats.strongSupport + tally.stats.undecided + tally.stats.oppose, tally.stats.surveyed);
+});
+
+test("Final Result wins over an earlier ID answer", () => {
+  const tally = tallyCanvassingOverview([
+    row({
+      primaryId: "CA3",
+      occurredAt: "2026-09-05T14:00:00.000-07:00",
+      response: "Strong Support",
+    }),
+    row({
+      primaryId: "CA3",
+      occurredAt: "2026-09-05T14:08:00.000-07:00",
+      question: "Final Result",
+      response: "Undecided",
+    }),
+  ]);
+  assert.equal(tally.stats.strongSupport, 0);
+  assert.equal(tally.stats.undecided, 1);
 });
 
 test("date filter uses the LA calendar day", () => {

@@ -8,7 +8,11 @@ import {
   resolveSurveyScriptProfile,
   tagUsesVerbatimFinalResultAggregate,
 } from "@/lib/campaign-tags";
-import { filterPairsByQcDateRange, summarizeRecontactPairs } from "@/lib/qc-recontact";
+import {
+  filterPairsByQcDateRange,
+  pairHasQcContact,
+  summarizeRecontactPairs,
+} from "@/lib/qc-recontact";
 import { loadQcRecontactPairsForPage } from "@/lib/queries/qc-recontact";
 import { getDashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
 import {
@@ -733,7 +737,9 @@ export default async function TagPage({ params, searchParams }: Props) {
   const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
   const recontactPayload = isQcTag ? await loadQcRecontactPairsForPage(tagId) : null;
   const recontactPairs = recontactPayload
-    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate)
+    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate).filter(
+        pairHasQcContact
+      )
     : [];
   const recontactStats = summarizeRecontactPairs(recontactPairs);
   const recontactHref = (() => {

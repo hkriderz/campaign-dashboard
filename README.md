@@ -35,7 +35,7 @@ A unified Next.js dashboard for phone banking analytics, texting support tags, c
 
 Text data is read from **`l11_stw_txt`** (override with `BQ_TEXT_DATASET`). It is never mixed into phonebank snapshots or `phonebanking-csv-*.json`.
 
-**Canvassing** is still a placeholder. **PDI Tools** are integrated under `/pdi` (overview, mapper, syncer).
+**Canvassing** includes Unique ID Overview (phone + text + knocks), Knock Analysis, Doorknocks and Results, and Non-Contact Patterns. **PDI Tools** are integrated under `/pdi` (overview, mapper, syncer).
 
 ### District Classifier
 
@@ -79,7 +79,7 @@ Runtime requirements:
 
 **Syncer (Dialer):** TypeScript engine by default. Optional Python escape hatch: `PDI_STW_TO_PDI_SCRIPT`, `PDI_STW_WORKING_DIR`, `PYTHON_EXECUTABLE`, `PDI_SYNC_ENGINE=python`. Place the latest `stw_pdi_mapping_*.json` in `pdi-mappings/` before a real sync.
 
-**Text Syncer:** Mapper Text mode lists each Nithya text campaign in the sidebar, using the same Dec 1, 2025 window as `/texting/nithya`. Campaigns with no Support/Moved tags stay visible as **No tags yet** and cannot be opened until Refresh finds mappable tags. **All lists** maps raw STW tag names (`NithyaMayorYES`, …) on the shared survey `Nithya (STW Text)`. **This list only** stores the same keys on that campaign’s name. **Save mapping** on a question stores a template (display campaign name + PDI flags). Opening another list auto-applies that template only when the question name matches, the question is still unmapped, and the campaign titles are similar (`Nithya PAC` ↔ `Nithya HWLRA`; not `School Board GOTV`). **Delete saved mapping** removes the template only. Sync looks up the campaign first, then falls back to `Nithya (STW Text)`. `/pdi/text-syncer` reads `l11_stw_txt` (`campaign_contact_tags` + `campaign_contacts.data` PDI ids: `v1_pdiid` / `pdi_id` / `PDI ID`), skips empty PDI ids and non-Support/Moved tags, and posts the same `/flags` payload as Dialer except `acquisitionTypeId` is PDI **Text Bank** (Dialer uses **ScaletoWin Phone Bank**). Incremental cursor is `sync_state.state_key = 'text'`. Advisory lock is `lock_key = 'text'`. People-level dedupe is shared (`pdi_id|flag_code|flag_date`). Python parity is Dialer-only.
+**Text Syncer:** Mapper Text mode lists each Nithya text campaign in the sidebar, using the same Dec 1, 2025 window as `/texting/nithya`. Campaigns with no Support/Moved tags stay visible as **No tags yet** and cannot be opened until Refresh finds mappable tags. Tags are classified to **support statuses** (`Strong Support`, `Undecided`, `Neither`, `Strong Oppose`) and **Moved** (`Recently moved`) — the same labels phonebank maps onto a PDI Support ID. **All lists** writes those statuses on the shared survey `Nithya (STW Text)`. **This list only** stores the same keys on that campaign’s name. Auto-match maps `Strong Support` → `SS`, `Undecided` → `U`, `Neither` → `U`, `Strong Oppose` → `SO`, and `Recently moved` → `Moved`. **Save mapping** on a question stores a template (display campaign name + PDI flags). Opening another list auto-applies that template only when the question name matches, the question is still unmapped, and the campaign titles are similar (`Nithya PAC` ↔ `Nithya HWLRA`; not `School Board GOTV`). **Delete saved mapping** removes the template only. `/pdi/text-syncer` reads `l11_stw_txt` (`campaign_contact_tags` + `campaign_contacts.data` PDI ids: `v1_pdiid` / `pdi_id` / `PDI ID`), skips empty PDI ids and non-Support/Moved tags, and posts the same `/flags` payload as Dialer except `acquisitionTypeId` is PDI **Text Bank** (Dialer uses **ScaletoWin Phone Bank**). After classification it keeps **one Support and one Moved status per person per campaign** (latest tag wins) — the phonebank analog of one Final Result per call — so the same PDI ID cannot receive both `SS` and `U` from one list. Flag lookup is campaign first, then `Nithya (STW Text)`; for each row it tries the classified status, then the raw STW tag (`NithyaMayorYES`, …), then any mapped tag with the same status (`NithyaMayor_YES` reuses a `NithyaMayorYES` → `SS` mapping). Incremental cursor is `sync_state.state_key = 'text'`. Advisory lock is `lock_key = 'text'`. People-level dedupe is shared (`pdi_id|flag_code|flag_date`). Python parity is Dialer-only.
 
 ---
 
@@ -165,11 +165,29 @@ The `searchTerms` are matched case-insensitively using `LIKE '%term%'` against t
 
 ---
 
-## Canvassing Overview and knock index
+## Unique ID Overview and knock index
 
-`/canvassing/overview` tallies **all saved Canvasser Details knocks** (not gap-report JSON). Sidebar **Overview** is the first Canvassing tools link. Knock Analysis, Doorknocks and Results, and Non-Contact Patterns stay as they are.
+`/canvassing/overview` counts **unique PDI / PRIMARY IDs** labeled Strong support, Undecided, or Strong oppose for a candidate. Sidebar **Unique IDs** is the first Canvassing tools link. Knock Analysis, Doorknocks and Results, and Non-Contact Patterns stay as they are.
 
-**Knock index:** `data/canvassing-reports/knock-index.json` stores compact rows (`PRIMARYID`, canvasser, assignment, time, question, response). Dedup key is `primaryId + occurredAt + question + response`. Overview imports and Knock Analysis saves both **append** to this file. Gap reports still drop raw knocks and are not the source of truth.
+**Sources (combined per candidate):**
+
+| Channel | Identity | Outcome | Storage |
+|---|---|---|---|
+| Phone | `callees.data` PDI (`v1_pdiID`, then `pdi_id`) | Final Result, else ID / polling (`extractCallSurveyLabels`) | `data/bq-snapshots/{tag}/unique-id-phone.json` |
+| Text | `campaign_contacts.data` PDI | Latest support tag (`Neither` → Undecided; Moved ignored) | `data/bq-snapshots/{tag}/unique-id-text.json` |
+| Canvass | Knock `PRIMARYID` | Final Result or ID question (`pickSupportOutcome`) | `data/canvassing-reports/knock-index.json` |
+
+IDs are normalized the same way as QC recontact (`trim`, strip spaces, uppercase). Rows without an ID are dropped. QC-named phone/text lists are excluded (`campaignNameLooksLikeQc`). Soft support folds into Strong support; soft oppose folds into Strong oppose. Labels stay generic — never a candidate name.
+
+**Latest label wins** across channels (timestamp, then canvass > phone > text). Combined counts put each ID in one bucket. **Channel breakout** uses the latest label *on that channel*, so the same person can be Strong support on the phone and Undecided on a text. **Change** is first vs last family **inside the selected date range**.
+
+**All candidates** is a comparison table only — IDs are not merged across races. Select a candidate for the paginated ID list (search, label/channel filters) and CSV export.
+
+**Refresh:** **Refresh phone & text** rebuilds that candidate’s unique-ID snapshots from BigQuery (`POST /api/canvassing/overview/refresh`). First GET for a selected candidate builds a missing snapshot once. All-candidates does not auto-build every tag. The phone dashboard tag refresh (`rebuildTagBqSnapshotsFromBigQuery`) also rebuilds unique-ID phone/text snapshots for non-QC candidates, so scheduled / local snapshot refresh keeps Unique IDs current.
+
+**Changed IDs:** on a selected candidate, click a change-table count to list the PDIs, then click a PDI for the labeled contact timeline in the date range. Changed IDs in the main table are also clickable.
+
+**Knock index:** `data/canvassing-reports/knock-index.json` stores compact rows (`PRIMARYID`, canvasser, assignment, time, question, response). Dedup key is `primaryId + occurredAt + question + response`. **Run Report** on Knock Analysis (Lunch or Final) appends those knock rows to Unique IDs immediately. Save still writes the gap report and also appends; re-runs of the same file add 0 rows. Unique ID Overview’s own upload still works. Gap reports still drop raw knocks and are not the source of truth.
 
 **Import the campaign files** already in `canvassref/`:
 
@@ -182,13 +200,11 @@ Defaults:
 - `canvassref/Canvasser Details - (Beginning to 9_6_2026).csv`
 - `canvassref/Canvasser Details - (9_7 to_9_12_2026).csv`
 
-Or upload the same CSV/XLSX on Overview. Re-uploads skip duplicate rows.
+Or upload the same CSV/XLSX on Unique ID Overview. Re-uploads skip duplicate rows.
 
-**Filters:** knock date in `America/Los_Angeles` (clear = all days) and candidate chips from `getCanvassingTags()`, matching `ASSIGNMENTNAME` with `campaignNameMatchesTag`.
+**Filters:** contact date in `America/Los_Angeles` (clear = all days) and candidate chips from `getCoreCampaignTags()`. Knocks match assignment / filename with `campaignNameMatchesTag`. Donate, volunteer, vote plan, and Prop 40 pledge rows stay in the knock index but never overwrite the ID result.
 
-**Tally:** knocks are unique PRIMARYID×day. Contacts exclude `Non-Contact Mobile`. Support / Undecided / Oppose use bilingual labels (`strong support` / `fuerte apoyo`, etc.). One outcome per canvasser per voter per day; the last ID/support question wins. Prop 40 pledge answers stay in the index for QC “how” but do not steal the support tally unless they are the only classified row. The table toolbar repeats **Doors knocked / Contacts / Strong support / Undecided / Strong oppose** for the current date + candidate chip — never a candidate name as a default outcome label.
-
-**QC matching:** refreshing a QC tag (`qc-*`, including local one-click) rebuilds Recontacts against this index. Canvass priors use `PRIMARYID` = callee PDI.
+**QC matching:** refreshing a QC tag (`qc-*`, including local one-click) rebuilds Recontacts against this index. Canvass priors use `PRIMARYID` = callee PDI. Text priors are fetched live from `l11_stw_txt` on the same refresh (not from `/texting` tag rollups).
 
 ---
 
@@ -196,9 +212,9 @@ Or upload the same CSV/XLSX on Overview. Re-uploads skip duplicate rows.
 
 On sidebar **QC Calls** tags (`/phonebanking/qc-<candidate>` only), Overview adds a **Recontacts** section above All Phone Banks, plus a **Matched** header card. Regular `/phonebanking/<candidate>` pages are unchanged.
 
-Each QC call is paired to prior contacts for the same callee PDI (from `callees.data`, preferring `v1_pdiID`, then `pdi_id` / `PDI ID`). Phone-bank priors come from regular (non-QC) banks. Canvass priors come from the saved knock index (`PRIMARYID` = PDI, assignment name via `campaignNameMatchesTag`). Channels stay separate; **change** uses the latest prior of either channel. A canvass-only match is still `matched`. Click a row for side-by-side answers. Refresh the QC tag to rebuild `data/bq-snapshots/qc-<candidate>/recontact-pairs.json` against the current knock index.
+Each QC call is paired to prior contacts for the same callee PDI (from `callees.data`, preferring `v1_pdiID`, then `pdi_id` / `PDI ID`). Phone-bank priors come from regular (non-QC) banks. Canvass priors come from the saved knock index (`PRIMARYID` = PDI, assignment name via `campaignNameMatchesTag`). Text priors come from STW Text (`l11_stw_txt`: PDI on `campaign_contacts.data`, campaign name, texter from outbound `messages.created_by_user_id` → `users.full_name`, support tags). Channels stay separate; **change** uses the latest prior that has a classifiable result (an untagged newer text does not wipe a phone or canvass outcome). A canvass-only or text-only match is still `matched`. Click a row for side-by-side phone answers and the text conversation (modal only). Refresh the QC tag to rebuild `data/bq-snapshots/qc-<candidate>/recontact-pairs.json` against the current knock index and live text contacts.
 
-Filter chips show row counts: All | Phone bank | Canvass | Changed | Held | Unmatched | No PDI. **Hide no QC contact** drops QC calls that have no Final Result. Result cells (table, modal, CSV) use generic **Strong support / Undecided / Strong oppose** — never a candidate name. **Copy CSV** / **Download CSV** export the visible filter: one row per QC call × prior, with PDI, change, both sides’ lists/results, and `Used for change` for the latest prior.
+The table automatically includes only QC calls whose canvass result is **Talking to Correct Person** (call back later, declined, answering machine, wrong number, and other dispositions are excluded). Older snapshots that left this field empty are hydrated from `call-survey-fill.json` on load; a QC tag refresh persists the label and drops non-contacts from `recontact-pairs.json`. Filters are independent multi-select groups: **Channel** (Phone / Canvass / Text), **Outcome** (Held / Strengthened / Softened / Flipped / No Reply), and **Match** (Unmatched / No PDI). Empty group = no constraint; chips in a group are OR, groups combine with AND. **No Reply** is a text prior with no inbound voter message — refresh the QC tag so `hasInboundReply` is stored on the pair (older snapshots omit the flag and do not match). Result cells (table, modal, CSV) use generic **Strong support / Undecided / Strong oppose** — never a candidate name. **Copy CSV** / **Download CSV** export the visible filter: one row per QC call × prior, with PDI, change, both sides’ lists/results, and `Used for change` for the latest prior that has a result. Conversation bodies stay in the modal, not the CSV.
 
 ---
 
@@ -223,7 +239,7 @@ campaign-dashboard/
 │   │       └── [campaignId]/
 │   │           └── page.tsx             # Phone bank detail (chart + table)
 │   ├── canvassing/
-│   │   ├── overview/                    # Saved-knock Overview (date + candidate filters)
+│   │   ├── overview/                    # Unique ID Overview (phone + text + knocks)
 │   │   ├── doorknocks-results/          # Doors / contact / support workbook
 │   │   └── non-contact-patterns/        # Rapid non-contact flags
 │   ├── pdi/                             # Placeholder (Phase 3)
@@ -257,11 +273,13 @@ campaign-dashboard/
 └── lib/
     ├── bigquery.ts                      # Singleton BQ client
     ├── campaign-tags.ts                 # Tag config + SQL helpers
+    ├── unique-ids/                      # Unique ID Overview collect / tally
     ├── qc-recontact/                    # QC vs phone-bank / canvass PDI pair builder
     ├── types.ts                         # All TypeScript types
     └── queries/
         ├── phonebanking.ts             # Dialer BQ queries
         ├── qc-recontact.ts             # QC recontact BQ + snapshot load
+        ├── unique-id-contacts.ts       # Phone/text unique-ID snapshots
         └── texting.ts                  # STW Text BQ queries
 ```
 
@@ -282,9 +300,11 @@ Texting data comes from the STW Text dataset (`BQ_TEXT_DATASET`, default `l11_st
 | Table | Used for |
 |---|---|
 | `l11_stw_txt.campaigns` | Text campaign name, send status, contact count |
-| `l11_stw_txt.campaign_contacts` | Contact-count fallback |
-| `l11_stw_txt.campaign_contact_tags` + `tags` | Support / moved tag rollups; PDI Text Syncer flag source |
-| `l11_stw_txt.campaign_contacts.data` | PDI person ids for Text Syncer (`v1_pdiid` / `pdi_id` / `PDI ID`) |
+| `l11_stw_txt.campaign_contacts` | Contact-count fallback; Recontacts text priors |
+| `l11_stw_txt.campaign_contact_tags` + `tags` | Support / moved tag rollups; PDI Text Syncer flag source; Recontacts text outcomes |
+| `l11_stw_txt.campaign_contacts.data` | PDI person ids for Text Syncer and Recontacts (`v1_pdiid` / `pdi_id` / `PDI ID`) |
+| `l11_stw_txt.messages` | Recontacts conversation thread (modal), “was texted” / texter identity, and inbound count for No Reply |
+| `l11_stw_txt.users` | Texter `full_name` on outbound messages |
 
 The queries are TypeScript ports of:
 - `pdiv3/campaign_hours_dials.py` → campaign-level stats
@@ -300,7 +320,9 @@ Heavy tag queries (`fetchTagDailyCallerStats`, `fetchTagPhonebankerQuestionStats
 - **Stable:** rows with `call_date` **strictly before yesterday** in LA are stored under `data/bq-snapshots/<tag>/` after each successful load.
 - **Disable:** set `BQ_SNAPSHOTS_DISABLED=1` to always run full BigQuery (debug).
 
-QC tags (`qc-<candidate>`) also write `recontact-pairs.json` on refresh. That file is the Overview **Recontacts** table: each QC call is paired to the latest prior regular phone bank and/or canvass knock for the same callee PDI (`PRIMARYID` on the knock index). Regular candidate pages do not load or show this file.
+QC tags (`qc-<candidate>`) also write `recontact-pairs.json` on refresh. That file is the Overview **Recontacts** table: each QC call is paired to the latest prior regular phone bank, canvass knock, and/or STW Text contact for the same callee PDI. Compact text metadata is stored on the pair (`campaignContactId`); the conversation is loaded live in the modal. Regular candidate pages do not load or show this file.
+
+Unique ID Overview stores compact SS / U / SO events at `data/bq-snapshots/<tag>/unique-id-phone.json` and `unique-id-text.json`. Rebuild them from `/canvassing/overview` (**Refresh phone & text**) or from a candidate / all-tag phone dashboard snapshot refresh.
 
 **Manual historical rebuild** (e.g. after STW backfills older dates):
 
@@ -334,7 +356,7 @@ This is a staff door code, not per-user login. Do not commit the password.
 | Phase | Feature | Status |
 |---|---|---|
 | 1 | Phone banking dashboard | ✅ Done |
-| 2 | Canvassing Overview + knock index | ✅ Done |
+| 2 | Unique ID Overview + knock index | ✅ Done |
 | 2 | Canvassing — Knock Analysis / Doorknocks CSV upload | ✅ Done |
 | 3 | Google Drive folder auto-ingest | 🔜 Planned |
 | 4 | PDI Mapper (embedded in dashboard) | 🔜 Planned |

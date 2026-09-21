@@ -1,30 +1,28 @@
 /**
  * QC recontact pairs: a QC call matched to prior contacts for the same voter PDI.
- * Priors may be phone-bank and/or canvass; channels stay separate.
+ * Priors may be phone-bank, canvass, and/or text; channels stay separate.
  */
 
-export type RecontactChannel = "phonebank" | "canvass";
+export type RecontactChannel = "phonebank" | "canvass" | "text";
 
 export type QcRecontactMatchStatus = "matched" | "unmatched" | "no_pdi";
 
 /** Prior vs QC Final Result movement. `unknown` when a side has no classified result. */
 export type QcRecontactChangeKind = "held" | "strengthened" | "softened" | "flipped" | "unknown";
 
+export type RecontactChannelFilter = RecontactChannel;
+export type RecontactOutcomeFilter = "held" | "strengthened" | "softened" | "flipped" | "no_reply";
+export type RecontactMatchFilter = "unmatched" | "no_pdi";
+
 /**
- * Filter chips on Overview. Flip-strip cells use held / strengthened / softened / flipped.
- * `phonebank` / `canvass` keep rows that have that channel in `priors`.
+ * Independent multi-select groups. Empty group = no constraint.
+ * Within a group = OR; across groups = AND.
  */
-export type QcRecontactFilter =
-  | "all"
-  | "phonebank"
-  | "canvass"
-  | "changed"
-  | "held"
-  | "strengthened"
-  | "softened"
-  | "flipped"
-  | "unmatched"
-  | "no_pdi";
+export type QcRecontactSelection = {
+  channels: RecontactChannelFilter[];
+  outcomes: RecontactOutcomeFilter[];
+  matches: RecontactMatchFilter[];
+};
 
 export type RecontactCallSummary = {
   callId: string;
@@ -50,9 +48,13 @@ export type PriorContactSummary = {
   callId?: string;
   campaignId?: string;
   callAt?: string;
+  /** STW Text `campaign_contacts.id` — used to load the conversation in the modal. */
+  campaignContactId?: string;
   finalResultLabel?: string;
   pollingLabel?: string;
   canvassLabel?: string;
+  /** Text only. Missing on older snapshots — those rows do not match No Reply. */
+  hasInboundReply?: boolean;
 };
 
 export type QcRecontactPair = {
@@ -91,8 +93,31 @@ export type QcRecontactSurveyAnswer = {
   answerValue: string;
 };
 
+export type QcRecontactTextMessage = {
+  at: string;
+  direction: "outbound" | "inbound";
+  body: string;
+  actorName: string;
+};
+
+/** Compact STW Text contact used when pairing QC calls (no thread body). */
+export type QcTextContactSummary = {
+  campaignContactId: string;
+  campaignId: string;
+  campaignName: string;
+  pdiId: string;
+  texterName: string;
+  occurredOn: string;
+  occurredAt: string;
+  resultLabel: string;
+  hasMessages: boolean;
+  /** Voter sent at least one inbound message. */
+  hasInboundReply: boolean;
+};
+
 export type QcRecontactDetailPayload = {
   pair: QcRecontactPair;
   qcAnswers: QcRecontactSurveyAnswer[];
   priorAnswers: QcRecontactSurveyAnswer[];
+  textThread: QcRecontactTextMessage[];
 };

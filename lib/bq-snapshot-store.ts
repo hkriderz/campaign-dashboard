@@ -13,6 +13,7 @@ import type {
   PhonebankerQuestionResponseStat,
   TagDailyCallerStat,
 } from "./types";
+import type { UniqueIdContactEvent } from "./unique-ids/types";
 
 const DATA_DIR = path.join(process.cwd(), "data", "bq-snapshots");
 const SNAPSHOT_VERSION = 1;
@@ -62,6 +63,13 @@ export type RecontactPairsSnapshotFile = {
   tagId: string;
   savedAt: string;
   pairs: QcRecontactPair[];
+};
+
+export type UniqueIdEventsSnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  rows: UniqueIdContactEvent[];
 };
 
 function readJson<T>(fp: string): T | null {
@@ -217,6 +225,56 @@ export function saveRecontactPairsSnapshot(
   fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
 }
 
+export function loadUniqueIdPhoneSnapshot(tagId: string): UniqueIdEventsSnapshotFile | null {
+  const fp = path.join(DATA_DIR, safeTag(tagId), "unique-id-phone.json");
+  const data = readJson<UniqueIdEventsSnapshotFile>(fp);
+  if (!data || data.version !== SNAPSHOT_VERSION || data.tagId !== tagId) return null;
+  if (!Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function saveUniqueIdPhoneSnapshot(
+  tagId: string,
+  rows: UniqueIdContactEvent[],
+  options?: SnapshotSaveOptions
+): void {
+  const dir = ensureDir(tagId);
+  const fp = path.join(dir, "unique-id-phone.json");
+  if (!options?.touchEvenIfUnchanged && stableRowsUnchanged(fp, rows)) return;
+  const payload: UniqueIdEventsSnapshotFile = {
+    version: SNAPSHOT_VERSION,
+    tagId,
+    savedAt: new Date().toISOString(),
+    rows,
+  };
+  fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
+}
+
+export function loadUniqueIdTextSnapshot(tagId: string): UniqueIdEventsSnapshotFile | null {
+  const fp = path.join(DATA_DIR, safeTag(tagId), "unique-id-text.json");
+  const data = readJson<UniqueIdEventsSnapshotFile>(fp);
+  if (!data || data.version !== SNAPSHOT_VERSION || data.tagId !== tagId) return null;
+  if (!Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function saveUniqueIdTextSnapshot(
+  tagId: string,
+  rows: UniqueIdContactEvent[],
+  options?: SnapshotSaveOptions
+): void {
+  const dir = ensureDir(tagId);
+  const fp = path.join(dir, "unique-id-text.json");
+  if (!options?.touchEvenIfUnchanged && stableRowsUnchanged(fp, rows)) return;
+  const payload: UniqueIdEventsSnapshotFile = {
+    version: SNAPSHOT_VERSION,
+    tagId,
+    savedAt: new Date().toISOString(),
+    rows,
+  };
+  fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
+}
+
 /** Delete all snapshot JSON files for a tag (e.g. before full rebuild). */
 export function clearTagSnapshots(tagId: string): void {
   const dir = path.join(DATA_DIR, safeTag(tagId));
@@ -227,6 +285,8 @@ export function clearTagSnapshots(tagId: string): void {
     "call-survey-fill.json",
     "phone-banks.json",
     "recontact-pairs.json",
+    "unique-id-phone.json",
+    "unique-id-text.json",
   ]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) {

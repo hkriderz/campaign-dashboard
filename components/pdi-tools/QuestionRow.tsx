@@ -188,6 +188,8 @@ function AnswerRow({
   const { state } = useApp();
   const aKeyFull = mappingAnswerKey(state.channel, surveyName, questionName, answerValue, state.textMappingScope);
   const aMapping: AnswerMappingEntry | undefined = state.answerMappings[aKeyFull];
+  const textStatus =
+    state.channel === "text" ? classifyTextContactTag(answerValue, TEXT_CANDIDATE_TAG_ID).answer : "";
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2 sm:py-1.5 hover:bg-gray-50 dark:hover:bg-zinc-800/40 transition-colors">
@@ -195,11 +197,13 @@ function AnswerRow({
         <p className="text-[11px] text-gray-700 dark:text-zinc-200 truncate" title={answerValue}>
           {answerValue}
         </p>
-        <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">
-          {state.channel === "text"
-            ? classifyTextContactTag(answerValue, TEXT_CANDIDATE_TAG_ID).answer
-            : questionName}
-        </p>
+        {state.channel === "text" ? (
+          textStatus && textStatus !== answerValue ? (
+            <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">{textStatus}</p>
+          ) : null
+        ) : (
+          <p className="text-[10px] text-gray-400 dark:text-zinc-600 truncate">{questionName}</p>
+        )}
       </div>
 
       <span className="hidden sm:inline text-gray-300 dark:text-zinc-700 text-[11px] flex-shrink-0">—</span>

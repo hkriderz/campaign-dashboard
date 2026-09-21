@@ -1,13 +1,17 @@
 import type { SurveyScriptProfile } from "../types";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, normalizeRecontactPersonId } from "./ids";
+import { canvassResultIsTalkingToCorrectPerson } from "./labels";
 import type {
   PriorContactSummary,
   QcRecontactChangeKind,
-  QcRecontactFilter,
   QcRecontactPair,
+  QcRecontactSelection,
   QcRecontactStats,
   RecontactCallSummary,
+  RecontactChannelFilter,
+  RecontactMatchFilter,
+  RecontactOutcomeFilter,
 } from "./types";
 
 export function callSummaryToPhonebankPrior(call: RecontactCallSummary): PriorContactSummary {
@@ -114,36 +118,53 @@ export function resolvePhonebankPriors(
     });
 }
 
-/** True when the QC call has a comparable Final Result / ID support answer. */
+/** True when the QC call reached the voter (canvass result is talking to correct person). */
 export function pairHasQcContact(pair: QcRecontactPair): boolean {
-  return Boolean(pair.qc.finalResultLabel.trim());
+  return canvassResultIsTalkingToCorrectPerson(pair.qc.canvassLabel);
 }
 
-export function pairMatchesFilter(pair: QcRecontactPair, filter: QcRecontactFilter): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "phonebank":
-      return pair.priors.some((prior) => prior.channel === "phonebank");
-    case "canvass":
-      return pair.priors.some((prior) => prior.channel === "canvass");
-    case "changed":
-      return pair.changeKind === "strengthened" || pair.changeKind === "softened" || pair.changeKind === "flipped";
-    case "held":
-      return pair.changeKind === "held";
-    case "strengthened":
-      return pair.changeKind === "strengthened";
-    case "softened":
-      return pair.changeKind === "softened";
-    case "flipped":
-      return pair.changeKind === "flipped";
-    case "unmatched":
-      return pair.matchStatus === "unmatched";
-    case "no_pdi":
-      return pair.matchStatus === "no_pdi";
-    default:
-      return true;
+export function emptyRecontactSelection(): QcRecontactSelection {
+  return { channels: [], outcomes: [], matches: [] };
+}
+
+/** Text prior with a stored false inbound flag. Missing flag (old snapshots) is unknown. */
+export function pairHasNoReply(pair: QcRecontactPair): boolean {
+  return pair.priors.some((prior) => prior.channel === "text" && prior.hasInboundReply === false);
+}
+
+export function pairMatchesChannelChip(pair: QcRecontactPair, channel: RecontactChannelFilter): boolean {
+  return pair.priors.some((prior) => prior.channel === channel);
+}
+
+export function pairMatchesOutcomeChip(pair: QcRecontactPair, outcome: RecontactOutcomeFilter): boolean {
+  if (outcome === "no_reply") return pairHasNoReply(pair);
+  return pair.changeKind === outcome;
+}
+
+export function pairMatchesMatchChip(pair: QcRecontactPair, match: RecontactMatchFilter): boolean {
+  return pair.matchStatus === match;
+}
+
+/**
+ * Empty group = no constraint. Within a group = OR. Across groups = AND.
+ */
+export function pairMatchesSelections(pair: QcRecontactPair, selection: QcRecontactSelection): boolean {
+  if (
+    selection.channels.length > 0 &&
+    !selection.channels.some((channel) => pairMatchesChannelChip(pair, channel))
+  ) {
+    return false;
   }
+  if (
+    selection.outcomes.length > 0 &&
+    !selection.outcomes.some((outcome) => pairMatchesOutcomeChip(pair, outcome))
+  ) {
+    return false;
+  }
+  if (selection.matches.length > 0 && !selection.matches.some((match) => pairMatchesMatchChip(pair, match))) {
+    return false;
+  }
+  return true;
 }
 
 export function summarizeRecontactPairs(pairs: readonly QcRecontactPair[]): QcRecontactStats {
@@ -194,5 +215,31 @@ export function changeKindLabel(kind: QcRecontactChangeKind): string {
 }
 
 export function recontactChannelLabel(channel: PriorContactSummary["channel"]): string {
-  return channel === "canvass" ? "Canvass" : "Phone bank";
+  switch (channel) {
+    case "canvass":
+      return "Canvass";
+    case "text":
+      return "Text";
+    default:
+      return "Phone bank";
+  }
+}
+
+function priorSortStamp(prior: PriorContactSummary): string {
+  return (prior.callAt || prior.occurredOn || "").trim();
+}
+
+export function sortPriorsNewestFirst(priors: readonly PriorContactSummary[]): PriorContactSummary[] {
+  return [...priors].sort((a, b) => {
+    const byStamp = priorSortStamp(b).localeCompare(priorSortStamp(a));
+    if (byStamp !== 0) return byStamp;
+    return a.channel.localeCompare(b.channel);
+  });
+}
+
+/** Newest-first priors: first row with a non-empty result (untagged text does not drive change). */
+export function firstClassifiablePrior(
+  priors: readonly PriorContactSummary[]
+): PriorContactSummary | undefined {
+  return sortPriorsNewestFirst(priors).find((prior) => Boolean(prior.resultLabel.trim()));
 }

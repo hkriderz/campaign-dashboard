@@ -3,7 +3,8 @@ import * as path from "path";
 import { ACQUISITION_TYPE_ID } from "./constants";
 import { ensurePdiSyncExportsDir } from "../sync-working-dir";
 import { ledgerKey } from "./ledger";
-import { getFlagStrict, getQuestionId, type MappingMaps } from "./mapping";
+import { getQuestionId, type MappingMaps } from "./mapping";
+import { resolveSyncFlagId } from "./text-flag";
 import type { SyncLogger } from "./logger";
 import type { PdiFlagPayloadItem, SurveyResultRow } from "./types";
 import { extractFlagDate } from "./transform";
@@ -108,7 +109,7 @@ export function buildMappingReport(
       continue;
     }
 
-    const flagId = getFlagStrict(maps, survey, question, answer, fallbackSurvey);
+    const flagId = resolveSyncFlagId(maps, r, survey, question, answer, fallbackSurvey);
     if (!flagId) {
       reportRow.mapping_status = "UNMAPPED_ANSWER: Answer is not explicitly mapped";
       rowsSkipped += 1;

@@ -1601,5 +1601,15 @@ export async function rebuildTagBqSnapshotsFromBigQuery(tagId: string): Promise<
   if (isDerivedQcTagId(tagId)) {
     const { rebuildQcRecontactSnapshot } = await import("./qc-recontact");
     await rebuildQcRecontactSnapshot(tagId);
+  } else if (tag) {
+    const { rebuildPhoneUniqueIdSnapshot, rebuildTextUniqueIdSnapshot } = await import("./unique-id-contacts");
+    const [phoneIds, textIds] = await Promise.all([
+      rebuildPhoneUniqueIdSnapshot(tag),
+      rebuildTextUniqueIdSnapshot(tag),
+    ]);
+    const uniqueIdErrors = [phoneIds.error, textIds.error].filter((item): item is string => Boolean(item));
+    if (uniqueIdErrors.length) {
+      throw new Error(uniqueIdErrors.join(" "));
+    }
   }
 }

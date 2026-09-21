@@ -3,6 +3,7 @@ import { resolvePdiToolsCredentials } from "@/lib/pdi-tools/resolve-pdi-credenti
 import { applyPdiToolsEnv } from "./apply-env";
 import { ensurePdiSyncTables } from "./bq-sync-bootstrap";
 import { DEFAULT_MIN_RECORDS } from "./constants";
+import { collapseTextRowsToLatestStatus } from "./collapse-text";
 import { fillFinalResults, logFinalResultCoverage } from "./fill-final";
 import { insertFlagInstances } from "./flag-instances";
 import { appendLedgerEntries, loadLedger } from "./ledger";
@@ -102,13 +103,19 @@ async function loadAndPrepareRows(
     const query = buildTextTagQuery(startStr, endStr);
     log.step("bigquery", progressForPhase("bigquery"), "Executing BigQuery (STW Text tags)...");
     const rawRows = await runQuery<SurveyResultRow>(query);
-    const filledRows = rawRows
+    const classified = rawRows
       .map((row) => normalizeTextSyncRow(row))
       .filter((row): row is SurveyResultRow => row != null);
     log.step(
       "bigquery",
       progressForPhase("bigquery"),
-      `Retrieved ${rawRows.length} tagged contacts; ${filledRows.length} Nithya Support/Moved with PDI ids`
+      `Retrieved ${rawRows.length} tagged contacts; ${classified.length} Nithya Support/Moved with PDI ids`
+    );
+    const { rows: filledRows, collapsedCount } = collapseTextRowsToLatestStatus(classified);
+    log.step(
+      "fill",
+      progressForPhase("fill"),
+      `After latest-status collapse: ${filledRows.length} rows (dropped ${collapsedCount} earlier tags in the same campaign)`
     );
     return { filledRows, synthetic: [] };
   }

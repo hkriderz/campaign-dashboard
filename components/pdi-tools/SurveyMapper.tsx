@@ -19,7 +19,7 @@ export default function SurveyMapper() {
         </h2>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs leading-relaxed">
           {channel === "text"
-            ? "Each Nithya text list is shown separately. Use All lists to map once, or This list only to fill one campaign. Save mapping applies when you open the next similar list."
+            ? "Each Nithya text list is shown separately. Map Support statuses (Strong Support, Undecided, Neither, Strong Oppose) onto a PDI Support ID. Use All lists to map once, or This list only to fill one campaign. Save mapping applies when you open the next similar list."
             : "Each STW survey shows its questions. Map each STW question to a PDI question, then answer-level flags auto-populate. Save mapping applies when you open the next similar list."}
         </p>
         {channel === "text" ? (

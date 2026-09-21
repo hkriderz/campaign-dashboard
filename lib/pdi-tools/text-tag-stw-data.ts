@@ -3,12 +3,6 @@ import type { StwData } from "@/lib/pdi-tools/types";
 import type { SurveyResultRow } from "@/lib/pdi-tools/sync/types";
 import { TEXT_CANDIDATE_TAG_ID, TEXT_MAPPING_SURVEY_NAME } from "@/lib/pdi-tools/channel";
 
-function supportRank(rawTag: string): number {
-  const classified = classifyTextContactTag(rawTag, TEXT_CANDIDATE_TAG_ID);
-  const i = TEXT_SUPPORT_ANSWER_ORDER.indexOf(classified.answer);
-  return i === -1 ? TEXT_SUPPORT_ANSWER_ORDER.length : i;
-}
-
 function uniqueTrimmed(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -21,36 +15,41 @@ function uniqueTrimmed(values: string[]): string[] {
   return out;
 }
 
+function supportStatusRank(answer: string): number {
+  const i = TEXT_SUPPORT_ANSWER_ORDER.indexOf(answer);
+  return i === -1 ? TEXT_SUPPORT_ANSWER_ORDER.length : i;
+}
+
 export type TextTagCatalogRow = {
   campaignName: string;
   tagName: string;
 };
 
 function questionsFromTagNames(tagNames: string[]): Record<string, string[]> {
-  const support: string[] = [];
-  const moved: string[] = [];
+  const support = new Set<string>();
+  const moved = new Set<string>();
 
   for (const raw of uniqueTrimmed(tagNames)) {
     const classified = classifyTextContactTag(raw, TEXT_CANDIDATE_TAG_ID);
-    if (classified.kind === "support") support.push(raw);
-    else if (classified.kind === "moved") moved.push(raw);
+    if (classified.kind === "support") support.add(classified.answer);
+    else if (classified.kind === "moved") moved.add(classified.answer);
   }
 
-  support.sort((a, b) => {
-    const ra = supportRank(a);
-    const rb = supportRank(b);
+  const supportList = [...support].sort((a, b) => {
+    const ra = supportStatusRank(a);
+    const rb = supportStatusRank(b);
     if (ra !== rb) return ra - rb;
     return a.localeCompare(b);
   });
-  moved.sort((a, b) => a.localeCompare(b));
+  const movedList = [...moved].sort((a, b) => a.localeCompare(b));
 
   const questions: Record<string, string[]> = {};
-  if (support.length > 0) questions.Support = support;
-  if (moved.length > 0) questions.Moved = moved;
+  if (supportList.length > 0) questions.Support = supportList;
+  if (movedList.length > 0) questions.Moved = movedList;
   return questions;
 }
 
-/** Distinct Nithya Support/Moved tags as one synthetic survey (mapping identity). */
+/** Distinct Nithya Support/Moved statuses as one synthetic survey (mapping identity). */
 export function buildNithyaTextStwData(tagNames: string[]): StwData {
   const questions = questionsFromTagNames(tagNames);
   return { [TEXT_MAPPING_SURVEY_NAME]: questions };
@@ -110,8 +109,9 @@ export function normalizeTextSyncRow(row: {
   return {
     campaign_name: campaignName,
     question_name: classified.question,
-    answer_value: raw,
+    answer_value: classified.answer,
     pdi_id: pdiId,
     call_time: row.call_time,
+    _source_answer: raw,
   };
 }

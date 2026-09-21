@@ -3,24 +3,41 @@ export type {
   QcCanvassKnockIndexRow,
   QcRecontactChangeKind,
   QcRecontactDetailPayload,
-  QcRecontactFilter,
   QcRecontactMatchStatus,
   QcRecontactPair,
+  QcRecontactSelection,
   QcRecontactStats,
   QcRecontactSurveyAnswer,
+  QcRecontactTextMessage,
+  QcTextContactSummary,
   RecontactCallSummary,
   RecontactChannel,
+  RecontactChannelFilter,
+  RecontactMatchFilter,
+  RecontactOutcomeFilter,
 } from "./types";
 
 export { normalizeRecontactPersonId, callOccurredBefore } from "./ids";
-export { displayRecontactResultLabel, extractCallSurveyLabels } from "./labels";
+export {
+  canvassResultIsTalkingToCorrectPerson,
+  displayRecontactResultLabel,
+  extractCallSurveyLabels,
+  fillMissingCanvassLabel,
+  surveyRowIsTalkingToCorrectPerson,
+} from "./labels";
 export { classifyRecontactChange } from "./change";
 export {
   callSummaryToPhonebankPrior,
   changeKindLabel,
+  emptyRecontactSelection,
   filterPairsByQcDateRange,
+  firstClassifiablePrior,
+  pairHasNoReply,
   pairHasQcContact,
-  pairMatchesFilter,
+  pairMatchesChannelChip,
+  pairMatchesMatchChip,
+  pairMatchesOutcomeChip,
+  pairMatchesSelections,
   recontactChannelLabel,
   resolvePhonebankPriors,
   summarizeRecontactPairs,

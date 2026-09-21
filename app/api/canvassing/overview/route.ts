@@ -1,56 +1,47 @@
 import { NextResponse } from "next/server";
-import { campaignNameMatchesTag, getCanvassingTags, getTagById } from "@/lib/campaign-tags";
-import { appendKnockEventsToIndex, loadKnockIndex } from "@/lib/canvassing/knock-index-store";
+import { appendKnockEventsToIndex } from "@/lib/canvassing/knock-index-store";
 import { buildKnockEvents, parseCanvassingUploadFile } from "@/lib/canvassing/knock-details-parser";
-import {
-  filterKnockIndexRows,
-  knockOccurredOnLa,
-  tallyCanvassingOverview,
-} from "@/lib/canvassing/overview-tally";
 import { readCanvassingUploadFormFiles } from "@/lib/canvassing/upload-form";
+import {
+  CredentialsRequiredError,
+  credentialsRequiredResponse,
+  withCredentialContext,
+} from "@/lib/credentials";
+import { buildUniqueIdOverviewCsv, buildUniqueIdOverviewPayload } from "@/lib/unique-ids/payload";
+import { parseUniqueIdOverviewForm, parseUniqueIdOverviewQuery } from "@/lib/unique-ids/query";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function overviewPayload(startDate: string, endDate: string, tagId: string) {
-  const index = loadKnockIndex();
-  const tag = tagId ? getTagById(tagId) : undefined;
-  const filtered = filterKnockIndexRows(index.rows, {
-    startDate,
-    endDate,
-    assignmentMatches: tag ? (assignmentName) => campaignNameMatchesTag(assignmentName, tag) : undefined,
-  });
-  const tally = tallyCanvassingOverview(filtered);
-  const days = index.rows.map((row) => knockOccurredOnLa(row.occurredAt)).filter(Boolean).sort();
-  return {
-    meta: {
-      updatedAt: index.updatedAt,
-      rowCount: index.rows.length,
-      filteredRowCount: filtered.length,
-      imports: index.imports.slice(-8),
-      minDate: days[0] ?? "",
-      maxDate: days[days.length - 1] ?? "",
-    },
-    candidates: getCanvassingTags().map((item) => ({ id: item.id, label: item.label })),
-    stats: tally.stats,
-    canvassers: tally.canvassers,
-  };
-}
+export const GET = withCredentialContext(async (req) => {
+  try {
+    const query = parseUniqueIdOverviewQuery(new URL(req.url));
+    if (query.format === "csv") {
+      const result = await buildUniqueIdOverviewCsv(query);
+      if (!result.csv) {
+        return NextResponse.json({ ok: false, error: result.error || "No unique IDs to export.", code: 400 }, { status: 400 });
+      }
+      return new NextResponse(result.csv, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${result.filename}"`,
+        },
+      });
+    }
+    const data = await buildUniqueIdOverviewPayload(query);
+    return NextResponse.json({ ok: true, data });
+  } catch (err) {
+    if (err instanceof CredentialsRequiredError) {
+      return credentialsRequiredResponse(err.message);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[canvassing/overview GET]", message);
+    return NextResponse.json({ ok: false, error: message, code: 500 }, { status: 500 });
+  }
+});
 
-function readDate(raw: string | null): string {
-  const value = raw?.trim() ?? "";
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
-}
-
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const startDate = readDate(url.searchParams.get("startDate"));
-  const endDate = readDate(url.searchParams.get("endDate"));
-  const tagId = url.searchParams.get("tagId")?.trim() ?? "";
-  return NextResponse.json({ ok: true, data: overviewPayload(startDate, endDate, tagId) });
-}
-
-export async function POST(req: Request) {
+export const POST = withCredentialContext(async (req) => {
   try {
     const form = await req.formData();
     const files = await readCanvassingUploadFormFiles(form);
@@ -66,22 +57,15 @@ export async function POST(req: Request) {
       source: "overview",
       fileNames: files.map((file) => file.fileName),
     });
-    const startDate = readDate(typeof form.get("startDate") === "string" ? String(form.get("startDate")) : "");
-    const endDate = readDate(typeof form.get("endDate") === "string" ? String(form.get("endDate")) : "");
-    const tagId = form.get("tagId")?.toString()?.trim() ?? "";
-    return NextResponse.json(
-      {
-        ok: true,
-        data: {
-          import: appended.importMeta,
-          ...overviewPayload(startDate, endDate, tagId),
-        },
-      },
-      { status: 201 }
-    );
+    const query = parseUniqueIdOverviewForm(form);
+    const data = await buildUniqueIdOverviewPayload(query);
+    return NextResponse.json({ ok: true, data: { import: appended.importMeta, ...data } }, { status: 201 });
   } catch (err) {
+    if (err instanceof CredentialsRequiredError) {
+      return credentialsRequiredResponse(err.message);
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[canvassing/overview POST]", message);
     return NextResponse.json({ ok: false, error: message, code: 400 }, { status: 400 });
   }
-}
+});

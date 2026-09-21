@@ -14,6 +14,7 @@ import { classifiedAnswerIsFinalResultBucket } from "../survey-answer-consolidat
 import type { CampaignTag, SurveyScriptProfile } from "../types";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, normalizeRecontactPersonId } from "./ids";
+import { sortPriorsNewestFirst } from "./pair";
 import type {
   PriorContactSummary,
   QcCanvassKnockIndexRow,
@@ -60,18 +61,6 @@ function knockOccurredOn(row: QcCanvassKnockIndexRow): string {
   const stamp = row.occurredAt.trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(stamp)) return stamp.slice(0, 10);
   return "";
-}
-
-function priorSortStamp(prior: PriorContactSummary): string {
-  return (prior.callAt || prior.occurredOn || "").trim();
-}
-
-export function sortPriorsNewestFirst(priors: readonly PriorContactSummary[]): PriorContactSummary[] {
-  return [...priors].sort((a, b) => {
-    const byStamp = priorSortStamp(b).localeCompare(priorSortStamp(a));
-    if (byStamp !== 0) return byStamp;
-    return a.channel.localeCompare(b.channel);
-  });
 }
 
 /**

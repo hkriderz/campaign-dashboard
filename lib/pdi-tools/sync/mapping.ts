@@ -128,6 +128,39 @@ export function getFlagStrict(
   return maps.answerMap.get(mapKey([fallback, question, answer]));
 }
 
+/** First explicit answer mapping among `answers`, then the fallback survey. */
+export function getFlagStrictAny(
+  maps: MappingMaps,
+  survey: string,
+  question: string,
+  answers: string[],
+  fallbackSurvey?: string
+): string | undefined {
+  const seen = new Set<string>();
+  for (const raw of answers) {
+    const answer = raw.trim();
+    if (!answer || seen.has(answer)) continue;
+    seen.add(answer);
+    const hit = getFlagStrict(maps, survey, question, answer, fallbackSurvey);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+export function listMappedAnswers(
+  maps: MappingMaps,
+  survey: string,
+  question: string
+): Array<{ answer: string; flagId: string }> {
+  const prefix = mapKey([survey, question, ""]);
+  const out: Array<{ answer: string; flagId: string }> = [];
+  for (const [key, flagId] of maps.answerMap) {
+    if (!key.startsWith(prefix)) continue;
+    out.push({ answer: key.slice(prefix.length), flagId });
+  }
+  return out;
+}
+
 export function getQuestionId(
   maps: MappingMaps,
   survey: string,

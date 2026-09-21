@@ -24,7 +24,7 @@ const MODES = [
     index: "03",
     title: "Canvassing",
     description:
-      "Review saved knocks by canvasser, run Knock Analysis, and build Doorknocks Results pivots from uploaded PDI files.",
+      "Count unique PDI / PRIMARY IDs labeled Strong support, Undecided, or Strong oppose from phone, text, and knocks. Knock Analysis and Doorknocks Results stay under Canvassing tools.",
     kicker: "Field",
   },
   {

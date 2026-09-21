@@ -47,7 +47,8 @@ export function buildTextTagCatalogQuery(): string {
 
 /**
  * Tagged Nithya contacts with an extractable PDI id.
- * `answer_value` is the raw STW tag name; the engine classifies Support/Moved after fetch.
+ * `answer_value` is the raw STW tag name; the engine classifies it to a Support/Moved
+ * status after fetch, then keeps the latest status per person+campaign+question.
  */
 export function buildTextTagQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");

@@ -35,6 +35,12 @@ type ApiResponse<T> = {
   error?: string;
 };
 
+type UniqueIdsImportMeta = {
+  rowsAdded: number;
+  rowsSkippedDup: number;
+  rowsSkippedNoPrimaryId: number;
+};
+
 type UploadFile = File;
 
 const ROLE_LABELS: Record<CanvassingFileRole, string> = {
@@ -1233,7 +1239,10 @@ export default function CanvassingClient() {
     setPreviewing(true);
     try {
       const res = await fetch("/api/canvassing/preview", { method: "POST", body: buildFormData() });
-      const json = (await res.json()) as ApiResponse<{ result: CanvassingReportResult }>;
+      const json = (await res.json()) as ApiResponse<{
+        result: CanvassingReportResult;
+        uniqueIdsImport?: UniqueIdsImportMeta;
+      }>;
       if (!json.ok || !json.data) throw new Error(json.error || "Unable to preview canvassing files.");
       const result = json.data.result;
       const nextReportDate = result.summary.detectedReportDate || reportDate;
@@ -1245,7 +1254,11 @@ export default function CanvassingClient() {
         setReportDate(nextReportDate);
       }
       setReportName(reportTitleFor(result, nextReportDate));
-      setMessage("Report run complete. Review the results, then save the report when ready.");
+      const imported = json.data.uniqueIdsImport;
+      const importNote = imported
+        ? ` Unique IDs: ${imported.rowsAdded} new knock row${imported.rowsAdded === 1 ? "" : "s"}, ${imported.rowsSkippedDup} duplicate${imported.rowsSkippedDup === 1 ? "" : "s"} skipped.`
+        : "";
+      setMessage(`Report run complete. Review the results, then save the report when ready.${importNote}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1369,7 +1382,9 @@ export default function CanvassingClient() {
         <p className="mt-3 max-w-3xl text-[var(--section-muted)]">
           Upload PDI Canvasser Details (knock timeline) plus optional campaign result workbooks.
           Choose a Lunch or Final gap report, set shift times, and exclude leads from schedule
-          sections while keeping them in the saved data.
+          sections while keeping them in the saved data. Run Report also appends knock rows to
+          Unique IDs (duplicate PRIMARYID + time + question + response skipped). Save still writes
+          the gap report as before.
         </p>
         <ul className="mt-3 max-w-3xl list-disc space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-400">
           <li>

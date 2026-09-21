@@ -7,28 +7,56 @@ import {
   buildRecontactPairsCsv,
   changeKindLabel,
   displayRecontactResultLabel,
+  emptyRecontactSelection,
   pairHasQcContact,
-  pairMatchesFilter,
+  pairMatchesChannelChip,
+  pairMatchesMatchChip,
+  pairMatchesOutcomeChip,
+  pairMatchesSelections,
   recontactChannelLabel,
   recontactExportFilename,
   summarizeRecontactPairs,
   type QcRecontactChangeKind,
-  type QcRecontactFilter,
   type QcRecontactPair,
+  type RecontactChannelFilter,
+  type RecontactMatchFilter,
+  type RecontactOutcomeFilter,
 } from "@/lib/qc-recontact";
 import { formatShortUsDate } from "@/lib/slice-key";
 import type { SurveyScriptProfile } from "@/lib/types";
 import QcRecontactModal from "./QcRecontactModal";
 
-const CHIP_FILTERS: Array<{ id: QcRecontactFilter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "phonebank", label: "Phone bank" },
+const CHANNEL_CHIPS: Array<{ id: RecontactChannelFilter; label: string }> = [
+  { id: "phonebank", label: "Phone" },
   { id: "canvass", label: "Canvass" },
-  { id: "changed", label: "Changed" },
+  { id: "text", label: "Text" },
+];
+
+const OUTCOME_CHIPS: Array<{ id: RecontactOutcomeFilter; label: string }> = [
   { id: "held", label: "Held" },
+  { id: "strengthened", label: "Strengthened" },
+  { id: "softened", label: "Softened" },
+  { id: "flipped", label: "Flipped" },
+  { id: "no_reply", label: "No Reply" },
+];
+
+const MATCH_CHIPS: Array<{ id: RecontactMatchFilter; label: string }> = [
   { id: "unmatched", label: "Unmatched" },
   { id: "no_pdi", label: "No PDI" },
 ];
+
+function toggleValue<T extends string>(list: readonly T[], id: T): T[] {
+  return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
+}
+
+function chipClass(active: boolean): string {
+  return [
+    "rounded-full border px-2.5 py-1 text-xs font-medium",
+    active
+      ? "border-indigo-400 bg-indigo-50 text-indigo-800 dark:border-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-200"
+      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300",
+  ].join(" ");
+}
 
 function changeBadgeClass(kind: QcRecontactChangeKind): string {
   switch (kind) {
@@ -58,28 +86,34 @@ export default function QcRecontactSection({
   hasSnapshot,
   surveyScriptProfile,
 }: Props) {
-  const [filter, setFilter] = useState<QcRecontactFilter>("all");
-  const [hideNoQcContact, setHideNoQcContact] = useState(false);
+  const [selection, setSelection] = useState(emptyRecontactSelection);
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const missingQcContactCount = useMemo(
-    () => pairs.filter((pair) => !pairHasQcContact(pair)).length,
-    [pairs]
-  );
-  const scopedPairs = useMemo(
-    () => (hideNoQcContact ? pairs.filter(pairHasQcContact) : pairs),
-    [pairs, hideNoQcContact]
-  );
+  const scopedPairs = useMemo(() => pairs.filter(pairHasQcContact), [pairs]);
   const stats = useMemo(() => summarizeRecontactPairs(scopedPairs), [scopedPairs]);
   const visible = useMemo(
-    () => scopedPairs.filter((pair) => pairMatchesFilter(pair, filter)),
-    [scopedPairs, filter]
+    () => scopedPairs.filter((pair) => pairMatchesSelections(pair, selection)),
+    [scopedPairs, selection]
   );
-  const chipCounts = useMemo(() => {
-    const counts = {} as Record<QcRecontactFilter, number>;
-    for (const chip of CHIP_FILTERS) {
-      counts[chip.id] = scopedPairs.filter((pair) => pairMatchesFilter(pair, chip.id)).length;
+  const channelCounts = useMemo(() => {
+    const counts = {} as Record<RecontactChannelFilter, number>;
+    for (const chip of CHANNEL_CHIPS) {
+      counts[chip.id] = scopedPairs.filter((pair) => pairMatchesChannelChip(pair, chip.id)).length;
+    }
+    return counts;
+  }, [scopedPairs]);
+  const outcomeCounts = useMemo(() => {
+    const counts = {} as Record<RecontactOutcomeFilter, number>;
+    for (const chip of OUTCOME_CHIPS) {
+      counts[chip.id] = scopedPairs.filter((pair) => pairMatchesOutcomeChip(pair, chip.id)).length;
+    }
+    return counts;
+  }, [scopedPairs]);
+  const matchCounts = useMemo(() => {
+    const counts = {} as Record<RecontactMatchFilter, number>;
+    for (const chip of MATCH_CHIPS) {
+      counts[chip.id] = scopedPairs.filter((pair) => pairMatchesMatchChip(pair, chip.id)).length;
     }
     return counts;
   }, [scopedPairs]);
@@ -114,7 +148,7 @@ export default function QcRecontactSection({
     setExportMessage(`Downloaded ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"}.`);
   }
 
-  const flipCells: Array<{ id: QcRecontactFilter; label: string; count: number }> = [
+  const flipCells: Array<{ id: RecontactOutcomeFilter; label: string; count: number }> = [
     { id: "held", label: "Held", count: stats.held },
     { id: "strengthened", label: "Strengthened", count: stats.strengthened },
     { id: "softened", label: "Softened", count: stats.softened },
@@ -127,7 +161,8 @@ export default function QcRecontactSection({
         <div>
           <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200">Recontacts</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            QC calls matched to prior phone-bank and canvass contacts for the same PDI. Change uses the latest prior.
+            QC calls that reached the correct person, matched to prior phone-bank, canvass, and text contacts.
+            Combine chips across rows. No Reply is a text prior with no inbound voter message.
           </p>
         </div>
         {hasSnapshot ? (
@@ -169,52 +204,98 @@ export default function QcRecontactSection({
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap gap-1.5">
-            {CHIP_FILTERS.map((chip) => {
-              const active = filter === chip.id;
-              const count = chipCounts[chip.id] ?? 0;
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  onClick={() => setFilter(chip.id)}
-                  className={[
-                    "rounded-full border px-2.5 py-1 text-xs font-medium",
-                    active
-                      ? "border-indigo-400 bg-indigo-50 text-indigo-800 dark:border-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-200"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300",
-                  ].join(" ")}
-                >
-                  {chip.label}{" "}
-                  <span className="tabular-nums text-[11px] opacity-80">{count.toLocaleString()}</span>
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => setHideNoQcContact((on) => !on)}
-              className={[
-                "rounded-full border px-2.5 py-1 text-xs font-medium",
-                hideNoQcContact
-                  ? "border-rose-400 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
-                  : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300",
-              ].join(" ")}
-            >
-              Hide no QC contact{" "}
-              <span className="tabular-nums text-[11px] opacity-80">
-                {missingQcContactCount.toLocaleString()}
-              </span>
-            </button>
+          <div className="space-y-2">
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Channel
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {CHANNEL_CHIPS.map((chip) => {
+                  const active = selection.channels.includes(chip.id);
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setSelection((prev) => ({ ...prev, channels: toggleValue(prev.channels, chip.id) }))
+                      }
+                      className={chipClass(active)}
+                    >
+                      {chip.label}{" "}
+                      <span className="tabular-nums text-[11px] opacity-80">
+                        {(channelCounts[chip.id] ?? 0).toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Outcome
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {OUTCOME_CHIPS.map((chip) => {
+                  const active = selection.outcomes.includes(chip.id);
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setSelection((prev) => ({ ...prev, outcomes: toggleValue(prev.outcomes, chip.id) }))
+                      }
+                      className={chipClass(active)}
+                    >
+                      {chip.label}{" "}
+                      <span className="tabular-nums text-[11px] opacity-80">
+                        {(outcomeCounts[chip.id] ?? 0).toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Match
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {MATCH_CHIPS.map((chip) => {
+                  const active = selection.matches.includes(chip.id);
+                  return (
+                    <button
+                      key={chip.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() =>
+                        setSelection((prev) => ({ ...prev, matches: toggleValue(prev.matches, chip.id) }))
+                      }
+                      className={chipClass(active)}
+                    >
+                      {chip.label}{" "}
+                      <span className="tabular-nums text-[11px] opacity-80">
+                        {(matchCounts[chip.id] ?? 0).toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
             {flipCells.map((cell) => {
-              const active = filter === cell.id;
+              const active = selection.outcomes.includes(cell.id);
               return (
                 <button
                   key={cell.id}
                   type="button"
-                  onClick={() => setFilter(cell.id)}
+                  aria-pressed={active}
+                  onClick={() =>
+                    setSelection((prev) => ({ ...prev, outcomes: toggleValue(prev.outcomes, cell.id) }))
+                  }
                   className={[
                     "rounded-lg border px-3 py-2 text-left text-xs",
                     active
@@ -234,10 +315,8 @@ export default function QcRecontactSection({
           {visible.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 px-3 py-6 text-sm text-center text-gray-500 dark:text-gray-400">
               {scopedPairs.length === 0
-                ? hideNoQcContact
-                  ? "No QC calls with a Final Result in this date range."
-                  : "No QC calls with PDI in this date range."
-                : "No recontact rows for this filter."}
+                ? "No QC calls that reached the correct person in this date range."
+                : "No recontact rows for this filter combination."}
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-900">
