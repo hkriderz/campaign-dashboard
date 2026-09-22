@@ -126,7 +126,7 @@ test("consolidateSurveyAnswerLines sums synthesized counts", () => {
     ],
     "faizahTraci"
   );
-  const ss = lines.find((l) => l.label === "Support Faizah");
+  const ss = lines.find((l) => l.label === "Strong support");
   const und = lines.find((l) => l.label === "Undecided");
   assert.equal(ss?.count, 12);
   assert.equal(ss?.synthesized, 3);

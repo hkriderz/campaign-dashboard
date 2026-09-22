@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   GENERIC_OUTCOME_LABELS,
+  consolidateSurveyAnswerLines,
   csvAnswerForFinalResultFamily,
   genericOutcomeDisplayLabel,
   isStrongSupportSurveyHit,
@@ -69,6 +70,24 @@ test("sumFinalResultFamilies counts raw Strong Support as generic SS, not a Faiz
   assert.doesNotMatch(GENERIC_OUTCOME_LABELS.strongSupport, /faizah/i);
 });
 
+test("consolidateSurveyAnswerLines posts Strong support, not Support Faizah", () => {
+  const lines = consolidateSurveyAnswerLines(
+    [
+      { label: "A. Strong Support for Nithya", count: 5 },
+      { label: "Support Faizah", count: 2 },
+      { label: "Support Nithya", count: 1 },
+      { label: "B. Undecided", count: 3 },
+      { label: "Support Traci", count: 4 },
+    ],
+    "faizahTraci"
+  );
+  const ss = lines.find((l) => l.label === "Strong support");
+  assert.equal(ss?.count, 8);
+  assert.equal(lines.some((l) => /faizah|nithya/i.test(l.label)), false);
+  assert.equal(lines.find((l) => l.label === "Undecided")?.count, 3);
+  assert.equal(lines.find((l) => l.label === "Support Traci")?.count, 4);
+});
+
 test("genericOutcomeDisplayLabel never returns a candidate name for FR families", () => {
   assert.equal(genericOutcomeDisplayLabel("Support Faizah"), "Strong support");
   assert.equal(genericOutcomeDisplayLabel("A. Strong Support"), "Strong support");
@@ -85,6 +104,7 @@ test("synthesizedHitMatchesLabel accepts script option text and bucket names", (
     rawAnswer: "A. Strong Support for Nithya",
   };
   assert.equal(synthesizedHitMatchesLabel(hit, "Support Faizah", "faizahTraci"), true);
+  assert.equal(synthesizedHitMatchesLabel(hit, "Strong support", "faizahTraci"), true);
   assert.equal(
     synthesizedHitMatchesLabel(hit, "A. Strong Support for Nithya", "faizahTraci"),
     true

@@ -52,9 +52,9 @@ export function getDashboardAggregateLexicon(
     };
   }
   return {
-    pollingSupportRowLabel: "Faizah",
+    pollingSupportRowLabel: "Strong support",
     pollingSecondaryRowLabel: "Anti Traci",
-    finalFallbackSSLabel: "Faizah SS",
+    finalFallbackSSLabel: "Strong support",
     finalFallbackOtherPositiveLabel: "Anti Traci",
     finalFallbackSOLabel: "SO (Traci Supporter)",
     traciViolationHeading: "Traci Violation Q",

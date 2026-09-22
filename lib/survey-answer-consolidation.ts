@@ -8,10 +8,11 @@ import { normalizeSurveyTextForMatching } from "./survey-i18n/rules";
 
 /**
  * Fixed order: Support → Undecided → Oppose.
+ * Candidate-named SS buckets display as generic "Strong support".
  * Within Support, "Support other candidate" is last; within Oppose, "Oppose current candidate" is last.
  */
 const BUCKET_ORDER_FAIZAH = [
-  "Support Faizah",
+  "Strong support",
   "Support other candidate",
   "Undecided",
   "Undecided — won't vote for Traci",
@@ -20,7 +21,7 @@ const BUCKET_ORDER_FAIZAH = [
 ] as const;
 
 const BUCKET_ORDER_EUNISSES = [
-  "Support Eunisses",
+  "Strong support",
   "Support other candidate",
   "Undecided",
   "Undecided — won't vote for Traci",
@@ -29,7 +30,7 @@ const BUCKET_ORDER_EUNISSES = [
 ] as const;
 
 const BUCKET_ORDER_GENERIC = [
-  "Support Ada",
+  "Strong support",
   "Support other candidate",
   "Undecided",
   "Undecided — won't vote opponent",
@@ -277,7 +278,12 @@ export const GENERIC_OUTCOME_LABELS = {
 
 /** Map a classified display label onto the three CSV-style Final Result families. */
 export function finalResultFamilyForDisplayLabel(displayLabel: string): FinalResultFamily {
-  if (STRONG_SUPPORT_DISPLAY_BUCKETS.has(displayLabel)) return "strongSupport";
+  if (
+    displayLabel === GENERIC_OUTCOME_LABELS.strongSupport ||
+    STRONG_SUPPORT_DISPLAY_BUCKETS.has(displayLabel)
+  ) {
+    return "strongSupport";
+  }
   if (
     displayLabel === "Undecided" ||
     displayLabel === "Undecided — won't vote for Traci" ||
@@ -318,9 +324,17 @@ function normalizedLabelKey(label: string): string {
   return normalizeSurveyTextForMatching(label.trim().toLowerCase());
 }
 
+/** Dashboard display for a classified bucket — SS never keeps a candidate name. */
+export function dashboardBucketDisplayLabel(classified: string): string {
+  if (STRONG_SUPPORT_DISPLAY_BUCKETS.has(classified)) {
+    return GENERIC_OUTCOME_LABELS.strongSupport;
+  }
+  return classified;
+}
+
 /**
  * True when a synthesized-call hit belongs to a Daily Aggregate / pivot label.
- * Preset slots send bucket names (`Support Faizah`); question slots send script text
+ * Preset slots send generic buckets (`Strong support`); question slots send script text
  * (`A. Strong Support for Nithya`). Exact match on either form is not enough.
  */
 export function synthesizedHitMatchesLabel(
@@ -451,7 +465,7 @@ export function consolidateSurveyAnswerLines(
   const byDisplay = new Map<string, { count: number; synthesized: number }>();
 
   for (const { label, count, synthesized } of lines) {
-    const display = classifySurveyAnswerDisplayLabel(label, profile);
+    const display = dashboardBucketDisplayLabel(classifySurveyAnswerDisplayLabel(label, profile));
     const prev = byDisplay.get(display) ?? { count: 0, synthesized: 0 };
     prev.count += count;
     prev.synthesized += synthesized ?? 0;

@@ -1,5 +1,9 @@
 import { sortAggregateAnswerLines } from "./aggregate-answer-sort";
-import type { AggregateAnswerLine } from "./daily-aggregate-survey-rollup";
+import {
+  effectiveFinalResultAnswerLabelForRollup,
+  type AggregateAnswerLine,
+} from "./daily-aggregate-survey-rollup";
+import { consolidateSurveyAnswerLines } from "./survey-answer-consolidation";
 import {
   formatAggregateAnswerLineLabel,
   questionCanonicalGroupKey,
@@ -93,7 +97,7 @@ export function mergeRollupsForQuestionGroup(
     const formatted = formatAggregateAnswerLineLabel(displayLabel, profile);
     addAnswerLineAcc(byDisplayLabel, formatted, count, synthesized);
   }
-  return sortAnswerLineMap(byDisplayLabel);
+  return consolidateSurveyAnswerLines(sortAnswerLineMap(byDisplayLabel), profile ?? "faizahTraci");
 }
 
 /**
@@ -107,9 +111,11 @@ export function buildRollupsByQuestionName(
     const q = r.questionName.trim();
     if (!q) continue;
     const av = r.answerValue.trim();
-    if (!av || av.toLowerCase() === "[no answer recorded]") continue;
+    const frLabel = effectiveFinalResultAnswerLabelForRollup(q, av);
+    const label = (frLabel || av).trim();
+    if (!label || label.toLowerCase() === "[no answer recorded]") continue;
     if (!byQ.has(q)) byQ.set(q, new Map());
-    addAnswerLineAcc(byQ.get(q)!, av, r.responseCount, r.synthesizedCount ?? 0);
+    addAnswerLineAcc(byQ.get(q)!, label, r.responseCount, r.synthesizedCount ?? 0);
   }
   const out = new Map<string, AggregateAnswerLine[]>();
   for (const [q, m] of byQ) {

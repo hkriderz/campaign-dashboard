@@ -3,9 +3,11 @@ import { normalizeSurveyTextForMatching } from "./survey-i18n/rules";
 
 /** Labels from `consolidateSurveyAnswerLines` bucket order — skip re-sorting those rows together. */
 const CONSOLIDATED_BUCKET_LABELS = new Set([
+  "strong support",
   "support faizah",
   "support ada",
   "support eunisses",
+  "support nithya",
   "support other candidate",
   "undecided",
   "undecided — won't vote for traci",
