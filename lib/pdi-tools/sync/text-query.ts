@@ -1,54 +1,41 @@
 import { PROJECT, TEXT_DATASET } from "@/lib/bigquery";
-import { buildTagWhereClause, getTagById } from "@/lib/campaign-tags";
-import { TEXT_CANDIDATE_TAG_ID } from "@/lib/pdi-tools/channel";
-
-const TEXT_WINDOW_START_DATE = "2025-12-01";
+import { pdiIdExtractSql } from "./pdi-id-sql";
 
 const P = PROJECT;
 const D = TEXT_DATASET;
 
-export const TEXT_PDI_ID_SQL = `
-COALESCE(
-  REGEXP_EXTRACT(campaign_contacts.data, r'(?i)"v1_pdiid"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(campaign_contacts.data, r'(?i)"pdi_id"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(campaign_contacts.data, r'(?i)"pdi id"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(campaign_contacts.data, r'(?i)"[^"]*pdi[ _]?id[^"]*"\\s*:\\s*"([^"]+)"')
-)
-`.trim();
+export const TEXT_PDI_ID_SQL = pdiIdExtractSql("campaign_contacts.data");
 
-function nithyaCampaignWhere(): string {
-  const tag = getTagById(TEXT_CANDIDATE_TAG_ID);
-  if (!tag) {
-    throw new Error('Campaign tag "nithya" is not configured.');
-  }
-  return buildTagWhereClause(tag);
-}
-
-/** All Nithya text campaigns plus any Support/Moved tags (untagged lists still appear). */
+/**
+ * Every text campaign that has at least one tag.
+ * Same listing rule as the dialer mapper (any name, no created-date cutoff),
+ * scoped to `l11_stw_txt` campaigns and tags.
+ */
 export function buildTextTagCatalogQuery(): string {
   return `
     SELECT DISTINCT
       campaigns.name AS campaign_name,
       tags.name AS tag_name
     FROM \`${P}.${D}.campaigns\` AS campaigns
-    LEFT JOIN \`${P}.${D}.campaign_contact_tags\` AS campaign_contact_tags
+    JOIN \`${P}.${D}.campaign_contact_tags\` AS campaign_contact_tags
       ON campaign_contact_tags.campaign_id = campaigns.id
       AND campaign_contact_tags.deleted_at IS NULL
-    LEFT JOIN \`${P}.${D}.tags\` AS tags
+    JOIN \`${P}.${D}.tags\` AS tags
       ON tags.id = campaign_contact_tags.tag_id
       AND tags.deleted_at IS NULL
-    WHERE ${nithyaCampaignWhere()}
-      AND campaigns.name IS NOT NULL
+    WHERE campaigns.name IS NOT NULL
       AND TRIM(campaigns.name) != ""
-      AND DATE(campaigns.created_at, 'America/Los_Angeles') >= '${TEXT_WINDOW_START_DATE}'
+      AND tags.name IS NOT NULL
+      AND TRIM(tags.name) != ""
     ORDER BY campaign_name, tag_name
   `.trim();
 }
 
 /**
- * Tagged Nithya contacts with an extractable PDI id.
- * `answer_value` is the raw STW tag name; the engine classifies it to a Support/Moved
- * status after fetch, then keeps the latest status per person+campaign+question.
+ * Tagged contacts with an extractable PDI id, for every text campaign.
+ * `answer_value` is the raw STW tag name. The engine classifies Nithya Mayor
+ * and Moved tags, keeps other tags under Other, then keeps the latest status
+ * per person, campaign, and question.
  */
 export function buildTextTagQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");
@@ -72,9 +59,10 @@ export function buildTextTagQuery(startIso: string, endIso: string): string {
         ON campaigns.id = campaign_contact_tags.campaign_id
       JOIN \`${P}.${D}.campaign_contacts\` AS campaign_contacts
         ON campaign_contacts.id = campaign_contact_tags.campaign_contact_id
-      WHERE ${nithyaCampaignWhere()}
-        AND campaign_contact_tags.deleted_at IS NULL
+      WHERE campaign_contact_tags.deleted_at IS NULL
         AND tags.deleted_at IS NULL
+        AND campaigns.name IS NOT NULL
+        AND TRIM(campaigns.name) != ""
         AND tags.name IS NOT NULL
         AND TRIM(tags.name) != ""
     )

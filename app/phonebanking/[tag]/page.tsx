@@ -10,7 +10,8 @@ import {
 } from "@/lib/campaign-tags";
 import {
   filterPairsByQcDateRange,
-  pairHasQcContact,
+  pairIsUsefulRecontact,
+  pairWithSupportAnswers,
   summarizeRecontactPairs,
 } from "@/lib/qc-recontact";
 import { loadQcRecontactPairsForPage } from "@/lib/queries/qc-recontact";
@@ -737,9 +738,9 @@ export default async function TagPage({ params, searchParams }: Props) {
   const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
   const recontactPayload = isQcTag ? await loadQcRecontactPairsForPage(tagId) : null;
   const recontactPairs = recontactPayload
-    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate).filter(
-        pairHasQcContact
-      )
+    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate)
+        .filter((pair) => pairIsUsefulRecontact(pair, surveyScriptProfile))
+        .map((pair) => pairWithSupportAnswers(pair, surveyScriptProfile))
     : [];
   const recontactStats = summarizeRecontactPairs(recontactPairs);
   const recontactHref = (() => {

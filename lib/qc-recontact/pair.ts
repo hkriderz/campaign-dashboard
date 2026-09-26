@@ -1,7 +1,11 @@
 import type { SurveyScriptProfile } from "../types";
+import {
+  classifySurveyAnswerDisplayLabel,
+  finalResultFamilyForDisplayLabel,
+} from "../survey-answer-consolidation";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, normalizeRecontactPersonId } from "./ids";
-import { canvassResultIsTalkingToCorrectPerson } from "./labels";
+import { canvassResultIsTalkingToCorrectPerson, recordedSurveyAnswer } from "./labels";
 import type {
   PriorContactSummary,
   QcRecontactChangeKind,
@@ -118,13 +122,71 @@ export function resolvePhonebankPriors(
     });
 }
 
+/** Fill identity fields missing from snapshots saved before name, address, and Were you contacted. */
+export function withRecontactCallDefaults(qc: RecontactCallSummary): RecontactCallSummary {
+  const voterName = qc.voterName ?? "";
+  const voterAddress = qc.voterAddress ?? "";
+  const contactedQuestion = qc.contactedQuestion ?? "";
+  const contactedAnswer = qc.contactedAnswer ?? "";
+  if (
+    qc.voterName === voterName &&
+    qc.voterAddress === voterAddress &&
+    qc.contactedQuestion === contactedQuestion &&
+    qc.contactedAnswer === contactedAnswer
+  ) {
+    return qc;
+  }
+  return { ...qc, voterName, voterAddress, contactedQuestion, contactedAnswer };
+}
+
 /** True when the QC call reached the voter (canvass result is talking to correct person). */
 export function pairHasQcContact(pair: QcRecontactPair): boolean {
   return canvassResultIsTalkingToCorrectPerson(pair.qc.canvassLabel);
 }
 
+/** Strong support, Undecided, or Strong oppose. Blank text and Were you contacted do not count. */
+export function isRecordedSupportLabel(label: string, profile: SurveyScriptProfile = "faizahTraci"): boolean {
+  const raw = recordedSurveyAnswer(label);
+  if (!raw) return false;
+  const family = finalResultFamilyForDisplayLabel(classifySurveyAnswerDisplayLabel(raw, profile));
+  return family === "strongSupport" || family === "undecided" || family === "strongOppose";
+}
+
+/** QC final result or polling is a support answer. Were you contacted alone does not count. */
+export function qcCallHasRecordedResponse(
+  qc: Pick<RecontactCallSummary, "finalResultLabel" | "pollingLabel">,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  return isRecordedSupportLabel(qc.finalResultLabel, profile) || isRecordedSupportLabel(qc.pollingLabel, profile);
+}
+
+/**
+ * Contact was made and the QC call recorded a support answer.
+ * Talking to the correct person with a blank survey is not useful.
+ */
+export function pairIsUsefulRecontact(
+  pair: QcRecontactPair,
+  profile: SurveyScriptProfile = "faizahTraci"
+): boolean {
+  return pairHasQcContact(pair) && qcCallHasRecordedResponse(pair.qc, profile);
+}
+
+/** Drop priors with no support answer and recompute change from the latest one that remains. */
+export function pairWithSupportAnswers(
+  pair: QcRecontactPair,
+  profile: SurveyScriptProfile = "faizahTraci"
+): QcRecontactPair {
+  const priors = pair.priors.filter((prior) => isRecordedSupportLabel(prior.resultLabel, profile));
+  const source = firstClassifiablePrior(priors);
+  const changeKind = source
+    ? classifyRecontactChange(source.resultLabel, pair.qc.finalResultLabel, profile)
+    : "unknown";
+  const matchStatus = pair.matchStatus === "no_pdi" ? "no_pdi" : priors.length > 0 ? "matched" : "unmatched";
+  return { ...pair, priors, matchStatus, changeKind };
+}
+
 export function emptyRecontactSelection(): QcRecontactSelection {
-  return { channels: [], outcomes: [], matches: [] };
+  return { channels: [], outcomes: [], matches: [], canvasser: "" };
 }
 
 /** Text prior with a stored false inbound flag. Missing flag (old snapshots) is unknown. */
@@ -143,6 +205,25 @@ export function pairMatchesOutcomeChip(pair: QcRecontactPair, outcome: Recontact
 
 export function pairMatchesMatchChip(pair: QcRecontactPair, match: RecontactMatchFilter): boolean {
   return pair.matchStatus === match;
+}
+
+/** Canvass prior actor. Phone and text actors do not match. */
+export function pairMatchesCanvasser(pair: QcRecontactPair, canvasser: string): boolean {
+  const want = canvasser.trim();
+  if (!want) return true;
+  return pair.priors.some((prior) => prior.channel === "canvass" && prior.actorName.trim() === want);
+}
+
+export function canvasserNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
+  const names = new Set<string>();
+  for (const pair of pairs) {
+    for (const prior of pair.priors) {
+      if (prior.channel !== "canvass") continue;
+      const name = prior.actorName.trim();
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 /**
@@ -164,6 +245,8 @@ export function pairMatchesSelections(pair: QcRecontactPair, selection: QcRecont
   if (selection.matches.length > 0 && !selection.matches.some((match) => pairMatchesMatchChip(pair, match))) {
     return false;
   }
+  const canvasser = selection.canvasser?.trim() ?? "";
+  if (canvasser && !pairMatchesCanvasser(pair, canvasser)) return false;
   return true;
 }
 

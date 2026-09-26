@@ -109,7 +109,7 @@ async function loadAndPrepareRows(
     log.step(
       "bigquery",
       progressForPhase("bigquery"),
-      `Retrieved ${rawRows.length} tagged contacts; ${classified.length} Nithya Support/Moved with PDI ids`
+      `Retrieved ${rawRows.length} tagged contacts; ${classified.length} with a PDI id`
     );
     const { rows: filledRows, collapsedCount } = collapseTextRowsToLatestStatus(classified);
     log.step(

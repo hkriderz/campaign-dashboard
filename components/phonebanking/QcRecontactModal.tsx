@@ -212,12 +212,28 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
                   <dd className="font-medium">{pair.qc.phonebankerName || "—"}</dd>
                 </div>
                 <div>
+                  <dt className="text-gray-500 dark:text-gray-400">Voter</dt>
+                  <dd className="font-medium">{pair.qc.voterName?.trim() || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500 dark:text-gray-400">Address</dt>
+                  <dd>{pair.qc.voterAddress?.trim() || "—"}</dd>
+                </div>
+                <div>
                   <dt className="text-gray-500 dark:text-gray-400">When</dt>
                   <dd>{formatShortUsDate(pair.qc.callDate)}</dd>
                 </div>
                 <div>
                   <dt className="text-gray-500 dark:text-gray-400">List</dt>
                   <dd>{pair.qc.campaignName || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500 dark:text-gray-400">Were you contacted</dt>
+                  <dd>{pair.qc.contactedAnswer?.trim() || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500 dark:text-gray-400">Polling</dt>
+                  <dd>{displayRecontactResultLabel(pair.qc.pollingLabel, surveyScriptProfile) || "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-gray-500 dark:text-gray-400">Result</dt>

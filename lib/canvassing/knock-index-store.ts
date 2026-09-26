@@ -119,7 +119,60 @@ export function knockEventToIndexRow(event: CanvassingKnockEvent, reportId: stri
     response: event.response,
     reportId,
     sourceFileName: event.sourceFileName,
+    voterName: event.voter.trim(),
   };
+}
+
+export type KnockIndexMergeResult = {
+  rows: QcCanvassKnockIndexRow[];
+  rowsAdded: number;
+  rowsSkippedDup: number;
+  rowsSkippedNoPrimaryId: number;
+  voterNamesFilled: number;
+};
+
+/**
+ * Append knock rows. A duplicate key with a blank stored voter name takes the incoming name
+ * so a re-upload backfills `VOTER` without creating a second row.
+ */
+export function mergeKnockIndexRows(
+  existing: readonly QcCanvassKnockIndexRow[],
+  incoming: readonly QcCanvassKnockIndexRow[]
+): KnockIndexMergeResult {
+  const rows = existing.map((row) => ({ ...row }));
+  const keyToIndex = new Map<string, number>();
+  for (let i = 0; i < rows.length; i += 1) {
+    keyToIndex.set(knockIndexDedupKey(rows[i]!), i);
+  }
+
+  let rowsAdded = 0;
+  let rowsSkippedDup = 0;
+  let rowsSkippedNoPrimaryId = 0;
+  let voterNamesFilled = 0;
+
+  for (const row of incoming) {
+    if (!normalizeRecontactPersonId(row.primaryId)) {
+      rowsSkippedNoPrimaryId += 1;
+      continue;
+    }
+    const key = knockIndexDedupKey(row);
+    const existingIndex = keyToIndex.get(key);
+    if (existingIndex !== undefined) {
+      const current = rows[existingIndex]!;
+      const incomingName = (row.voterName ?? "").trim();
+      if (incomingName && !(current.voterName ?? "").trim()) {
+        rows[existingIndex] = { ...current, voterName: incomingName };
+        voterNamesFilled += 1;
+      }
+      rowsSkippedDup += 1;
+      continue;
+    }
+    keyToIndex.set(key, rows.length);
+    rows.push({ ...row });
+    rowsAdded += 1;
+  }
+
+  return { rows, rowsAdded, rowsSkippedDup, rowsSkippedNoPrimaryId, voterNamesFilled };
 }
 
 export function appendKnockIndexRows(
@@ -131,25 +184,7 @@ export function appendKnockIndexRows(
   }
 ): AppendKnockIndexResult {
   const index = loadKnockIndex();
-  const seen = new Set(index.rows.map(knockIndexDedupKey));
-  const added: QcCanvassKnockIndexRow[] = [];
-  let rowsSkippedDup = 0;
-  let rowsSkippedNoPrimaryId = 0;
-
-  for (const row of incoming) {
-    if (!normalizeRecontactPersonId(row.primaryId)) {
-      rowsSkippedNoPrimaryId += 1;
-      continue;
-    }
-    const key = knockIndexDedupKey(row);
-    if (seen.has(key)) {
-      rowsSkippedDup += 1;
-      continue;
-    }
-    seen.add(key);
-    added.push(row);
-  }
-
+  const merged = mergeKnockIndexRows(index.rows, incoming);
   const importId = crypto.randomUUID();
   const now = new Date().toISOString();
   const importMeta: KnockIndexImportMeta = {
@@ -158,21 +193,21 @@ export function appendKnockIndexRows(
     source: meta.source,
     reportId: meta.reportId?.trim() || importId,
     fileNames: (meta.fileNames ?? []).filter(Boolean),
-    rowsAdded: added.length,
-    rowsSkippedDup,
-    rowsSkippedNoPrimaryId,
+    rowsAdded: merged.rowsAdded,
+    rowsSkippedDup: merged.rowsSkippedDup,
+    rowsSkippedNoPrimaryId: merged.rowsSkippedNoPrimaryId,
   };
 
-  if (added.length || importMeta.fileNames.length) {
+  if (merged.rowsAdded || merged.voterNamesFilled || importMeta.fileNames.length) {
     writeKnockIndex({
       version: 1,
       updatedAt: now,
       imports: [...index.imports, importMeta],
-      rows: [...index.rows, ...added],
+      rows: merged.rows,
     });
   }
 
-  return { importMeta, rowCount: index.rows.length + added.length };
+  return { importMeta, rowCount: merged.rows.length };
 }
 
 export function appendKnockEventsToIndex(

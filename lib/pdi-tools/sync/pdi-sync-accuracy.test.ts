@@ -96,6 +96,45 @@ test("buildMappingReport does not map raw flag-code-looking answers without expl
   assert.equal(result.report[0]?.mapping_status, "UNMAPPED_ANSWER: Answer is not explicitly mapped");
 });
 
+test("buildMappingReport does not treat a Scale to Win callee id as a voter PDI id", () => {
+  const maps = buildMappingMaps(
+    mappingOutput([
+      {
+        key: "Campaign A||Final Result||Support",
+        surveyName: "Campaign A",
+        stwQuestionName: "Final Result",
+        stwAnswerValue: "Support",
+        pdiQuestionId: "pdi_final",
+        pdiAnswerOptionId: "pdi_answer_support",
+        pdiFlagId: "flag_support",
+        pdiFlagCode: "SUPPORT",
+        pdiFlagDesc: "Support",
+        confidence: "manual",
+        method: "user-selected",
+      },
+    ]),
+    "test.json"
+  );
+  const rows: SurveyResultRow[] = [
+    {
+      campaign_name: "Campaign A",
+      question_name: "Final Result",
+      answer_value: "Support",
+      pdi_id: "",
+      callee_id: "stw-callee-uuid",
+      caller_id: "stw-caller-uuid",
+      call_id: "call-1",
+    },
+  ];
+
+  const result = buildMappingReport(rows, maps, new Set());
+
+  assert.equal(result.payload.length, 0);
+  assert.equal(result.rowsSkipped, 1);
+  assert.equal(result.report[0]?.mapping_status, "UNMAPPED: No PDI ID");
+  assert.equal(result.report[0]?.pdi_id, "");
+});
+
 test("fillFinalResults only synthesizes final results with explicit final-result answer mappings", () => {
   const maps = buildMappingMaps(
     mappingOutput([

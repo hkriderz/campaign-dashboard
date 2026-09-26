@@ -80,7 +80,7 @@ function MapperBody() {
                 <br />
                 {state.channel === "text" ? (
                   <>
-                    Text mode loads Nithya tags from BigQuery (<code className="px-1 rounded">l11_stw_txt</code>). Use{" "}
+                    Text mode loads every tagged text campaign from BigQuery (<code className="px-1 rounded">l11_stw_txt</code>). Use{" "}
                     <strong className="text-gray-700 dark:text-zinc-300">⟳ Refresh</strong> after credentials are set.
                   </>
                 ) : (

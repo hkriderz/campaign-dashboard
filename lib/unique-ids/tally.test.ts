@@ -40,6 +40,10 @@ function call(
     phonebankerName: "Alex",
     pollingLabel: "",
     canvassLabel: "",
+    voterName: "",
+    voterAddress: "",
+    contactedQuestion: "",
+    contactedAnswer: "",
     ...partial,
   };
 }

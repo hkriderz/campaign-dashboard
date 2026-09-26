@@ -1,4 +1,5 @@
 import { STW_DATASET, STW_PROJECT } from "./constants";
+import { pdiIdExtractSql } from "./pdi-id-sql";
 
 export function buildSurveyQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");
@@ -11,10 +12,7 @@ export function buildSurveyQuery(startIso: string, endIso: string): string {
         DATETIME(calls.connected_at) AS call_time,
         SAFE.PARSE_JSON(callees.data) AS new_data,
         calls.id AS call_id,
-        IFNULL(
-          REGEXP_EXTRACT(callees.data, r'(?i)"[^"]*pdi[ _]?id[^"]*"\\s*:\\s*"([^"]+)"'),
-          ""
-        ) AS pdi_id,
+        ${pdiIdExtractSql("callees.data")} AS pdi_id,
         callers.id AS caller_id,
         callers.name AS phonebanker,
         campaigns.name AS campaign_name,

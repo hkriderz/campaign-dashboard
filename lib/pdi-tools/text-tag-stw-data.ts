@@ -1,4 +1,8 @@
-import { classifyTextContactTag, TEXT_SUPPORT_ANSWER_ORDER } from "@/lib/texting-tag-labels";
+import {
+  classifyTextContactTag,
+  TEXT_QUESTION_ORDER,
+  TEXT_SUPPORT_ANSWER_ORDER,
+} from "@/lib/texting-tag-labels";
 import type { StwData } from "@/lib/pdi-tools/types";
 import type { SurveyResultRow } from "@/lib/pdi-tools/sync/types";
 import { TEXT_CANDIDATE_TAG_ID, TEXT_MAPPING_SURVEY_NAME } from "@/lib/pdi-tools/channel";
@@ -26,26 +30,39 @@ export type TextTagCatalogRow = {
 };
 
 function questionsFromTagNames(tagNames: string[]): Record<string, string[]> {
-  const support = new Set<string>();
-  const moved = new Set<string>();
+  const grouped = new Map<string, Set<string>>();
 
   for (const raw of uniqueTrimmed(tagNames)) {
     const classified = classifyTextContactTag(raw, TEXT_CANDIDATE_TAG_ID);
-    if (classified.kind === "support") support.add(classified.answer);
-    else if (classified.kind === "moved") moved.add(classified.answer);
+    const answers = grouped.get(classified.question) ?? new Set<string>();
+    answers.add(classified.answer);
+    grouped.set(classified.question, answers);
   }
 
-  const supportList = [...support].sort((a, b) => {
-    const ra = supportStatusRank(a);
-    const rb = supportStatusRank(b);
+  const questionNames = [...grouped.keys()].sort((a, b) => {
+    const ia = TEXT_QUESTION_ORDER.indexOf(a);
+    const ib = TEXT_QUESTION_ORDER.indexOf(b);
+    const ra = ia === -1 ? TEXT_QUESTION_ORDER.length : ia;
+    const rb = ib === -1 ? TEXT_QUESTION_ORDER.length : ib;
     if (ra !== rb) return ra - rb;
     return a.localeCompare(b);
   });
-  const movedList = [...moved].sort((a, b) => a.localeCompare(b));
 
   const questions: Record<string, string[]> = {};
-  if (supportList.length > 0) questions.Support = supportList;
-  if (movedList.length > 0) questions.Moved = movedList;
+  for (const questionName of questionNames) {
+    const answers = [...(grouped.get(questionName) ?? [])];
+    if (questionName === "Support") {
+      answers.sort((a, b) => {
+        const ra = supportStatusRank(a);
+        const rb = supportStatusRank(b);
+        if (ra !== rb) return ra - rb;
+        return a.localeCompare(b);
+      });
+    } else {
+      answers.sort((a, b) => a.localeCompare(b));
+    }
+    if (answers.length > 0) questions[questionName] = answers;
+  }
   return questions;
 }
 
@@ -59,15 +76,15 @@ export function hasMappableTextQuestions(questions: Record<string, string[]> | u
   return Object.keys(questions ?? {}).length > 0;
 }
 
-/** One sidebar entry per text campaign; mapping keys still use the synthetic survey. */
+/** One sidebar entry per text campaign that has at least one tag. */
 export function buildNithyaTextCampaignStwData(rows: TextTagCatalogRow[]): StwData {
   const tagsByCampaign = new Map<string, string[]>();
   for (const row of rows) {
     const campaignName = row.campaignName.trim();
-    if (!campaignName) continue;
-    const list = tagsByCampaign.get(campaignName) ?? [];
     const tagName = row.tagName.trim();
-    if (tagName) list.push(tagName);
+    if (!campaignName || !tagName) continue;
+    const list = tagsByCampaign.get(campaignName) ?? [];
+    list.push(tagName);
     tagsByCampaign.set(campaignName, list);
   }
 
@@ -102,7 +119,6 @@ export function normalizeTextSyncRow(row: {
   if (!raw || !pdiId) return null;
 
   const classified = classifyTextContactTag(raw, TEXT_CANDIDATE_TAG_ID);
-  if (classified.kind === "other") return null;
 
   const campaignName = String(row.campaign_name ?? "").trim() || TEXT_MAPPING_SURVEY_NAME;
 

@@ -424,7 +424,7 @@ export default function SyncerClient({ channel = "dialer" }: { channel?: PdiSync
         <p className="section-hero__lede">
           {isText ? (
             <>
-              Posts mapped Nithya text tags to PDI flags. Uses{" "}
+              Posts mapped text tags to PDI flags. Uses{" "}
               <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">stw_text_pdi_mapping_*.json</code> from
               Mapper Text mode. Flags are posted with PDI acquisition type{" "}
               <strong>Text Bank</strong>. Dry-run first; live posts share the people ledger with Dialer.
@@ -567,7 +567,7 @@ export default function SyncerClient({ channel = "dialer" }: { channel?: PdiSync
           {mappingCatalog && mappingCatalog.files.length === 0 && !rollbackRun.trim() ? (
             <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2">
               {isText
-                ? "No stw_text_pdi_mapping_*.json in pdi-mappings yet. In Mapper Text mode, map Support and Moved, then Save to pdi-mappings (or upload the JSON here)."
+                ? "No stw_text_pdi_mapping_*.json in pdi-mappings yet. In Mapper Text mode, map the tags you want posted, then Save to pdi-mappings (or upload the JSON here)."
                 : "No stw_pdi_mapping_*.json in pdi-mappings yet. Export from the Mapper, or upload a mapping JSON here."}
             </p>
           ) : null}
@@ -596,7 +596,7 @@ export default function SyncerClient({ channel = "dialer" }: { channel?: PdiSync
             label="Sync range"
             helpText={
               isText
-                ? "Range mode syncs Nithya text tags applied from the selected start through the selected end date."
+                ? "Range mode syncs text tags applied from the selected start through the selected end date."
                 : "Range mode syncs survey results from the selected start through the selected end date."
             }
             maxDate={todayIsoDate()}

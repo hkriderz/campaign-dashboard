@@ -7,6 +7,7 @@ import {
   hasMappableTextQuestions,
   normalizeTextSyncRow,
 } from "./text-tag-stw-data";
+import { buildTextTagCatalogQuery, buildTextTagQuery } from "./sync/text-query";
 import { autoMatchAnswer } from "./auto-match";
 import { collapseTextRowsToLatestStatus } from "./sync/collapse-text";
 import { buildMappingMaps } from "./sync/mapping";
@@ -34,31 +35,49 @@ test("buildNithyaTextStwData collapses raw tags to support statuses", () => {
     "Strong Oppose",
   ]);
   assert.deepEqual(data[TEXT_MAPPING_SURVEY_NAME]?.Moved, ["Recently moved"]);
+  assert.deepEqual(data[TEXT_MAPPING_SURVEY_NAME]?.Other, ["RandomOtherTag"]);
 });
 
-test("buildNithyaTextCampaignStwData lists campaigns separately including untagged lists", () => {
+test("buildNithyaTextCampaignStwData lists every tagged campaign and keeps other tags", () => {
   const data = buildNithyaTextCampaignStwData([
     { campaignName: "Nithya Endorsement", tagName: "NithyaMayorYES" },
     { campaignName: "Nithya Endorsement", tagName: "Moved" },
     { campaignName: "Nithya PAC", tagName: "NithyaMayor_Undecided" },
     { campaignName: "Nithya Pending", tagName: "" },
-    { campaignName: "Nithya Other Only", tagName: "SomeOtherTag" },
+    { campaignName: "School Board GOTV", tagName: "OptOut" },
   ]);
 
   assert.deepEqual(Object.keys(data).sort(), [
     "Nithya Endorsement",
-    "Nithya Other Only",
     "Nithya PAC",
-    "Nithya Pending",
+    "School Board GOTV",
   ]);
   assert.deepEqual(data["Nithya Endorsement"]?.Support, ["Strong Support"]);
   assert.deepEqual(data["Nithya Endorsement"]?.Moved, ["Recently moved"]);
   assert.deepEqual(data["Nithya PAC"]?.Support, ["Undecided"]);
-  assert.deepEqual(data["Nithya Pending"], {});
-  assert.deepEqual(data["Nithya Other Only"], {});
+  assert.deepEqual(data["School Board GOTV"]?.Other, ["OptOut"]);
   assert.equal(hasMappableTextQuestions(data["Nithya Endorsement"]), true);
-  assert.equal(hasMappableTextQuestions(data["Nithya Pending"]), false);
-  assert.equal(hasMappableTextQuestions(data["Nithya Other Only"]), false);
+  assert.equal(hasMappableTextQuestions(data["School Board GOTV"]), true);
+  assert.equal(data["Nithya Pending"], undefined);
+});
+
+test("text mapper catalog lists every tagged text campaign with no name or date cutoff", () => {
+  const sql = buildTextTagCatalogQuery();
+  assert.match(sql, /l11_stw_txt\.campaigns/);
+  assert.match(sql, /campaign_contact_tags/);
+  assert.match(sql, /JOIN `[^`]+` AS tags/);
+  assert.match(sql, /tags\.name IS NOT NULL/);
+  assert.doesNotMatch(sql, /nithya/i);
+  assert.doesNotMatch(sql, /2025-12-01/);
+  assert.doesNotMatch(sql, /created_at/);
+});
+
+test("text sync query includes every tagged campaign in the sync window", () => {
+  const sql = buildTextTagQuery("2026-09-01T00:00:00", "2026-09-02T00:00:00");
+  assert.match(sql, /campaign_contact_tags/);
+  assert.match(sql, /call_time >= '2026-09-01 00:00:00'/);
+  assert.doesNotMatch(sql, /nithya/i);
+  assert.doesNotMatch(sql, /2025-12-01/);
 });
 
 test("normalizeTextSyncRow writes classified status and keeps the raw tag", () => {
@@ -86,9 +105,21 @@ test("normalizeTextSyncRow writes classified status and keeps the raw tag", () =
   assert.equal(noCampaign?.answer_value, "Strong Support");
   assert.equal(noCampaign?._source_answer, "NithyaMayorYES");
 
-  assert.equal(
-    normalizeTextSyncRow({ answer_value: "RandomOtherTag", pdi_id: "CA123" }),
-    null
+  assert.deepEqual(
+    normalizeTextSyncRow({
+      campaign_name: "School Board GOTV",
+      answer_value: "RandomOtherTag",
+      pdi_id: "CA123",
+      call_time: "2026-09-03 12:00:00",
+    }),
+    {
+      campaign_name: "School Board GOTV",
+      question_name: "Other",
+      answer_value: "RandomOtherTag",
+      pdi_id: "CA123",
+      call_time: "2026-09-03 12:00:00",
+      _source_answer: "RandomOtherTag",
+    }
   );
   assert.equal(
     normalizeTextSyncRow({ answer_value: "NithyaMayorYES", pdi_id: "" }),

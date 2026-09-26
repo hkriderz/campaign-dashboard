@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import type { CampaignTag } from "../types";
 import { classifyRecontactChange } from "./change";
 import { normalizeRecontactPersonId } from "./ids";
-import { extractCallSurveyLabels, fillMissingCanvassLabel, surveyRowIsTalkingToCorrectPerson } from "./labels";
+import { extractCallSurveyLabels, fillMissingCanvassLabel, isWereYouContactedQuestion, surveyRowIsTalkingToCorrectPerson } from "./labels";
 import { knockIsQcSupportChecker, knockMatchesPrimaryTag, mergeCanvassPriorsIntoPairs, resolveCanvassPriors } from "./canvass";
 import {
   emptyRecontactSelection,
   pairHasQcContact,
+  pairIsUsefulRecontact,
+  pairMatchesCanvasser,
   pairMatchesChannelChip,
   pairMatchesSelections,
+  pairWithSupportAnswers,
   resolvePhonebankPriors,
   summarizeRecontactPairs,
 } from "./pair";
@@ -31,9 +34,13 @@ function call(partial: Partial<RecontactCallSummary> & Pick<RecontactCallSummary
     callAt: `${partial.callDate}T12:00:00`,
     phonebankerName: "Alex",
     pdiId: "CA123",
+    voterName: "",
+    voterAddress: "",
     finalResultLabel: "Support Faizah",
     pollingLabel: "",
     canvassLabel: "",
+    contactedQuestion: "",
+    contactedAnswer: "",
     ...partial,
   };
 }
@@ -481,4 +488,184 @@ test("donation-only knocks do not create a canvass prior", () => {
     },
   ]);
   assert.equal(priors.length, 0);
+});
+
+test("extractCallSurveyLabels stores Were you contacted in English and Spanish", () => {
+  const english = extractCallSurveyLabels(
+    [{ questionName: "04 Were you contacted?", answerValue: "Yes" }],
+    "faizahTraci"
+  );
+  assert.equal(english.contactedQuestion, "04 Were you contacted?");
+  assert.equal(english.contactedAnswer, "Yes");
+  assert.equal(isWereYouContactedQuestion("¿Te contactaron?"), true);
+  const spanish = extractCallSurveyLabels(
+    [{ questionName: "¿Fue contactado por un canvasser?", answerValue: "No" }],
+    "faizahTraci"
+  );
+  assert.equal(spanish.contactedAnswer, "No");
+  assert.equal(
+    extractCallSurveyLabels([{ questionName: "04 Were you contacted?", answerValue: "[no answer recorded]" }], "faizahTraci")
+      .contactedAnswer,
+    ""
+  );
+});
+
+test("fillMissingCanvassLabel also hydrates polling and Were you contacted", () => {
+  const qc = call({
+    callId: "qc1",
+    callDate: "2026-03-10",
+    canvassLabel: "Talking to Correct Person",
+    pollingLabel: "",
+    contactedAnswer: "",
+  });
+  const filled = fillMissingCanvassLabel(
+    qc,
+    [
+      { questionName: "03 Polling", answerValue: "A. Undecided" },
+      { questionName: "Were you contacted?", answerValue: "Yes" },
+    ],
+    "faizahTraci"
+  );
+  assert.equal(filled.canvassLabel, "Talking to Correct Person");
+  assert.equal(filled.pollingLabel, "Undecided");
+  assert.equal(filled.contactedAnswer, "Yes");
+});
+
+test("pairIsUsefulRecontact drops a correct-person call with no recorded answer", () => {
+  const blank = call({
+    callId: "qc1",
+    callDate: "2026-03-10",
+    pdiId: "CA1",
+    finalResultLabel: "",
+    pollingLabel: "",
+    canvassLabel: "Talking to Correct Person",
+    contactedAnswer: "",
+  });
+  const matched = resolvePhonebankPriors([blank], [call({ callId: "r1", callDate: "2026-03-01", pdiId: "CA1" })], "faizahTraci")[0]!;
+  assert.equal(matched.matchStatus, "matched");
+  assert.equal(pairHasQcContact(matched), true);
+  assert.equal(pairIsUsefulRecontact(matched), false);
+
+  const pollingOnly = {
+    ...matched,
+    qc: { ...matched.qc, pollingLabel: "Undecided" },
+  };
+  assert.equal(pairIsUsefulRecontact(pollingOnly), true);
+
+  const contactedOnly = {
+    ...matched,
+    qc: { ...matched.qc, pollingLabel: "", contactedAnswer: "No" },
+  };
+  assert.equal(pairIsUsefulRecontact(contactedOnly), false);
+  assert.equal(
+    pairIsUsefulRecontact({
+      ...matched,
+      qc: { ...matched.qc, contactedAnswer: "[no answer recorded]" },
+    }),
+    false
+  );
+});
+
+test("canvasser filter matches only the canvass prior actor", () => {
+  const pair: QcRecontactPair = {
+    pairId: "qc1",
+    matchStatus: "matched",
+    changeKind: "held",
+    qc: call({ callId: "qc1", callDate: "2026-03-10", pdiId: "CA1", canvassLabel: "Talking to Correct Person" }),
+    priors: [
+      {
+        channel: "phonebank",
+        pdiId: "CA1",
+        actorName: "Maria",
+        occurredOn: "2026-03-01",
+        listOrAssignment: "Faizah 001",
+        resultLabel: "Strong Support",
+      },
+      {
+        channel: "canvass",
+        pdiId: "CA1",
+        actorName: "Sam Door",
+        occurredOn: "2026-03-02",
+        listOrAssignment: "Faizah Turf 4",
+        resultLabel: "Strong Support",
+      },
+    ],
+  };
+  const empty = emptyRecontactSelection();
+  assert.equal(pairMatchesCanvasser(pair, "Maria"), false);
+  assert.equal(pairMatchesCanvasser(pair, "Sam Door"), true);
+  assert.equal(pairMatchesSelections(pair, { ...empty, canvasser: "Sam Door" }), true);
+  assert.equal(pairMatchesSelections(pair, { ...empty, canvasser: "Maria" }), false);
+  assert.equal(pairMatchesSelections(pair, { ...empty, canvasser: "Sam Door", channels: ["text"] }), false);
+});
+
+test("pairWithSupportAnswers drops priors that have no support label and uses the canvass result", () => {
+  const pair: QcRecontactPair = {
+    pairId: "qc1",
+    matchStatus: "matched",
+    changeKind: "unknown",
+    qc: call({
+      callId: "qc1",
+      callDate: "2026-03-10",
+      pdiId: "CA1",
+      finalResultLabel: "Support Faizah",
+      canvassLabel: "Talking to Correct Person",
+    }),
+    priors: [
+      {
+        channel: "phonebank",
+        pdiId: "CA1",
+        actorName: "Vikas B",
+        occurredOn: "2026-03-09",
+        listOrAssignment: "QC list",
+        resultLabel: "",
+        callAt: "2026-03-09T18:00:00",
+      },
+      {
+        channel: "canvass",
+        pdiId: "CA1",
+        actorName: "Sam Door",
+        occurredOn: "2026-03-02",
+        listOrAssignment: "Turf",
+        resultLabel: "Strong Support",
+        callAt: "2026-03-02T15:00:00",
+      },
+    ],
+  };
+  const shown = pairWithSupportAnswers(pair);
+  assert.equal(shown.priors.length, 1);
+  assert.equal(shown.priors[0]?.channel, "canvass");
+  assert.equal(shown.changeKind, "held");
+  assert.equal(shown.matchStatus, "matched");
+});
+
+test("empty QC voter name falls back to the matched knock sheet voter", () => {
+  const pairs = resolvePhonebankPriors(
+    [call({ callId: "qc1", callDate: "2026-03-10", pdiId: "CA1", voterName: "", voterAddress: "1 Main St" })],
+    [],
+    "faizahTraci"
+  );
+  const index: QcCanvassKnockIndexRow[] = [
+    {
+      primaryId: "CA1",
+      canvasserName: "Sam Door",
+      assignmentName: "Faizah Turf 4",
+      occurredAt: "2026-03-02T15:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Strong Support",
+      reportId: "rep-1",
+      voterName: "Ada Lovelace",
+    },
+  ];
+  const merged = mergeCanvassPriorsIntoPairs(pairs, faizahTag, index, "faizahTraci");
+  assert.equal(merged[0]?.qc.voterName, "Ada Lovelace");
+  assert.equal(merged[0]?.qc.voterAddress, "1 Main St");
+
+  const named = resolvePhonebankPriors(
+    [call({ callId: "qc2", callDate: "2026-03-10", pdiId: "CA1", voterName: "Phone Name" })],
+    [],
+    "faizahTraci"
+  );
+  const kept = mergeCanvassPriorsIntoPairs(named, faizahTag, index, "faizahTraci");
+  assert.equal(kept[0]?.qc.voterName, "Phone Name");
 });

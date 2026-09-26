@@ -22,6 +22,8 @@ export type QcRecontactSelection = {
   channels: RecontactChannelFilter[];
   outcomes: RecontactOutcomeFilter[];
   matches: RecontactMatchFilter[];
+  /** Empty string = all canvassers. */
+  canvasser: string;
 };
 
 export type RecontactCallSummary = {
@@ -33,9 +35,16 @@ export type RecontactCallSummary = {
   callAt: string;
   phonebankerName: string;
   pdiId: string;
+  /** Voter display name. Empty on snapshots saved before this field existed. */
+  voterName: string;
+  /** One-line street / city / state / zip from the QC callee record. */
+  voterAddress: string;
   finalResultLabel: string;
   pollingLabel: string;
   canvassLabel: string;
+  /** Script question that matched “were you contacted”. */
+  contactedQuestion: string;
+  contactedAnswer: string;
 };
 
 export type PriorContactSummary = {
@@ -86,6 +95,8 @@ export type QcCanvassKnockIndexRow = {
   response: string;
   reportId: string;
   sourceFileName?: string;
+  /** Knock-sheet VOTER column. Missing on indexes built before this field existed. */
+  voterName?: string;
 };
 
 export type QcRecontactSurveyAnswer = {

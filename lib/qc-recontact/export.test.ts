@@ -15,9 +15,13 @@ const matched: QcRecontactPair = {
     callAt: "2026-09-12T18:05:00",
     phonebankerName: "Ava",
     pdiId: "PDI123",
+    voterName: "Ada Lovelace",
+    voterAddress: "1 Main St, Los Angeles, CA 90001",
     finalResultLabel: "Strong Oppose",
     pollingLabel: "Undecided",
     canvassLabel: "Talking to Correct Person",
+    contactedQuestion: "Were you contacted?",
+    contactedAnswer: "Yes",
   },
   priors: [
     {
@@ -57,19 +61,24 @@ const unmatched: QcRecontactPair = {
     callAt: "",
     phonebankerName: "Ed",
     pdiId: "PDI999",
+    voterName: "",
+    voterAddress: "",
     finalResultLabel: "Undecided",
     pollingLabel: "",
     canvassLabel: "",
+    contactedQuestion: "",
+    contactedAnswer: "",
   },
   priors: [],
 };
 
 test("recontact CSV remaps candidate result labels to generic SS / U / SO", () => {
   const rows = recontactPairsToCsvRows([matched], "faizahTraci");
-  const resultCells = [rows[0]?.[9], rows[0]?.[10], rows[0]?.[17], rows[0]?.[18], rows[0]?.[19]].join("|");
-  assert.equal(rows[0]?.[9], "Strong oppose");
-  assert.equal(rows[0]?.[17], "Strong support");
-  assert.equal(rows[0]?.[18], "Strong support");
+  const resultCells = [rows[0]?.[12], rows[0]?.[13], rows[0]?.[20], rows[0]?.[21], rows[0]?.[22]].join("|");
+  assert.equal(rows[0]?.[5], "Yes");
+  assert.equal(rows[0]?.[12], "Strong oppose");
+  assert.equal(rows[0]?.[20], "Strong support");
+  assert.equal(rows[0]?.[21], "Strong support");
   assert.doesNotMatch(resultCells, /faizah|nithya/i);
 });
 
@@ -78,12 +87,14 @@ test("recontact CSV is one row per prior and keeps unmatched QC calls", () => {
   assert.equal(rows.length, 3);
   assert.equal(rows[0]?.[0], "Flipped");
   assert.equal(rows[0]?.[2], "PDI123");
-  assert.equal(rows[0]?.[12], "Phone bank");
-  assert.equal(rows[0]?.[23], "Yes");
-  assert.equal(rows[1]?.[12], "Canvass");
-  assert.equal(rows[1]?.[23], "No");
+  assert.equal(rows[0]?.[3], "Ada Lovelace");
+  assert.equal(rows[0]?.[4], "1 Main St, Los Angeles, CA 90001");
+  assert.equal(rows[0]?.[15], "Phone bank");
+  assert.equal(rows[0]?.[26], "Yes");
+  assert.equal(rows[1]?.[15], "Canvass");
+  assert.equal(rows[1]?.[26], "No");
   assert.equal(rows[2]?.[1], "Unmatched");
-  assert.equal(rows[2]?.[12], "");
+  assert.equal(rows[2]?.[15], "");
 });
 
 test("buildRecontactPairsCsv includes a header and escaped cells", () => {

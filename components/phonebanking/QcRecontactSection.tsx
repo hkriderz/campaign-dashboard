@@ -8,7 +8,9 @@ import {
   changeKindLabel,
   displayRecontactResultLabel,
   emptyRecontactSelection,
-  pairHasQcContact,
+  canvasserNamesForPairs,
+  pairIsUsefulRecontact,
+  pairWithSupportAnswers,
   pairMatchesChannelChip,
   pairMatchesMatchChip,
   pairMatchesOutcomeChip,
@@ -90,7 +92,13 @@ export default function QcRecontactSection({
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
-  const scopedPairs = useMemo(() => pairs.filter(pairHasQcContact), [pairs]);
+  const scopedPairs = useMemo(
+    () =>
+      pairs
+        .filter((pair) => pairIsUsefulRecontact(pair, surveyScriptProfile))
+        .map((pair) => pairWithSupportAnswers(pair, surveyScriptProfile)),
+    [pairs, surveyScriptProfile]
+  );
   const stats = useMemo(() => summarizeRecontactPairs(scopedPairs), [scopedPairs]);
   const visible = useMemo(
     () => scopedPairs.filter((pair) => pairMatchesSelections(pair, selection)),
@@ -110,6 +118,7 @@ export default function QcRecontactSection({
     }
     return counts;
   }, [scopedPairs]);
+  const canvasserNames = useMemo(() => canvasserNamesForPairs(scopedPairs), [scopedPairs]);
   const matchCounts = useMemo(() => {
     const counts = {} as Record<RecontactMatchFilter, number>;
     for (const chip of MATCH_CHIPS) {
@@ -161,7 +170,7 @@ export default function QcRecontactSection({
         <div>
           <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200">Recontacts</h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            QC calls that reached the correct person, matched to prior phone-bank, canvass, and text contacts.
+            QC calls that reached the correct person and recorded an answer, matched to prior phone-bank, canvass, and text contacts.
             Combine chips across rows. No Reply is a text prior with no inbound voter message.
           </p>
         </div>
@@ -283,6 +292,27 @@ export default function QcRecontactSection({
                 })}
               </div>
             </div>
+            <div>
+              <label htmlFor="qc-recontact-canvasser" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Canvasser
+              </label>
+              <select
+                id="qc-recontact-canvasser"
+                value={selection.canvasser}
+                onChange={(event) => setSelection((prev) => ({ ...prev, canvasser: event.target.value }))}
+                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              >
+                <option value="">All canvassers</option>
+                {selection.canvasser && !canvasserNames.includes(selection.canvasser) ? (
+                  <option value={selection.canvasser}>{selection.canvasser}</option>
+                ) : null}
+                {canvasserNames.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -315,7 +345,7 @@ export default function QcRecontactSection({
           {visible.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 px-3 py-6 text-sm text-center text-gray-500 dark:text-gray-400">
               {scopedPairs.length === 0
-                ? "No QC calls that reached the correct person in this date range."
+                ? "No QC calls that reached the correct person and recorded an answer in this date range."
                 : "No recontact rows for this filter combination."}
             </div>
           ) : (
@@ -328,6 +358,8 @@ export default function QcRecontactSection({
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Prior</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Prior result</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Were you contacted</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC polling</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC result</th>
                   </tr>
                 </thead>
@@ -355,8 +387,10 @@ export default function QcRecontactSection({
                             {changeKindLabel(pair.changeKind)}
                           </span>
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-gray-800 dark:text-gray-200">
-                          {pair.qc.pdiId || "—"}
+                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+                          <div className="font-mono">{pair.qc.pdiId || "—"}</div>
+                          <div>{pair.qc.voterName?.trim() || "—"}</div>
+                          <div className="text-gray-500 dark:text-gray-400">{pair.qc.voterAddress?.trim() || "—"}</div>
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
                           {priors.length ? (
@@ -392,6 +426,12 @@ export default function QcRecontactSection({
                             {formatShortUsDate(pair.qc.callDate)}
                           </div>
                           <div className="text-gray-500 dark:text-gray-400">{pair.qc.campaignName}</div>
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+                          {pair.qc.contactedAnswer?.trim() || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-xs">
+                          {displayRecontactResultLabel(pair.qc.pollingLabel, surveyScriptProfile) || "—"}
                         </td>
                         <td className="px-3 py-2 text-xs">
                           {displayRecontactResultLabel(pair.qc.finalResultLabel, surveyScriptProfile) || "—"}

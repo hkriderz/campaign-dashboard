@@ -17,13 +17,19 @@ function callTimeMs(callTime: SurveyResultRow["call_time"]): number {
 }
 
 function statusGroupKey(row: SurveyResultRow): string {
-  return `${norm(row.campaign_name)}\0${norm(row.pdi_id)}\0${norm(row.question_name)}`;
+  const campaign = norm(row.campaign_name);
+  const pdiId = norm(row.pdi_id);
+  const question = norm(row.question_name);
+  const base = `${campaign}\0${pdiId}\0${question}`;
+  if (question === "Support" || question === "Moved") return base;
+  return `${base}\0${norm(row.answer_value)}`;
 }
 
 /**
  * Phonebank analog of one Final Result per call: keep the latest Support (or
- * Moved) tag per person in a campaign. Earlier conflicting statuses are dropped
- * so the same PDI ID cannot receive both SS and U from one list.
+ * Moved) tag per person in a campaign. Distinct tags under Other are kept.
+ * Earlier conflicting Support or Moved statuses are dropped so the same PDI ID
+ * cannot receive both SS and U from one list.
  */
 export function collapseTextRowsToLatestStatus(rows: SurveyResultRow[]): {
   rows: SurveyResultRow[];

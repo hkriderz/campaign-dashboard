@@ -46,6 +46,14 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 Unique IDs
               </Link>
               <Link
+                href="/canvassing/canvassers"
+                onClick={onNavClick}
+                className={navLinkClass(pathname.startsWith("/canvassing/canvassers"))}
+              >
+                <span className="w-1.5 h-1.5 rounded-none bg-teal-700 dark:bg-teal-400 flex-shrink-0" />
+                Canvasser Overview
+              </Link>
+              <Link
                 href="/canvassing"
                 onClick={onNavClick}
                 className={navLinkClass(pathname === "/canvassing")}

@@ -31,9 +31,13 @@ function call(partial: Partial<RecontactCallSummary> & Pick<RecontactCallSummary
     callAt: `${partial.callDate}T12:00:00`,
     phonebankerName: "Alex",
     pdiId: "CA123",
+    voterName: "",
+    voterAddress: "",
     finalResultLabel: "Support Faizah",
     pollingLabel: "",
     canvassLabel: "",
+    contactedQuestion: "",
+    contactedAnswer: "",
     ...partial,
   };
 }
@@ -248,7 +252,7 @@ test("recontact CSV writes Text as the prior channel", () => {
     ],
   };
   const rows = recontactPairsToCsvRows([pair], "faizahTraci");
-  assert.equal(rows[0]?.[12], "Text");
-  assert.equal(rows[0]?.[16], "Sam");
-  assert.equal(rows[0]?.[23], "Yes");
+  assert.equal(rows[0]?.[15], "Text");
+  assert.equal(rows[0]?.[19], "Sam");
+  assert.equal(rows[0]?.[26], "Yes");
 });

@@ -1,5 +1,6 @@
 import { runQuery, PROJECT, DATASET } from "../bigquery";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
+import { pdiIdExtractSql } from "@/lib/pdi-tools/sync/pdi-id-sql";
 import {
   loadCallSurveyFillSnapshot,
   loadRecontactPairsSnapshot,
@@ -20,12 +21,15 @@ import {
   extractCallSurveyLabels,
   fillMissingCanvassLabel,
   normalizeRecontactPersonId,
+  qcCallHasRecordedResponse,
   resolvePhonebankPriors,
+  withRecontactCallDefaults,
   type QcRecontactDetailPayload,
   type QcRecontactPair,
   type QcRecontactSurveyAnswer,
   type RecontactCallSummary,
 } from "../qc-recontact";
+import { extractCalleeIdentity } from "../qc-recontact/identity";
 import { mergeCanvassPriorsIntoPairs } from "../qc-recontact/canvass";
 import { mergeTextPriorsIntoPairs } from "../qc-recontact/text";
 import { fetchTagCallSurveyRowsForFinalFill } from "./phonebanking";
@@ -37,13 +41,8 @@ const P = PROJECT;
 const D = DATASET;
 const PHONEBANK_WINDOW_START_DATE = "2025-12-01";
 
-/** Prefer STW `v1_pdiID`, then older pdi_id keys in `callees.data`. */
-const CALLEE_PDI_ID_SQL = `IFNULL(COALESCE(
-  REGEXP_EXTRACT(callees.data, r'(?i)"v1_pdiid"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(callees.data, r'(?i)"pdi_id"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(callees.data, r'(?i)"pdi id"\\s*:\\s*"([^"]+)"'),
-  REGEXP_EXTRACT(callees.data, r'(?i)"[^"]*pdi[ _]?id[^"]*"\\s*:\\s*"([^"]+)"')
-), "")`;
+/** PDI keys first, then `v1_primaryid` / `primary_id` when the value is `CA` + digits. */
+const CALLEE_PDI_ID_SQL = pdiIdExtractSql("callees.data");
 
 function requireDashboardDataAccess(): void {
   assertDataAccessAllowed({ gcp: true });
@@ -61,6 +60,8 @@ export type PdiSurveyRow = {
   callAt: string;
   phonebankerName: string;
   pdiId: string;
+  voterName: string;
+  voterAddress: string;
   questionName: string;
   answerValue: string;
 };
@@ -89,6 +90,8 @@ export function groupRowsIntoCallSummaries(
       callAt: first.callAt,
       phonebankerName: first.phonebankerName,
       pdiId: first.pdiId,
+      voterName: first.voterName,
+      voterAddress: first.voterAddress,
       ...labels,
     });
   }
@@ -101,7 +104,6 @@ function hydrateRecontactPairsFromSurveyFill(
   profile: SurveyScriptProfile,
   terms: readonly string[]
 ): QcRecontactPair[] {
-  if (!fillRows.length) return [...pairs];
   const byCall = new Map<string, CallSurveyRowForFill[]>();
   for (const row of fillRows) {
     const list = byCall.get(row.callId) ?? [];
@@ -110,7 +112,7 @@ function hydrateRecontactPairsFromSurveyFill(
   }
   return pairs.map((pair) => {
     const rows = byCall.get(pair.qc.callId) ?? [];
-    const qc = fillMissingCanvassLabel(pair.qc, rows, profile, terms);
+    const qc = fillMissingCanvassLabel(withRecontactCallDefaults(pair.qc), rows, profile, terms);
     return qc === pair.qc ? pair : { ...pair, qc };
   });
 }
@@ -134,6 +136,7 @@ export async function fetchTagPdiSurveyRows(
       ) AS call_at,
       callers.name AS phonebanker_name,
       ${CALLEE_PDI_ID_SQL} AS pdi_id,
+      COALESCE(callees.data, '') AS callee_data,
       COALESCE(survey.question_name, '') AS question_name,
       TRIM(COALESCE(survey.answer_value, '')) AS answer_value
     FROM \`${P}.${D}.survey_results\` survey
@@ -153,17 +156,22 @@ export async function fetchTagPdiSurveyRows(
   `;
 
   const rows = await runQuery<Record<string, unknown>>(sql);
-  return rows.map((r) => ({
-    callId: toStr(r.call_id),
-    campaignId: toStr(r.campaign_id),
-    campaignName: toStr(r.campaign_name),
-    callDate: toDateString(r.call_date) ?? "",
-    callAt: toStr(r.call_at),
-    phonebankerName: canonicalizePhonebankerName(toStr(r.phonebanker_name)),
-    pdiId: normalizeRecontactPersonId(toStr(r.pdi_id)),
-    questionName: toStr(r.question_name),
-    answerValue: toStr(r.answer_value),
-  }));
+  return rows.map((r) => {
+    const identity = extractCalleeIdentity(toStr(r.callee_data));
+    return {
+      callId: toStr(r.call_id),
+      campaignId: toStr(r.campaign_id),
+      campaignName: toStr(r.campaign_name),
+      callDate: toDateString(r.call_date) ?? "",
+      callAt: toStr(r.call_at),
+      phonebankerName: canonicalizePhonebankerName(toStr(r.phonebanker_name)),
+      pdiId: normalizeRecontactPersonId(toStr(r.pdi_id)),
+      voterName: identity.voterName,
+      voterAddress: identity.voterAddress,
+      questionName: toStr(r.question_name),
+      answerValue: toStr(r.answer_value),
+    };
+  });
 }
 
 export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promise<QcRecontactPair[]> {
@@ -182,8 +190,8 @@ export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promis
   ]);
 
   const terms = candidateTermsForTag(primaryTag);
-  const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, terms).filter((qc) =>
-    canvassResultIsTalkingToCorrectPerson(qc.canvassLabel)
+  const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, terms).filter(
+    (qc) => canvassResultIsTalkingToCorrectPerson(qc.canvassLabel) && qcCallHasRecordedResponse(qc, profile)
   );
   const phonePairs = resolvePhonebankPriors(
     qcCalls,

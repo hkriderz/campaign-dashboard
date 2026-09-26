@@ -74,7 +74,7 @@ export function buildMappingReport(
     const survey = norm(r.campaign_name);
     const question = norm(r.question_name);
     const answer = norm(r.answer_value);
-    const pdiId = norm(r.pdi_id || r.callee_id || r.caller_id);
+    const pdiId = norm(r.pdi_id);
     const callId = norm(r.call_id);
     const calleeRowId = norm(r.callee_id);
 
@@ -246,7 +246,7 @@ export function writeSyncCsvReports(
         sync_window_end: opts.syncWindowEnd,
         call_id: String(r.call_id ?? ""),
         campaign_name: norm(r.campaign_name),
-        pdi_id: norm(r.pdi_id || r.callee_id || r.caller_id),
+        pdi_id: norm(r.pdi_id),
         final_result_question: norm(r.question_name),
         source_question: norm(r._fill_source_question),
         synthesized_answer: norm(r.answer_value),

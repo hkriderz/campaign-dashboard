@@ -24,10 +24,24 @@ export type RecontactSurveyRow = {
 
 const TALKING_TO_CORRECT_PERSON_LABEL = "Talking to Correct Person";
 
-function usableSurveyAnswer(answerValue: string): string {
-  const av = answerValue.trim();
+const WERE_YOU_CONTACTED_HINTS = ["were you contacted", "te contactaron", "fue contactad"];
+
+/** Non-blank survey text. `[no answer recorded]` and missing values count as empty. */
+export function recordedSurveyAnswer(answerValue: string | undefined | null): string {
+  const av = (answerValue ?? "").trim();
   if (!av || av.toLowerCase() === "[no answer recorded]") return "";
   return av;
+}
+
+function usableSurveyAnswer(answerValue: string): string {
+  return recordedSurveyAnswer(answerValue);
+}
+
+/** QC script question asking whether a canvasser (or caller) already reached this voter. */
+export function isWereYouContactedQuestion(questionName: string): boolean {
+  const n = normalizeSurveyTextForMatching(questionName.trim().toLowerCase());
+  if (!n) return false;
+  return WERE_YOU_CONTACTED_HINTS.some((hint) => n.includes(hint));
 }
 
 function isAffirmativeSurveyAnswer(answerValue: string): boolean {
@@ -113,10 +127,18 @@ export function extractCallSurveyLabels(
   rows: readonly RecontactSurveyRow[],
   profile: SurveyScriptProfile,
   terms: readonly string[] = []
-): { finalResultLabel: string; pollingLabel: string; canvassLabel: string } {
+): {
+  finalResultLabel: string;
+  pollingLabel: string;
+  canvassLabel: string;
+  contactedQuestion: string;
+  contactedAnswer: string;
+} {
   let finalResultLabel = "";
   let pollingLabel = "";
   let canvassLabel = "";
+  let contactedQuestion = "";
+  let contactedAnswer = "";
   let sawTalkingToCorrectPerson = false;
 
   for (const row of rows) {
@@ -129,6 +151,13 @@ export function extractCallSurveyLabels(
       const av = usableSurveyAnswer(row.answerValue);
       if (av) {
         pollingLabel = classifySurveyAnswerDisplayLabel(av, profile);
+      }
+    }
+    if (isWereYouContactedQuestion(row.questionName)) {
+      const av = usableSurveyAnswer(row.answerValue);
+      if (av) {
+        contactedQuestion = row.questionName.trim();
+        contactedAnswer = av;
       }
     }
     if (surveyRowIsTalkingToCorrectPerson(row.questionName, row.answerValue)) {
@@ -147,18 +176,40 @@ export function extractCallSurveyLabels(
     finalResultLabel = comparableSupportResultFromRows(rows, profile, terms);
   }
 
-  return { finalResultLabel, pollingLabel, canvassLabel };
+  return { finalResultLabel, pollingLabel, canvassLabel, contactedQuestion, contactedAnswer };
 }
 
-/** Older recontact snapshots left `canvassLabel` empty for combined Canvass Result columns. */
+/**
+ * Older snapshots omitted canvass, polling, or Were you contacted.
+ * Fills only the fields that are still empty. Leaves a recorded value in place.
+ */
 export function fillMissingCanvassLabel(
   qc: RecontactCallSummary,
   rows: readonly RecontactSurveyRow[],
   profile: SurveyScriptProfile,
   terms: readonly string[] = []
 ): RecontactCallSummary {
-  if (qc.canvassLabel.trim()) return qc;
+  const needsCanvass = !recordedSurveyAnswer(qc.canvassLabel);
+  const needsPolling = !recordedSurveyAnswer(qc.pollingLabel);
+  const needsContacted = !recordedSurveyAnswer(qc.contactedAnswer);
+  if (!needsCanvass && !needsPolling && !needsContacted) return qc;
+  if (!rows.length) return qc;
+
   const labels = extractCallSurveyLabels(rows, profile, terms);
-  if (!labels.canvassLabel) return qc;
-  return { ...qc, canvassLabel: labels.canvassLabel };
+  const next: RecontactCallSummary = { ...qc };
+  let changed = false;
+  if (needsCanvass && labels.canvassLabel) {
+    next.canvassLabel = labels.canvassLabel;
+    changed = true;
+  }
+  if (needsPolling && labels.pollingLabel) {
+    next.pollingLabel = labels.pollingLabel;
+    changed = true;
+  }
+  if (needsContacted && labels.contactedAnswer) {
+    next.contactedQuestion = labels.contactedQuestion;
+    next.contactedAnswer = labels.contactedAnswer;
+    changed = true;
+  }
+  return changed ? next : qc;
 }

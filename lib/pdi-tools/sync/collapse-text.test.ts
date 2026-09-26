@@ -114,3 +114,26 @@ test("Support and Moved for the same person are both kept", () => {
     ["Moved", "Support"]
   );
 });
+
+test("distinct Other tags for the same person are both kept", () => {
+  const optOut = classified({
+    campaign_name: "School Board GOTV",
+    answer_value: "OptOut",
+    pdi_id: "CA123",
+    call_time: "2026-09-02 09:00:00",
+  });
+  const wrong = classified({
+    campaign_name: "School Board GOTV",
+    answer_value: "WrongNumber",
+    pdi_id: "CA123",
+    call_time: "2026-09-02 10:00:00",
+  });
+
+  const { rows, collapsedCount } = collapseTextRowsToLatestStatus([optOut, wrong]);
+  assert.equal(collapsedCount, 0);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    rows.map((row) => row.answer_value).sort(),
+    ["OptOut", "WrongNumber"]
+  );
+});

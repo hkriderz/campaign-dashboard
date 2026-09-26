@@ -56,7 +56,7 @@ export function transformSurveyRows(
     const survey = norm(r.campaign_name);
     const question = norm(r.question_name);
     const answer = norm(r.answer_value);
-    const pdiId = norm(r.pdi_id || r.callee_id || r.caller_id);
+    const pdiId = norm(r.pdi_id);
 
     if (!pdiId) {
       rowsSkipped += 1;
