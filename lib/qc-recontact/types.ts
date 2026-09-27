@@ -22,8 +22,10 @@ export type QcRecontactSelection = {
   channels: RecontactChannelFilter[];
   outcomes: RecontactOutcomeFilter[];
   matches: RecontactMatchFilter[];
-  /** Empty string = all canvassers. */
-  canvasser: string;
+  /** Empty string = every prior phonebanker and canvasser. */
+  priorActor: string;
+  /** Empty string = every QC phonebanker. */
+  qcCaller: string;
 };
 
 export type RecontactCallSummary = {

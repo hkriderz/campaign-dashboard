@@ -382,16 +382,13 @@ export default function CanvassingOverviewClient() {
                     <th className="px-2.5 py-2 text-left">Text</th>
                     <th className="px-2.5 py-2 text-left">Canvass</th>
                     <th className="px-2.5 py-2 text-left">Changed</th>
+                    <th className="px-2.5 py-2 text-left">Details</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                   {payload.candidateSummaries.map((row) => (
                     <tr key={row.id} className="odd:bg-white even:bg-gray-50/70 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
-                      <td className="px-2.5 py-1.5 font-medium">
-                        <button type="button" onClick={() => setTagId(row.id)} className="underline-offset-2 hover:underline">
-                          {row.label}
-                        </button>
-                      </td>
+                      <td className="px-2.5 py-1.5 font-medium">{row.label}</td>
                       <td className="px-2.5 py-1.5 tabular-nums">{formatNumber(row.combined.uniqueIds)}</td>
                       <td className={`px-2.5 py-1.5 tabular-nums ${familyTone("strongSupport")}`}>
                         {formatNumber(row.combined.strongSupport)}
@@ -403,18 +400,15 @@ export default function CanvassingOverviewClient() {
                       <td className="px-2.5 py-1.5 tabular-nums">{formatNumber(row.byChannel.phone.uniqueIds)}</td>
                       <td className="px-2.5 py-1.5 tabular-nums">{formatNumber(row.byChannel.text.uniqueIds)}</td>
                       <td className="px-2.5 py-1.5 tabular-nums">{formatNumber(row.byChannel.canvass.uniqueIds)}</td>
-                      <td className="px-2.5 py-1.5 tabular-nums">
-                        {row.changes.changed ? (
-                          <button
-                            type="button"
-                            onClick={() => setTagId(row.id)}
-                            className="underline-offset-2 hover:underline"
-                          >
-                            {formatNumber(row.changes.changed)}
-                          </button>
-                        ) : (
-                          formatNumber(row.changes.changed)
-                        )}
+                      <td className="px-2.5 py-1.5 tabular-nums">{formatNumber(row.changes.changed)}</td>
+                      <td className="px-2.5 py-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setTagId(row.id)}
+                          className="border border-[var(--section-rule)] px-2 py-0.5 hover:border-[var(--section-accent)]"
+                        >
+                          Show more details
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -636,13 +630,14 @@ function ChangeTable({
                     <tr className="border-t border-[var(--section-rule)]">
                       <td className={`py-1.5 pr-3 ${familyTone(row.from)}`}>{familyDisplayLabel(row.from)}</td>
                       <td className={`py-1.5 pr-3 ${familyTone(row.to)}`}>{familyDisplayLabel(row.to)}</td>
-                      <td className="py-1.5 tabular-nums">
+                      <td className="py-1.5">
+                        <span className="tabular-nums">{formatNumber(row.count)}</span>
                         <button
                           type="button"
                           onClick={() => setOpenKey(expanded ? null : key)}
-                          className="underline-offset-2 hover:underline"
+                          className="ml-3 border border-[var(--section-rule)] px-2 py-0.5 hover:border-[var(--section-accent)]"
                         >
-                          {formatNumber(row.count)}
+                          Show more details
                         </button>
                       </td>
                     </tr>

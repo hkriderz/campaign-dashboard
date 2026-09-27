@@ -30,7 +30,7 @@ import {
   type RecontactCallSummary,
 } from "../qc-recontact";
 import { extractCalleeIdentity } from "../qc-recontact/identity";
-import { mergeCanvassPriorsIntoPairs } from "../qc-recontact/canvass";
+import { mergeCanvassPriorsIntoPairs, replaceCanvassPriorsFromKnockIndex } from "../qc-recontact/canvass";
 import { mergeTextPriorsIntoPairs } from "../qc-recontact/text";
 import { fetchTagCallSurveyRowsForFinalFill } from "./phonebanking";
 import { fetchTagTextContacts, fetchTextConversation } from "./text-recontact";
@@ -234,8 +234,9 @@ export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcReco
   const snap = loadRecontactPairsSnapshot(tagId);
   if (!snap) return { pairs: [], hasSnapshot: false };
   const fillRows = loadCallSurveyFillSnapshot(tagId)?.rows ?? [];
+  const hydrated = hydrateRecontactPairsFromSurveyFill(snap.pairs, fillRows, profile, terms);
   return {
-    pairs: hydrateRecontactPairsFromSurveyFill(snap.pairs, fillRows, profile, terms),
+    pairs: replaceCanvassPriorsFromKnockIndex(hydrated, primaryTag, loadKnockIndexRows(), profile),
     hasSnapshot: true,
   };
 }

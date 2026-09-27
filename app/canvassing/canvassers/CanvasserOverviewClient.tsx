@@ -175,7 +175,7 @@ export default function CanvasserOverviewClient() {
     <div className="space-y-5">
       <div>
         <p className="section-kicker text-teal-800 dark:text-teal-300">Field / QC</p>
-        <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">Canvasser Overview</h1>
+        <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">Canvasser QC Overview</h1>
         <hr className="section-hero__rule bg-teal-700 dark:bg-teal-300" />
         <p className="section-hero__lede">
           QC calls that reached the voter, grouped by the canvasser who originally ID’d them. Recall
@@ -243,9 +243,14 @@ export default function CanvasserOverviewClient() {
       ) : (
         <div className="border border-[var(--section-rule)] overflow-hidden bg-[var(--section-paper)]">
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[var(--section-rule)]">
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              {loading ? "Updating…" : `${formatNumber(payload?.canvassers.length ?? 0)} canvassers · ${formatNumber(surveyedTotal)} surveyed`}
-            </p>
+            <div className="min-w-0 space-y-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {loading ? "Updating…" : `${formatNumber(payload?.canvassers.length ?? 0)} canvassers · ${formatNumber(surveyedTotal)} surveyed`}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Click each canvasser name to show more details
+              </p>
+            </div>
             <button
               type="button"
               onClick={downloadCsv}

@@ -30,7 +30,6 @@ export {
 export { classifyRecontactChange } from "./change";
 export {
   callSummaryToPhonebankPrior,
-  canvasserNamesForPairs,
   changeKindLabel,
   emptyRecontactSelection,
   filterPairsByQcDateRange,
@@ -38,8 +37,11 @@ export {
   pairHasNoReply,
   pairHasQcContact,
   pairIsUsefulRecontact,
-  pairMatchesCanvasser,
   pairMatchesChannelChip,
+  pairMatchesPriorActor,
+  pairMatchesQcCaller,
+  priorActorNamesForPairs,
+  qcCallerNamesForPairs,
   pairMatchesMatchChip,
   pairMatchesOutcomeChip,
   pairMatchesSelections,
@@ -52,6 +54,7 @@ export {
 } from "./pair";
 export {
   buildRecontactPairsCsv,
+  buildRecontactTableTsv,
   recontactExportFilename,
 } from "./export";
 export {

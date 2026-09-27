@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildRecontactPairsCsv, recontactExportFilename, recontactPairsToCsvRows } from "./export";
+import { buildRecontactPairsCsv, buildRecontactTableTsv, recontactExportFilename, recontactPairsToCsvRows } from "./export";
 import type { QcRecontactPair } from "./types";
 
 const matched: QcRecontactPair = {
@@ -95,6 +95,23 @@ test("recontact CSV is one row per prior and keeps unmatched QC calls", () => {
   assert.equal(rows[1]?.[26], "No");
   assert.equal(rows[2]?.[1], "Unmatched");
   assert.equal(rows[2]?.[15], "");
+});
+
+test("copy table keeps a comma address in one column", () => {
+  const tsv = buildRecontactTableTsv([matched], "faizahTraci");
+  const [header, first] = tsv.split("\r\n");
+  assert.equal(
+    header,
+    "Change\tPDI\tVoter name\tVoter address\tPrior\tPrior channel\tPrior date\tPrior list\tPrior result\tQC\tQC date\tQC list\tWere you contacted\tQC polling\tQC result"
+  );
+  const cells = first?.split("\t") ?? [];
+  assert.equal(cells.length, 15);
+  assert.equal(cells[3], "1 Main St, Los Angeles, CA 90001");
+  assert.equal(cells[4], "Sidney");
+  assert.equal(cells[6], "9/9/26");
+  assert.equal(cells[9], "Ava");
+  const lines = tsv.trim().split("\r\n");
+  assert.equal(lines.length, 3);
 });
 
 test("buildRecontactPairsCsv includes a header and escaped cells", () => {

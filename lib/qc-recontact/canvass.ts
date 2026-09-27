@@ -14,7 +14,7 @@ import { classifiedAnswerIsFinalResultBucket } from "../survey-answer-consolidat
 import type { CampaignTag, SurveyScriptProfile } from "../types";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, normalizeRecontactPersonId } from "./ids";
-import { sortPriorsNewestFirst } from "./pair";
+import { firstClassifiablePrior, sortPriorsNewestFirst } from "./pair";
 import type {
   PriorContactSummary,
   QcCanvassKnockIndexRow,
@@ -121,6 +121,36 @@ export function resolveCanvassPriors(
   const latest = latestSupportKnock(pdiId, primaryTag, beforeDate, beforeAt, knockIndex);
   if (!want || !latest) return [];
   return [priorFromKnock(latest, want)];
+}
+
+function withoutSavedCanvassPriors(pair: QcRecontactPair, profile: SurveyScriptProfile): QcRecontactPair {
+  if (!pair.priors.some((prior) => prior.channel === "canvass")) return pair;
+  const priors = pair.priors.filter((prior) => prior.channel !== "canvass");
+  if (pair.matchStatus === "no_pdi") return { ...pair, priors };
+  const source = firstClassifiablePrior(priors);
+  return {
+    ...pair,
+    priors,
+    matchStatus: priors.length > 0 ? "matched" : "unmatched",
+    changeKind: source
+      ? classifyRecontactChange(source.resultLabel, pair.qc.finalResultLabel, profile)
+      : "unknown",
+  };
+}
+
+/**
+ * Drop canvass priors saved on the QC snapshot and apply the current knock index.
+ * Phone and text priors stay as stored. Unique ID uploads update the knock index
+ * without a BigQuery rebuild, so page loads must read that file again.
+ */
+export function replaceCanvassPriorsFromKnockIndex(
+  pairs: readonly QcRecontactPair[],
+  primaryTag: CampaignTag,
+  knockIndex: readonly QcCanvassKnockIndexRow[],
+  profile: SurveyScriptProfile
+): QcRecontactPair[] {
+  const stripped = pairs.map((pair) => withoutSavedCanvassPriors(pair, profile));
+  return mergeCanvassPriorsIntoPairs(stripped, primaryTag, knockIndex, profile);
 }
 
 /**

@@ -1,3 +1,4 @@
+import { QC_CAMPAIGN_NAME_MARKERS, campaignNameLooksLikeQc } from "./qc-campaign-name";
 import type { CampaignTag, SurveyScriptProfile } from "./types";
 import {
   readCampaignTagsConfigFromDisk,
@@ -31,7 +32,7 @@ export const QC_NAV_GROUP_LABEL = "QC Calls";
  * Substrings matched case-insensitively on `campaigns.name` (LIKE) to treat a list as QC.
  * Extend when STW uses new naming (e.g. "quality control", "q.c.").
  */
-export const QC_CAMPAIGN_NAME_MARKERS: readonly string[] = ["qc"];
+export { QC_CAMPAIGN_NAME_MARKERS, campaignNameLooksLikeQc };
 
 /**
  * Built-in candidates when no config file or empty `tags` array.
@@ -284,16 +285,6 @@ export function getCanvassingTags(): CampaignTag[] {
 /** True when `id` is a derived QC slug (`qc-<candidateId>`). */
 export function isDerivedQcTagId(tagId: string): boolean {
   return tagId.startsWith("qc-") && tagId.length > 3;
-}
-
-/** STW list names that belong on QC Calls pages (`LIKE '%qc%'`). */
-export function campaignNameLooksLikeQc(campaignName: string): boolean {
-  const n = campaignName.trim().toLowerCase();
-  if (!n) return false;
-  return QC_CAMPAIGN_NAME_MARKERS.some((raw) => {
-    const marker = raw.trim().toLowerCase();
-    return Boolean(marker) && n.includes(marker);
-  });
 }
 
 /** Daily Aggregate membership: candidate pages exclude QC lists; QC pages keep only QC; All Campaigns keeps both. */

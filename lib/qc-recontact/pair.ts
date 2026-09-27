@@ -1,3 +1,4 @@
+import { campaignNameLooksLikeQc } from "../qc-campaign-name";
 import type { SurveyScriptProfile } from "../types";
 import {
   classifySurveyAnswerDisplayLabel,
@@ -61,10 +62,13 @@ function indexPrimaryCallsByPdi(primaryCalls: readonly RecontactCallSummary[]): 
 
 function pickLatestPriorBefore(
   qc: RecontactCallSummary,
-  candidates: readonly RecontactCallSummary[]
+  candidates: readonly RecontactCallSummary[],
+  profile: SurveyScriptProfile
 ): RecontactCallSummary | null {
   for (const prior of candidates) {
     if (prior.callId && prior.callId === qc.callId) continue;
+    if (campaignNameLooksLikeQc(prior.campaignName)) continue;
+    if (!isRecordedSupportLabel(prior.finalResultLabel, profile)) continue;
     if (callOccurredBefore(prior.callDate, prior.callAt, qc.callDate, qc.callAt)) {
       return prior;
     }
@@ -74,7 +78,8 @@ function pickLatestPriorBefore(
 
 /**
  * Pair each QC call to the latest regular phone-bank call for the same PDI
- * strictly before the QC call. Does not consult canvassing.
+ * strictly before the QC call. Skips other QC lists and calls with no
+ * Strong support, Undecided, or Strong oppose answer. Does not consult canvassing.
  */
 export function resolvePhonebankPriors(
   qcCalls: readonly RecontactCallSummary[],
@@ -96,7 +101,7 @@ export function resolvePhonebankPriors(
           changeKind: "unknown" as const,
         };
       }
-      const prior = pickLatestPriorBefore(qcNorm, byPdi.get(pdi) ?? []);
+      const prior = pickLatestPriorBefore(qcNorm, byPdi.get(pdi) ?? [], profile);
       if (!prior) {
         return {
           pairId: qc.callId,
@@ -186,7 +191,7 @@ export function pairWithSupportAnswers(
 }
 
 export function emptyRecontactSelection(): QcRecontactSelection {
-  return { channels: [], outcomes: [], matches: [], canvasser: "" };
+  return { channels: [], outcomes: [], matches: [], priorActor: "", qcCaller: "" };
 }
 
 /** Text prior with a stored false inbound flag. Missing flag (old snapshots) is unknown. */
@@ -207,23 +212,46 @@ export function pairMatchesMatchChip(pair: QcRecontactPair, match: RecontactMatc
   return pair.matchStatus === match;
 }
 
-/** Canvass prior actor. Phone and text actors do not match. */
-export function pairMatchesCanvasser(pair: QcRecontactPair, canvasser: string): boolean {
-  const want = canvasser.trim();
-  if (!want) return true;
-  return pair.priors.some((prior) => prior.channel === "canvass" && prior.actorName.trim() === want);
+function sortPersonNames(names: Iterable<string>): string[] {
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
-export function canvasserNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
+/** Prior phonebanker or canvasser. Text texters do not match. */
+export function pairMatchesPriorActor(pair: QcRecontactPair, actorName: string): boolean {
+  const want = actorName.trim();
+  if (!want) return true;
+  return pair.priors.some(
+    (prior) =>
+      (prior.channel === "phonebank" || prior.channel === "canvass") && prior.actorName.trim() === want
+  );
+}
+
+/** QC phonebanker on the QC call. */
+export function pairMatchesQcCaller(pair: QcRecontactPair, callerName: string): boolean {
+  const want = callerName.trim();
+  if (!want) return true;
+  return pair.qc.phonebankerName.trim() === want;
+}
+
+export function priorActorNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
   const names = new Set<string>();
   for (const pair of pairs) {
     for (const prior of pair.priors) {
-      if (prior.channel !== "canvass") continue;
+      if (prior.channel !== "phonebank" && prior.channel !== "canvass") continue;
       const name = prior.actorName.trim();
       if (name) names.add(name);
     }
   }
-  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  return sortPersonNames(names);
+}
+
+export function qcCallerNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
+  const names = new Set<string>();
+  for (const pair of pairs) {
+    const name = pair.qc.phonebankerName.trim();
+    if (name) names.add(name);
+  }
+  return sortPersonNames(names);
 }
 
 /**
@@ -245,8 +273,10 @@ export function pairMatchesSelections(pair: QcRecontactPair, selection: QcRecont
   if (selection.matches.length > 0 && !selection.matches.some((match) => pairMatchesMatchChip(pair, match))) {
     return false;
   }
-  const canvasser = selection.canvasser?.trim() ?? "";
-  if (canvasser && !pairMatchesCanvasser(pair, canvasser)) return false;
+  const priorActor = selection.priorActor?.trim() ?? "";
+  if (priorActor && !pairMatchesPriorActor(pair, priorActor)) return false;
+  const qcCaller = selection.qcCaller?.trim() ?? "";
+  if (qcCaller && !pairMatchesQcCaller(pair, qcCaller)) return false;
   return true;
 }
 

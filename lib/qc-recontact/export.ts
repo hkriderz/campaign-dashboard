@@ -1,4 +1,5 @@
 import { escapeCsvCell } from "../pivot-csv-export";
+import { formatShortUsDate } from "../slice-key";
 import type { SurveyScriptProfile } from "../types";
 import { displayRecontactResultLabel } from "./labels";
 import { changeKindLabel, firstClassifiablePrior, recontactChannelLabel } from "./pair";
@@ -120,6 +121,89 @@ export function recontactPairsToCsvRows(
     });
   }
   return rows;
+}
+
+export const RECONTACT_TABLE_HEADERS = [
+  "Change",
+  "PDI",
+  "Voter name",
+  "Voter address",
+  "Prior",
+  "Prior channel",
+  "Prior date",
+  "Prior list",
+  "Prior result",
+  "QC",
+  "QC date",
+  "QC list",
+  "Were you contacted",
+  "QC polling",
+  "QC result",
+] as const;
+
+/** One spreadsheet cell. Tabs and line breaks would split the paste into extra columns or rows. */
+function spreadsheetCell(value: string): string {
+  return value.replace(/[\t\r\n]+/g, " ").trim();
+}
+
+function tablePriorCells(prior: PriorContactSummary | undefined, profile: SurveyScriptProfile): string[] {
+  if (!prior) return ["", "", "", "", ""];
+  return [
+    prior.actorName,
+    recontactChannelLabel(prior.channel),
+    formatShortUsDate(prior.occurredOn),
+    prior.listOrAssignment,
+    displayRecontactResultLabel(prior.resultLabel, profile),
+  ];
+}
+
+/** Visible recontact columns, one row per prior. Unmatched QC calls keep one row with empty prior cells. */
+export function recontactPairsToTableRows(
+  pairs: readonly QcRecontactPair[],
+  profile: SurveyScriptProfile = "faizahTraci"
+): string[][] {
+  const rows: string[][] = [];
+  for (const pair of pairs) {
+    const qc = pair.qc;
+    const baseStart = [
+      changeKindLabel(pair.changeKind),
+      qc.pdiId,
+      qc.voterName ?? "",
+      qc.voterAddress ?? "",
+    ];
+    const baseEnd = [
+      qc.phonebankerName,
+      formatShortUsDate(qc.callDate),
+      qc.campaignName,
+      qc.contactedAnswer ?? "",
+      displayRecontactResultLabel(qc.pollingLabel, profile),
+      displayRecontactResultLabel(qc.finalResultLabel, profile),
+    ];
+    const priors = pair.priors;
+    if (priors.length === 0) {
+      rows.push([...baseStart, ...tablePriorCells(undefined, profile), ...baseEnd]);
+      continue;
+    }
+    for (const prior of priors) {
+      rows.push([...baseStart, ...tablePriorCells(prior, profile), ...baseEnd]);
+    }
+  }
+  return rows;
+}
+
+/**
+ * Tab-separated copy of the on-screen table. Spreadsheets paste tabs into columns
+ * and leave commas inside an address in that cell.
+ */
+export function buildRecontactTableTsv(
+  pairs: readonly QcRecontactPair[],
+  profile: SurveyScriptProfile = "faizahTraci"
+): string {
+  const lines = [
+    RECONTACT_TABLE_HEADERS.map((header) => spreadsheetCell(header)).join("\t"),
+    ...recontactPairsToTableRows(pairs, profile).map((row) => row.map((cell) => spreadsheetCell(cell)).join("\t")),
+  ];
+  return lines.join("\r\n");
 }
 
 /** RFC 4180 CSV of the visible recontact table. One row per QC call × prior. */

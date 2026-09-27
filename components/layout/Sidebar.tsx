@@ -51,7 +51,7 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 className={navLinkClass(pathname.startsWith("/canvassing/canvassers"))}
               >
                 <span className="w-1.5 h-1.5 rounded-none bg-teal-700 dark:bg-teal-400 flex-shrink-0" />
-                Canvasser Overview
+                Canvasser QC Overview
               </Link>
               <Link
                 href="/canvassing"

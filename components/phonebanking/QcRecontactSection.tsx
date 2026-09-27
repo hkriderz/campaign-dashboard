@@ -5,16 +5,18 @@ import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
   buildRecontactPairsCsv,
+  buildRecontactTableTsv,
   changeKindLabel,
   displayRecontactResultLabel,
   emptyRecontactSelection,
-  canvasserNamesForPairs,
   pairIsUsefulRecontact,
   pairWithSupportAnswers,
   pairMatchesChannelChip,
   pairMatchesMatchChip,
   pairMatchesOutcomeChip,
   pairMatchesSelections,
+  priorActorNamesForPairs,
+  qcCallerNamesForPairs,
   recontactChannelLabel,
   recontactExportFilename,
   summarizeRecontactPairs,
@@ -75,6 +77,44 @@ function changeBadgeClass(kind: QcRecontactChangeKind): string {
   }
 }
 
+function PersonFilter({
+  id,
+  label,
+  emptyLabel,
+  value,
+  names,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  emptyLabel: string;
+  value: string;
+  names: readonly string[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        {label}
+      </label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full min-w-[12rem] rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 sm:w-auto"
+      >
+        <option value="">{emptyLabel}</option>
+        {value && !names.includes(value) ? <option value={value}>{value}</option> : null}
+        {names.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 type Props = {
   tagId: string;
   pairs: QcRecontactPair[];
@@ -118,7 +158,8 @@ export default function QcRecontactSection({
     }
     return counts;
   }, [scopedPairs]);
-  const canvasserNames = useMemo(() => canvasserNamesForPairs(scopedPairs), [scopedPairs]);
+  const priorActorNames = useMemo(() => priorActorNamesForPairs(scopedPairs), [scopedPairs]);
+  const qcCallerNames = useMemo(() => qcCallerNamesForPairs(scopedPairs), [scopedPairs]);
   const matchCounts = useMemo(() => {
     const counts = {} as Record<RecontactMatchFilter, number>;
     for (const chip of MATCH_CHIPS) {
@@ -131,7 +172,7 @@ export default function QcRecontactSection({
     return buildRecontactPairsCsv(visible, surveyScriptProfile);
   }
 
-  async function copyCsv() {
+  async function copyTable() {
     setExportMessage(null);
     setExportError(null);
     if (visible.length === 0) {
@@ -139,10 +180,12 @@ export default function QcRecontactSection({
       return;
     }
     try {
-      await writeTextToClipboard(exportCsv());
-      setExportMessage(`Copied ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"} as CSV.`);
+      await writeTextToClipboard(buildRecontactTableTsv(visible, surveyScriptProfile));
+      setExportMessage(
+        `Copied ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"}. Paste into a spreadsheet to keep each column in its own cell.`
+      );
     } catch {
-      setExportError("Unable to copy CSV. Your browser may be blocking clipboard access.");
+      setExportError("Unable to copy the table. Your browser may be blocking clipboard access.");
     }
   }
 
@@ -178,11 +221,11 @@ export default function QcRecontactSection({
           <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button
               type="button"
-              onClick={() => void copyCsv()}
+              onClick={() => void copyTable()}
               disabled={visible.length === 0}
               className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
             >
-              Copy CSV
+              Copy table
             </button>
             <button
               type="button"
@@ -202,7 +245,7 @@ export default function QcRecontactSection({
           <p className="text-xs text-emerald-700 dark:text-emerald-300">{exportMessage}</p>
         ) : (
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Copy or download the current filter as CSV (one row per prior; empty prior columns when unmatched).
+            Copy table pastes into a spreadsheet as columns. Download CSV is the full export (one row per prior).
           </p>
         )
       ) : null}
@@ -292,26 +335,23 @@ export default function QcRecontactSection({
                 })}
               </div>
             </div>
-            <div>
-              <label htmlFor="qc-recontact-canvasser" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                Canvasser
-              </label>
-              <select
-                id="qc-recontact-canvasser"
-                value={selection.canvasser}
-                onChange={(event) => setSelection((prev) => ({ ...prev, canvasser: event.target.value }))}
-                className="rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-              >
-                <option value="">All canvassers</option>
-                {selection.canvasser && !canvasserNames.includes(selection.canvasser) ? (
-                  <option value={selection.canvasser}>{selection.canvasser}</option>
-                ) : null}
-                {canvasserNames.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <PersonFilter
+                id="qc-recontact-prior"
+                label="Prior"
+                emptyLabel="All prior callers"
+                value={selection.priorActor}
+                names={priorActorNames}
+                onChange={(priorActor) => setSelection((prev) => ({ ...prev, priorActor }))}
+              />
+              <PersonFilter
+                id="qc-recontact-qc"
+                label="QC"
+                emptyLabel="All QC callers"
+                value={selection.qcCaller}
+                names={qcCallerNames}
+                onChange={(qcCaller) => setSelection((prev) => ({ ...prev, qcCaller }))}
+              />
             </div>
           </div>
 
