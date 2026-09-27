@@ -413,12 +413,13 @@ test("keeps phone and canvass priors separate and changeKind uses the latest cha
   assert.equal(pairMatchesChannelChip(merged[0]!, "canvass"), true);
 });
 
-test("resolveCanvassPriors matches PRIMARYID and candidate assignment when an index is passed", () => {
+test("resolveCanvassPriors matches the candidate question, not the turf or file name", () => {
   const index: QcCanvassKnockIndexRow[] = [
     {
       primaryId: "ca1",
       canvasserName: "Sam Door",
-      assignmentName: "Faizah Turf 4",
+      assignmentName: "Ana Lidia N QC 9-13-26",
+      sourceFileName: "Canvasser Details.csv",
       occurredAt: "2026-03-02T15:00:00",
       question: "Can we count on you to support Faizah?",
       response: "Strong Support",
@@ -427,7 +428,7 @@ test("resolveCanvassPriors matches PRIMARYID and candidate assignment when an in
     {
       primaryId: "CA1",
       canvasserName: "Other Candidate",
-      assignmentName: "Ada Walk",
+      assignmentName: "Faizah Turf 4",
       occurredAt: "2026-03-03T15:00:00",
       question: "Can we count on you to support Ada?",
       response: "Undecided",
@@ -438,8 +439,10 @@ test("resolveCanvassPriors matches PRIMARYID and candidate assignment when an in
   assert.equal(priors.length, 1);
   assert.equal(priors[0]?.channel, "canvass");
   assert.equal(priors[0]?.actorName, "Sam Door");
-  assert.equal(knockMatchesPrimaryTag(index[0]!, faizahTag), true);
-  assert.equal(knockMatchesPrimaryTag(index[1]!, faizahTag), false);
+  assert.equal(priors[0]?.listOrAssignment, "Ana Lidia N QC 9-13-26");
+  assert.equal(knockMatchesPrimaryTag(index[0]!, faizahTag), false);
+  assert.equal(knockIsQcSupportChecker(index[0]!, faizahTag), true);
+  assert.equal(knockIsQcSupportChecker(index[1]!, faizahTag), false);
 });
 
 test("canvass prior ignores a later donation and uses the candidate ID support answer", () => {

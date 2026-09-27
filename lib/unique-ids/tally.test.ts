@@ -144,15 +144,27 @@ test("knock support folds into Strong support and ignores donate rows", () => {
       knock({
         primaryId: "CA2",
         occurredAt: "2026-09-06T11:00:00.000-07:00",
-        assignmentName: "Faizah Turf A",
+        assignmentName: "Nithya Eng 9-5-26",
+        question: "Can we count on you to support Faizah?",
+        response: "Undecided",
+      }),
+      knock({
+        primaryId: "CA3",
+        occurredAt: "2026-09-14T16:27:07.000-07:00",
+        assignmentName: "Ana Lidia N QC 9-13-26",
+        question: "Can we count on you to support Nithya Raman for mayor?",
         response: "Undecided",
       }),
     ],
     { tag: nithyaTag }
   );
-  assert.equal(events.length, 1);
-  assert.equal(events[0]?.personId, "CA1");
-  assert.equal(events[0]?.family, "strongSupport");
+  assert.equal(events.length, 2);
+  assert.deepEqual(
+    events.map((row) => row.personId).sort(),
+    ["CA1", "CA3"]
+  );
+  assert.equal(events.find((row) => row.personId === "CA3")?.family, "undecided");
+  assert.equal(events.find((row) => row.personId === "CA3")?.campaignName, "Ana Lidia N QC 9-13-26");
 });
 
 test("latest label wins across days and channels; channel breakout stays separate", () => {

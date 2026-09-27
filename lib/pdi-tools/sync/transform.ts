@@ -9,6 +9,11 @@ function norm(x: unknown): string {
   return String(x).trim();
 }
 
+/**
+ * Calendar day the answer was recorded.
+ * `call_time` is already a Pacific wall time from the sync query. Taking the
+ * date prefix avoids shifting an evening call onto the next UTC day.
+ */
 export function extractFlagDate(callTimeVal: unknown): string {
   if (!callTimeVal) return new Date().toISOString().slice(0, 10);
 
@@ -19,15 +24,8 @@ export function extractFlagDate(callTimeVal: unknown): string {
     valStr = String(callTimeVal).trim();
   }
 
-  const parsed = Date.parse(valStr.replace(" ", "T"));
-  if (!Number.isNaN(parsed)) {
-    return new Date(parsed).toISOString().slice(0, 10);
-  }
-
-  if (valStr.length >= 10) {
-    const datePart = valStr.slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return datePart;
-  }
+  const recordedDay = /^(\d{4}-\d{2}-\d{2})/.exec(valStr);
+  if (recordedDay?.[1]) return recordedDay[1];
 
   return new Date().toISOString().slice(0, 10);
 }

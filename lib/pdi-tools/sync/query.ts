@@ -1,6 +1,12 @@
 import { STW_DATASET, STW_PROJECT } from "./constants";
 import { pdiIdExtractSql } from "./pdi-id-sql";
 
+/**
+ * Dialer survey rows for a sync window.
+ * Each flag is dated from its own call: Pacific time of connected_at, or
+ * created_at when the call never connected. The campaign is that call's
+ * campaign, so an earlier contact on the same PDI cannot supply the date.
+ */
 export function buildSurveyQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");
   const endStr = endIso.slice(0, 19).replace("T", " ");
@@ -9,7 +15,10 @@ export function buildSurveyQuery(startIso: string, endIso: string): string {
     WITH base AS (
       SELECT
         callees.id AS callee_id,
-        DATETIME(calls.connected_at) AS call_time,
+        DATETIME(
+          COALESCE(calls.connected_at, calls.created_at),
+          'America/Los_Angeles'
+        ) AS call_time,
         SAFE.PARSE_JSON(callees.data) AS new_data,
         calls.id AS call_id,
         ${pdiIdExtractSql("callees.data")} AS pdi_id,
@@ -26,7 +35,9 @@ export function buildSurveyQuery(startIso: string, endIso: string): string {
       JOIN \`${STW_PROJECT}.${STW_DATASET}.callers\` AS callers
         ON calls.caller_id = callers.id
       JOIN \`${STW_PROJECT}.${STW_DATASET}.campaigns\` AS campaigns
-        ON survey.campaign_id = campaigns.id
+        ON calls.campaign_id = campaigns.id
+      WHERE survey.deleted_at IS NULL
+        AND survey.question_name IS NOT NULL
     )
     SELECT *
     FROM base

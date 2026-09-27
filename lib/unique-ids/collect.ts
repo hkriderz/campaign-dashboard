@@ -6,7 +6,7 @@ import {
 } from "../canvassing/overview-tally";
 import { isFinalResultQuestionName } from "../daily-aggregate-survey-rollup";
 import { campaignNameLooksLikeQc } from "../campaign-tags";
-import { knockMatchesPrimaryTag } from "../qc-recontact/canvass";
+import { knockIsQcSupportChecker } from "../qc-recontact/canvass";
 import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 import type { QcTextContactSummary, RecontactCallSummary } from "../qc-recontact/types";
 import type { CampaignTag, SurveyScriptProfile } from "../types";
@@ -138,7 +138,7 @@ export function collectKnockEvents(
   const tag = options.tag;
   const grouped = new Map<string, ClassifiedKnock[]>();
   for (const row of rows) {
-    if (tag && !knockMatchesPrimaryTag(row, tag)) continue;
+    if (tag && !knockIsQcSupportChecker(row, tag, profile)) continue;
     const classified = classifyKnockRow(row, profile);
     if (!classified) continue;
     const key = `${classified.personId}|${classified.day}`;

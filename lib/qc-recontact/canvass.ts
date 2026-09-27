@@ -23,7 +23,7 @@ import type {
 
 /**
  * True when a knock assignment or source filename would belong to this candidate.
- * Future canvassing match uses the same helper as QC vs regular phone-bank lists.
+ * QC priors and Unique IDs do not use this. They match the candidate question.
  */
 export function knockMatchesPrimaryTag(
   row: Pick<QcCanvassKnockIndexRow, "assignmentName" | "sourceFileName">,
@@ -92,7 +92,6 @@ function latestSupportKnock(
   const profile = resolveSurveyScriptProfile(primaryTag);
   const matches = knockIndex.filter((row) => {
     if (normalizeRecontactPersonId(row.primaryId) !== want) return false;
-    if (!knockMatchesPrimaryTag(row, primaryTag)) return false;
     if (!knockIsQcSupportChecker(row, primaryTag, profile)) return false;
     const occurredOn = knockOccurredOn(row);
     if (!occurredOn) return false;

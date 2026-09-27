@@ -35,7 +35,9 @@ export function buildTextTagCatalogQuery(): string {
  * Tagged contacts with an extractable PDI id, for every text campaign.
  * `answer_value` is the raw STW tag name. The engine classifies Nithya Mayor
  * and Moved tags, keeps other tags under Other, then keeps the latest status
- * per person, campaign, and question.
+ * per person, campaign, and question. `call_time` is the Pacific time the tag
+ * was applied, so each flag is dated on that day even when the person was
+ * contacted on other lists.
  */
 export function buildTextTagQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");
@@ -46,11 +48,7 @@ export function buildTextTagQuery(startIso: string, endIso: string): string {
       SELECT
         campaigns.name AS campaign_name,
         tags.name AS answer_value,
-        DATETIME(COALESCE(
-          campaign_contact_tags.created_at,
-          campaigns.started_at,
-          campaigns.created_at
-        )) AS call_time,
+        DATETIME(campaign_contact_tags.created_at, 'America/Los_Angeles') AS call_time,
         IFNULL(${TEXT_PDI_ID_SQL}, "") AS pdi_id
       FROM \`${P}.${D}.campaign_contact_tags\` AS campaign_contact_tags
       JOIN \`${P}.${D}.tags\` AS tags
