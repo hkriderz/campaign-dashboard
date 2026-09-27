@@ -12,6 +12,8 @@ export type UniqueIdContactEvent = {
   family: UniqueIdFamily;
   campaignName: string;
   actorName: string;
+  /** Voter name when the source stored one. Blank for text-only contacts and older snapshots. */
+  voterName: string;
 };
 
 export type UniqueIdFamilyCounts = {
@@ -44,6 +46,8 @@ export type UniqueIdChangeSummary = {
 
 export type UniqueIdRow = {
   personId: string;
+  /** Latest nonempty voter name across this person's events. Display only. */
+  voterName: string;
   family: UniqueIdFamily;
   occurredOn: string;
   occurredAt: string;

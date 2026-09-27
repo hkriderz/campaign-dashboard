@@ -76,37 +76,59 @@ function priorFromKnock(latest: QcCanvassKnockIndexRow, pdiId: string): PriorCon
 }
 
 /**
- * Latest canvassing knock for this PDI / PRIMARYID before the QC date.
- * Callers pass the saved knock index from `data/canvassing-reports/knock-index.json`.
+ * Support knocks grouped by normalized PDI. Same checker and date requirement
+ * as a per-pair scan of the full index.
  */
-function latestSupportKnock(
-  pdiId: string,
+function indexSupportKnocksByPdi(
+  knockIndex: readonly QcCanvassKnockIndexRow[],
   primaryTag: CampaignTag,
+  profile: SurveyScriptProfile
+): Map<string, QcCanvassKnockIndexRow[]> {
+  const byPdi = new Map<string, QcCanvassKnockIndexRow[]>();
+  for (const row of knockIndex) {
+    const pdi = normalizeRecontactPersonId(row.primaryId);
+    if (!pdi) continue;
+    if (!knockIsQcSupportChecker(row, primaryTag, profile)) continue;
+    if (!knockOccurredOn(row)) continue;
+    const list = byPdi.get(pdi);
+    if (list) list.push(row);
+    else byPdi.set(pdi, [row]);
+  }
+  return byPdi;
+}
+
+function latestKnockBefore(
+  candidates: readonly QcCanvassKnockIndexRow[],
   beforeDate: string,
-  beforeAt: string | undefined,
-  knockIndex: readonly QcCanvassKnockIndexRow[]
+  beforeAt: string | undefined
 ): QcCanvassKnockIndexRow | null {
-  const want = normalizeRecontactPersonId(pdiId);
-  if (!want || knockIndex.length === 0) return null;
-
-  const profile = resolveSurveyScriptProfile(primaryTag);
-  const matches = knockIndex.filter((row) => {
-    if (normalizeRecontactPersonId(row.primaryId) !== want) return false;
-    if (!knockIsQcSupportChecker(row, primaryTag, profile)) return false;
-    const occurredOn = knockOccurredOn(row);
-    if (!occurredOn) return false;
-    return callOccurredBefore(occurredOn, row.occurredAt, beforeDate, beforeAt);
-  });
-
+  const matches = candidates.filter((row) =>
+    callOccurredBefore(knockOccurredOn(row), row.occurredAt, beforeDate, beforeAt)
+  );
   if (!matches.length) return null;
-
   matches.sort((a, b) => {
     const byStamp = (b.occurredAt || "").localeCompare(a.occurredAt || "");
     if (byStamp !== 0) return byStamp;
     return (b.reportId || "").localeCompare(a.reportId || "");
   });
-
   return matches[0] ?? null;
+}
+
+/**
+ * Latest canvassing knock for this PDI / PRIMARYID before the QC date.
+ * `byPdi` is the once-per-request index from `indexSupportKnocksByPdi`.
+ */
+function latestSupportKnock(
+  pdiId: string,
+  beforeDate: string,
+  beforeAt: string | undefined,
+  byPdi: ReadonlyMap<string, readonly QcCanvassKnockIndexRow[]>
+): QcCanvassKnockIndexRow | null {
+  const want = normalizeRecontactPersonId(pdiId);
+  if (!want) return null;
+  const candidates = byPdi.get(want);
+  if (!candidates?.length) return null;
+  return latestKnockBefore(candidates, beforeDate, beforeAt);
 }
 
 export function resolveCanvassPriors(
@@ -117,7 +139,9 @@ export function resolveCanvassPriors(
   knockIndex: readonly QcCanvassKnockIndexRow[] = []
 ): PriorContactSummary[] {
   const want = normalizeRecontactPersonId(pdiId);
-  const latest = latestSupportKnock(pdiId, primaryTag, beforeDate, beforeAt, knockIndex);
+  const profile = resolveSurveyScriptProfile(primaryTag);
+  const byPdi = indexSupportKnocksByPdi(knockIndex, primaryTag, profile);
+  const latest = latestSupportKnock(pdiId, beforeDate, beforeAt, byPdi);
   if (!want || !latest) return [];
   return [priorFromKnock(latest, want)];
 }
@@ -164,13 +188,18 @@ export function mergeCanvassPriorsIntoPairs(
 ): QcRecontactPair[] {
   if (!knockIndex.length) return [...pairs];
 
+  const byPdi = indexSupportKnocksByPdi(
+    knockIndex,
+    primaryTag,
+    resolveSurveyScriptProfile(primaryTag)
+  );
+
   return pairs.map((pair) => {
     const latest = latestSupportKnock(
       pair.qc.pdiId,
-      primaryTag,
       pair.qc.callDate,
       pair.qc.callAt || undefined,
-      knockIndex
+      byPdi
     );
     if (!latest) return pair;
 

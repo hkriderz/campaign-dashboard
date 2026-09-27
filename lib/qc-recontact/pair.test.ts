@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { CampaignTag } from "../types";
+import { resolveSurveyScriptProfile } from "../campaign-tags";
 import { classifyRecontactChange } from "./change";
-import { normalizeRecontactPersonId } from "./ids";
+import { callOccurredBefore, matchesPdiOrNameQuery, normalizeRecontactPersonId } from "./ids";
 import { extractCallSurveyLabels, fillMissingCanvassLabel, isWereYouContactedQuestion, surveyRowIsTalkingToCorrectPerson } from "./labels";
 import {
   knockIsQcSupportChecker,
@@ -792,4 +793,131 @@ test("empty QC voter name falls back to the matched knock sheet voter", () => {
   );
   const kept = mergeCanvassPriorsIntoPairs(named, faizahTag, index, "faizahTraci");
   assert.equal(kept[0]?.qc.voterName, "Phone Name");
+});
+
+function knockDay(row: QcCanvassKnockIndexRow): string {
+  const stamp = row.occurredAt.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(stamp)) return stamp.slice(0, 10);
+  return "";
+}
+
+/** The pre-index full scan. The PDI map must return this same prior. */
+function linearLatestSupportKnock(
+  pdiId: string,
+  primaryTag: CampaignTag,
+  beforeDate: string,
+  beforeAt: string | undefined,
+  knockIndex: readonly QcCanvassKnockIndexRow[]
+): QcCanvassKnockIndexRow | null {
+  const want = normalizeRecontactPersonId(pdiId);
+  if (!want || knockIndex.length === 0) return null;
+  const profile = resolveSurveyScriptProfile(primaryTag);
+  const matches = knockIndex.filter((row) => {
+    if (normalizeRecontactPersonId(row.primaryId) !== want) return false;
+    if (!knockIsQcSupportChecker(row, primaryTag, profile)) return false;
+    const occurredOn = knockDay(row);
+    if (!occurredOn) return false;
+    return callOccurredBefore(occurredOn, row.occurredAt, beforeDate, beforeAt);
+  });
+  if (!matches.length) return null;
+  matches.sort((a, b) => {
+    const byStamp = (b.occurredAt || "").localeCompare(a.occurredAt || "");
+    if (byStamp !== 0) return byStamp;
+    return (b.reportId || "").localeCompare(a.reportId || "");
+  });
+  return matches[0] ?? null;
+}
+
+test("PDI index picks the same prior as a full knock scan", () => {
+  const index: QcCanvassKnockIndexRow[] = [
+    {
+      primaryId: "ca 1",
+      canvasserName: "Older",
+      assignmentName: "Faizah Turf 1",
+      occurredAt: "2026-03-01T10:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Undecided",
+      reportId: "a",
+    },
+    {
+      primaryId: "CA1",
+      canvasserName: "Newer",
+      assignmentName: "Faizah Turf 2",
+      occurredAt: "2026-03-04T10:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Strong Support",
+      reportId: "b",
+    },
+    {
+      primaryId: "CA1",
+      canvasserName: "Tie Low",
+      assignmentName: "Faizah Turf 2",
+      occurredAt: "2026-03-04T10:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Strong Support",
+      reportId: "a",
+    },
+    {
+      primaryId: "CA2",
+      canvasserName: "Other Person",
+      assignmentName: "Faizah Turf 9",
+      occurredAt: "2026-03-08T10:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Strong Support",
+      reportId: "z",
+    },
+    {
+      primaryId: "CA1",
+      canvasserName: "After QC",
+      assignmentName: "Faizah Turf 3",
+      occurredAt: "2026-03-11T10:00:00",
+      question: "Can we count on you to support Faizah?",
+      response: "Undecided",
+      reportId: "c",
+    },
+    {
+      primaryId: "CA1",
+      canvasserName: "No Date",
+      assignmentName: "Faizah Turf 4",
+      occurredAt: "",
+      question: "Can we count on you to support Faizah?",
+      response: "Strong Support",
+      reportId: "d",
+    },
+    {
+      primaryId: "CA1",
+      canvasserName: "Donation",
+      assignmentName: "Faizah Turf 5",
+      occurredAt: "2026-03-05T10:00:00",
+      question: "Would you like to donate to Faizah?",
+      response: "Undecided",
+      reportId: "e",
+    },
+  ];
+  const beforeDate = "2026-03-10";
+  const beforeAt = "2026-03-10T18:00:00";
+  const scanned = linearLatestSupportKnock("CA1", faizahTag, beforeDate, beforeAt, index);
+  const priors = resolveCanvassPriors("CA1", faizahTag, beforeDate, beforeAt, index);
+  assert.equal(scanned?.canvasserName, "Newer");
+  assert.equal(priors.length, 1);
+  assert.equal(priors[0]?.actorName, scanned?.canvasserName);
+  assert.equal(priors[0]?.callAt, scanned?.occurredAt);
+  assert.equal(priors[0]?.resultLabel, scanned?.response.trim());
+
+  const otherScan = linearLatestSupportKnock("CA2", faizahTag, beforeDate, beforeAt, index);
+  const otherPriors = resolveCanvassPriors("CA2", faizahTag, beforeDate, beforeAt, index);
+  assert.equal(otherScan?.canvasserName, "Other Person");
+  assert.equal(otherPriors[0]?.actorName, otherScan?.canvasserName);
+  assert.equal(otherPriors[0]?.callAt, otherScan?.occurredAt);
+});
+
+test("matchesPdiOrNameQuery keeps full PDI matches and adds name matches", () => {
+  assert.equal(matchesPdiOrNameQuery("", "CA55278516", "Joseph Mosqueda"), true);
+  assert.equal(matchesPdiOrNameQuery("CA55278516", "CA55278516", "Joseph Mosqueda"), true);
+  assert.equal(matchesPdiOrNameQuery("ca55278516", "CA55278516", ""), true);
+  assert.equal(matchesPdiOrNameQuery("CA 55278516", "CA55278516", ""), true);
+  assert.equal(matchesPdiOrNameQuery("55278516", "CA55278516", "Joseph Mosqueda"), true);
+  assert.equal(matchesPdiOrNameQuery("Mosqueda", "CA55278516", "Joseph Mosqueda"), true);
+  assert.equal(matchesPdiOrNameQuery("joseph mosqueda", "CA55278516", "Joseph Mosqueda"), true);
+  assert.equal(matchesPdiOrNameQuery("Nobody", "CA55278516", "Joseph Mosqueda"), false);
 });

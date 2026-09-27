@@ -9,6 +9,7 @@ import {
   changeKindLabel,
   displayRecontactResultLabel,
   emptyRecontactSelection,
+  matchesPdiOrNameQuery,
   pairIsUsefulRecontact,
   pairWithSupportAnswers,
   pairMatchesChannelChip,
@@ -48,6 +49,8 @@ const MATCH_CHIPS: Array<{ id: RecontactMatchFilter; label: string }> = [
   { id: "unmatched", label: "Unmatched" },
   { id: "no_pdi", label: "No PDI" },
 ];
+
+const RECONTACT_PAGE_SIZE = 100;
 
 function toggleValue<T extends string>(list: readonly T[], id: T): T[] {
   return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
@@ -129,6 +132,8 @@ export default function QcRecontactSection({
   surveyScriptProfile,
 }: Props) {
   const [selection, setSelection] = useState(emptyRecontactSelection);
+  const [pdiQuery, setPdiQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -140,10 +145,31 @@ export default function QcRecontactSection({
     [pairs, surveyScriptProfile]
   );
   const stats = useMemo(() => summarizeRecontactPairs(scopedPairs), [scopedPairs]);
+  const searchQuery = pdiQuery.trim();
+  const filterKey = [
+    searchQuery,
+    selection.priorActor,
+    selection.qcCaller,
+    selection.channels.join("\0"),
+    selection.outcomes.join("\0"),
+    selection.matches.join("\0"),
+  ].join("|");
+  const [trackedFilterKey, setTrackedFilterKey] = useState(filterKey);
+  if (trackedFilterKey !== filterKey) {
+    setTrackedFilterKey(filterKey);
+    setPage(1);
+  }
   const visible = useMemo(
-    () => scopedPairs.filter((pair) => pairMatchesSelections(pair, selection)),
-    [scopedPairs, selection]
+    () =>
+      scopedPairs.filter((pair) => {
+        if (!pairMatchesSelections(pair, selection)) return false;
+        return matchesPdiOrNameQuery(pdiQuery, pair.qc.pdiId, pair.qc.voterName ?? "");
+      }),
+    [scopedPairs, selection, pdiQuery]
   );
+  const pageCount = Math.max(1, Math.ceil(visible.length / RECONTACT_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = visible.slice((safePage - 1) * RECONTACT_PAGE_SIZE, safePage * RECONTACT_PAGE_SIZE);
   const channelCounts = useMemo(() => {
     const counts = {} as Record<RecontactChannelFilter, number>;
     for (const chip of CHANNEL_CHIPS) {
@@ -352,6 +378,24 @@ export default function QcRecontactSection({
                 names={qcCallerNames}
                 onChange={(qcCaller) => setSelection((prev) => ({ ...prev, qcCaller }))}
               />
+              <div>
+                <label
+                  htmlFor="qc-recontact-pdi"
+                  className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400"
+                >
+                  PDI / name
+                </label>
+                <input
+                  id="qc-recontact-pdi"
+                  type="search"
+                  value={pdiQuery}
+                  onChange={(event) => setPdiQuery(event.target.value)}
+                  placeholder="Search PDI or name"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-full min-w-[12rem] rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 sm:w-auto"
+                />
+              </div>
             </div>
           </div>
 
@@ -386,9 +430,12 @@ export default function QcRecontactSection({
             <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 px-3 py-6 text-sm text-center text-gray-500 dark:text-gray-400">
               {scopedPairs.length === 0
                 ? "No QC calls that reached the correct person and recorded an answer in this date range."
-                : "No recontact rows for this filter combination."}
+                : searchQuery
+                  ? "No recontact rows match that PDI or name."
+                  : "No recontact rows for this filter combination."}
             </div>
           ) : (
+            <>
             <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-900">
               <table className="w-full text-sm text-left">
                 <thead>
@@ -404,7 +451,7 @@ export default function QcRecontactSection({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {visible.map((pair) => {
+                  {pageRows.map((pair) => {
                     const priors = pair.priors;
                     return (
                       <tr
@@ -482,6 +529,33 @@ export default function QcRecontactSection({
                 </tbody>
               </table>
             </div>
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <p className="text-gray-500 dark:text-gray-400">
+                Page {safePage} of {pageCount}
+                {visible.length > RECONTACT_PAGE_SIZE
+                  ? ` · ${visible.length.toLocaleString()} rows`
+                  : ""}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage(safePage - 1)}
+                  disabled={safePage <= 1}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage(safePage + 1)}
+                  disabled={safePage >= pageCount}
+                  className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+            </>
           )}
         </>
       )}

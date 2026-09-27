@@ -17,7 +17,7 @@ export type {
   RecontactOutcomeFilter,
 } from "./types";
 
-export { normalizeRecontactPersonId, callOccurredBefore } from "./ids";
+export { normalizeRecontactPersonId, matchesPdiOrNameQuery, callOccurredBefore } from "./ids";
 export {
   canvassResultIsTalkingToCorrectPerson,
   displayRecontactResultLabel,

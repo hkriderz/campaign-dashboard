@@ -35,6 +35,13 @@ export type AppendKnockIndexResult = {
 const DATA_ROOT = path.join(process.cwd(), "data", "canvassing-reports");
 const INDEX_PATH = path.join(DATA_ROOT, "knock-index.json");
 
+/** Parse cache for this process. Invalidated by mtime, size, and every write. */
+let knockIndexCache: { mtimeMs: number; size: number; index: KnockIndexFile } | null = null;
+
+function clearKnockIndexCache(): void {
+  knockIndexCache = null;
+}
+
 function ensureStoreDir(): void {
   if (!fs.existsSync(DATA_ROOT)) fs.mkdirSync(DATA_ROOT, { recursive: true });
 }
@@ -88,10 +95,24 @@ export function knockIndexDedupKey(row: Pick<QcCanvassKnockIndexRow, "primaryId"
 
 export function loadKnockIndex(): KnockIndexFile {
   ensureStoreDir();
-  if (!fs.existsSync(INDEX_PATH)) return emptyIndex();
+  if (!fs.existsSync(INDEX_PATH)) {
+    clearKnockIndexCache();
+    return emptyIndex();
+  }
   try {
-    return hydrateIndex(JSON.parse(fs.readFileSync(INDEX_PATH, "utf-8")) as Partial<KnockIndexFile>);
+    const stat = fs.statSync(INDEX_PATH);
+    if (
+      knockIndexCache &&
+      knockIndexCache.mtimeMs === stat.mtimeMs &&
+      knockIndexCache.size === stat.size
+    ) {
+      return knockIndexCache.index;
+    }
+    const index = hydrateIndex(JSON.parse(fs.readFileSync(INDEX_PATH, "utf-8")) as Partial<KnockIndexFile>);
+    knockIndexCache = { mtimeMs: stat.mtimeMs, size: stat.size, index };
+    return index;
   } catch {
+    clearKnockIndexCache();
     return emptyIndex();
   }
 }
@@ -101,6 +122,7 @@ export function loadKnockIndexRows(): QcCanvassKnockIndexRow[] {
 }
 
 function writeKnockIndex(index: KnockIndexFile): void {
+  clearKnockIndexCache();
   ensureStoreDir();
   const tmpPath = `${INDEX_PATH}.${process.pid}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(index), "utf-8");

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { runQuery, PROJECT, DATASET } from "../bigquery";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { pdiIdExtractSql } from "@/lib/pdi-tools/sync/pdi-id-sql";
@@ -20,7 +21,10 @@ import {
   canvassResultIsTalkingToCorrectPerson,
   extractCallSurveyLabels,
   fillMissingCanvassLabel,
+  filterPairsByQcDateRange,
   normalizeRecontactPersonId,
+  pairIsUsefulRecontact,
+  pairWithSupportAnswers,
   qcCallHasRecordedResponse,
   resolvePhonebankPriors,
   withRecontactCallDefaults,
@@ -239,6 +243,23 @@ export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcReco
     pairs: replaceCanvassPriorsFromKnockIndex(hydrated, primaryTag, loadKnockIndexRows(), profile),
     hasSnapshot: true,
   };
+}
+
+/** Per-request memo so the header tile and the table share one knock-index pass. */
+export const loadQcRecontactPairsForPageCached = cache(loadQcRecontactPairsForPage);
+
+/**
+ * Same date and support filters the QC page applied before rendering the table.
+ */
+export function prepareQcRecontactPagePairs(
+  pairs: readonly QcRecontactPair[],
+  startDate: string,
+  endDate: string,
+  profile: SurveyScriptProfile
+): QcRecontactPair[] {
+  return filterPairsByQcDateRange(pairs, startDate, endDate)
+    .filter((pair) => pairIsUsefulRecontact(pair, profile))
+    .map((pair) => pairWithSupportAnswers(pair, profile));
 }
 
 function answersForCall(rows: readonly CallSurveyRowForFill[], callId: string): QcRecontactSurveyAnswer[] {

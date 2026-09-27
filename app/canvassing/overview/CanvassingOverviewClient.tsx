@@ -436,7 +436,7 @@ export default function CanvassingOverviewClient() {
             >
               <input
                 type="text"
-                placeholder="Search PDI / PRIMARYID…"
+                placeholder="Search PDI / name…"
                 value={qDraft}
                 onChange={(event) => setQDraft(event.target.value)}
                 className="dash-input px-3 py-1.5 text-xs w-52"
@@ -491,6 +491,7 @@ export default function CanvassingOverviewClient() {
                   <thead className="sticky top-0 z-10 bg-gray-800 text-white">
                     <tr>
                       <th className="px-2.5 py-2 text-left">PDI / PRIMARYID</th>
+                      <th className="px-2.5 py-2 text-left">Name</th>
                       <th className="px-2.5 py-2 text-left">Latest label</th>
                       <th className="px-2.5 py-2 text-left">Latest date</th>
                       <th className="px-2.5 py-2 text-left">Channel</th>
@@ -691,6 +692,7 @@ function IdRow({
           row.personId
         )}
       </td>
+      <td className="px-2.5 py-1.5">{row.voterName?.trim() || "—"}</td>
       <td className={`px-2.5 py-1.5 ${familyTone(row.family)}`}>{familyDisplayLabel(row.family)}</td>
       <td className="px-2.5 py-1.5 tabular-nums">{row.occurredOn}</td>
       <td className="px-2.5 py-1.5">{channelDisplayLabel(row.channel)}</td>

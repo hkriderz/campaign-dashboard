@@ -29,6 +29,7 @@ export type KnockIndexTallyRow = {
   occurredAt: string;
   question: string;
   response: string;
+  voterName?: string;
 };
 
 export type CanvassingOverviewStats = {

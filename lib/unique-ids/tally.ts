@@ -5,6 +5,7 @@ import {
   familyDisplayLabel,
   UNIQUE_ID_CHANNELS,
 } from "./classify";
+import { matchesPdiOrNameQuery } from "../qc-recontact/ids";
 import type {
   UniqueIdChannel,
   UniqueIdChangedPerson,
@@ -75,12 +76,19 @@ function clampPageSize(raw: number | undefined): number {
   return Math.min(n, MAX_PAGE_SIZE);
 }
 
+function latestVoterName(events: readonly UniqueIdContactEvent[]): string {
+  for (const event of events) {
+    const name = (event.voterName ?? "").trim();
+    if (name) return name;
+  }
+  return "";
+}
+
 function matchesRowFilters(
   row: UniqueIdRow,
   options: UniqueIdTallyOptions
 ): boolean {
-  const q = (options.q ?? "").trim().replace(/\s+/g, "").toUpperCase();
-  if (q && !row.personId.includes(q)) return false;
+  if (!matchesPdiOrNameQuery(options.q ?? "", row.personId, row.voterName ?? "")) return false;
   const family = options.family;
   if (family && row.family !== family) return false;
   const channel = options.channel;
@@ -185,6 +193,7 @@ export function tallyUniqueIds(
     const channels = UNIQUE_ID_CHANNELS.filter((channel) => latestByChannel.has(channel));
     rows.push({
       personId,
+      voterName: latestVoterName(newestFirst),
       family: latest.family,
       occurredOn: latest.occurredOn,
       occurredAt: latest.occurredAt,
@@ -236,6 +245,7 @@ export function tallyUniqueIds(
 export function uniqueIdRowsToCsv(rows: readonly UniqueIdRow[]): string {
   const headers = [
     "PDI / PRIMARYID",
+    "Name",
     "Latest label",
     "Latest date",
     "Latest time",
@@ -250,6 +260,7 @@ export function uniqueIdRowsToCsv(rows: readonly UniqueIdRow[]): string {
   for (const row of rows) {
     const cells = [
       row.personId,
+      row.voterName ?? "",
       familyDisplayLabel(row.family),
       row.occurredOn,
       row.occurredAt,

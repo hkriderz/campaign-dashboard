@@ -5,7 +5,7 @@ import type { KnockIndexTallyRow } from "../canvassing/overview-tally";
 import type { QcTextContactSummary, RecontactCallSummary } from "../qc-recontact/types";
 import { familyFromKnockOutcome, familyFromResultLabel } from "./classify";
 import { collectKnockEvents, collectPhoneEvents, collectTextEvents } from "./collect";
-import { tallyUniqueIds } from "./tally";
+import { tallyUniqueIds, uniqueIdRowsToCsv } from "./tally";
 import type { UniqueIdContactEvent } from "./types";
 
 const nithyaTag: CampaignTag = {
@@ -25,6 +25,7 @@ function event(
     channel: "phone",
     campaignName: "Nithya 001",
     actorName: "Alex",
+    voterName: "",
     ...partial,
   };
 }
@@ -254,4 +255,106 @@ test("date filter and ID search apply after unique collapse", () => {
   assert.equal(tally.ids.rows[0]?.changed, false);
   assert.equal(tally.minDate, "2026-09-01");
   assert.equal(tally.maxDate, "2026-09-10");
+});
+
+test("voter name is display-only and does not change ids, labels, or counts", () => {
+  const events = [
+    event({
+      personId: "CA1",
+      family: "undecided",
+      occurredOn: "2026-09-01",
+      voterName: "Old Name",
+      channel: "phone",
+    }),
+    event({
+      personId: "CA1",
+      family: "strongSupport",
+      occurredOn: "2026-09-08",
+      voterName: "",
+      channel: "phone",
+    }),
+    event({
+      personId: "CA1",
+      family: "strongSupport",
+      occurredOn: "2026-09-10",
+      voterName: "Joseph Mosqueda",
+      channel: "canvass",
+      actorName: "Sam Door",
+    }),
+    event({
+      personId: "CA2",
+      family: "undecided",
+      occurredOn: "2026-09-02",
+      voterName: "",
+      channel: "text",
+      actorName: "Texter",
+    }),
+  ];
+  const tally = tallyUniqueIds(events);
+  assert.equal(tally.combined.uniqueIds, 2);
+  assert.equal(tally.combined.strongSupport, 1);
+  assert.equal(tally.combined.undecided, 1);
+  const ca1 = tally.matchedRows.find((row) => row.personId === "CA1");
+  assert.equal(ca1?.voterName, "Joseph Mosqueda");
+  assert.equal(ca1?.family, "strongSupport");
+  assert.equal(ca1?.actorName, "Sam Door");
+  assert.equal(tally.matchedRows.find((row) => row.personId === "CA2")?.voterName, "");
+
+  const byName = tallyUniqueIds(events, { q: "mosqueda" });
+  assert.equal(byName.combined.uniqueIds, 2);
+  assert.equal(byName.ids.total, 1);
+  assert.equal(byName.ids.rows[0]?.personId, "CA1");
+
+  const byFullId = tallyUniqueIds(events, { q: "CA 1" });
+  assert.equal(byFullId.ids.total, 1);
+  assert.equal(byFullId.ids.rows[0]?.personId, "CA1");
+
+  const csv = uniqueIdRowsToCsv(tally.matchedRows);
+  assert.match(csv, /^PDI \/ PRIMARYID,Name,/);
+  assert.match(csv, /CA1,Joseph Mosqueda,Strong support/);
+});
+
+test("phone and canvass copy the voter name; text stays blank", () => {
+  const phone = collectPhoneEvents(
+    [call({ callId: "1", pdiId: "CA1", finalResultLabel: "Support Nithya", voterName: " Joseph Mosqueda " })],
+    "faizahTraci"
+  );
+  assert.equal(phone[0]?.voterName, "Joseph Mosqueda");
+  assert.equal(phone[0]?.actorName, "Alex");
+
+  const texts = collectTextEvents([text({ pdiId: "CA1", resultLabel: "Strong Support" })], "faizahTraci");
+  assert.equal(texts[0]?.voterName, "");
+  assert.equal(texts[0]?.actorName, "Jordan");
+
+  const knocks = collectKnockEvents(
+    [
+      knock({
+        primaryId: "CA1",
+        occurredAt: "2026-09-05T14:00:00.000-07:00",
+        response: "Support",
+        voterName: "Joseph Mosqueda",
+        canvasserName: "Sam Door",
+      }),
+    ],
+    { tag: nithyaTag }
+  );
+  assert.equal(knocks[0]?.voterName, "Joseph Mosqueda");
+  assert.equal(knocks[0]?.actorName, "Sam Door");
+});
+
+test("a saved event without voterName stays blank and keeps the same person", () => {
+  const legacy = {
+    personId: "CA1",
+    occurredAt: "2026-09-08T12:00:00",
+    occurredOn: "2026-09-08",
+    channel: "phone" as const,
+    family: "strongSupport" as const,
+    campaignName: "Nithya 001",
+    actorName: "Alex",
+  };
+  const tally = tallyUniqueIds([legacy as UniqueIdContactEvent]);
+  assert.equal(tally.combined.uniqueIds, 1);
+  assert.equal(tally.matchedRows[0]?.personId, "CA1");
+  assert.equal(tally.matchedRows[0]?.family, "strongSupport");
+  assert.equal(tally.matchedRows[0]?.voterName, "");
 });

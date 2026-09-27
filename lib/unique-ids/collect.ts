@@ -57,6 +57,7 @@ export function collectPhoneEvents(
       family,
       campaignName: call.campaignName,
       actorName: call.phonebankerName,
+      voterName: (call.voterName ?? "").trim(),
     });
   }
   return out;
@@ -84,6 +85,7 @@ export function collectTextEvents(
       family,
       campaignName: contact.campaignName,
       actorName: contact.texterName,
+      voterName: "",
     });
   }
   return out;
@@ -123,6 +125,7 @@ function pickKnockEvent(
     family,
     campaignName: chosen.assignmentName,
     actorName: chosen.canvasserName,
+    voterName: (chosen.voterName ?? "").trim(),
   };
 }
 

@@ -8,13 +8,6 @@ import {
   resolveSurveyScriptProfile,
   tagUsesVerbatimFinalResultAggregate,
 } from "@/lib/campaign-tags";
-import {
-  filterPairsByQcDateRange,
-  pairIsUsefulRecontact,
-  pairWithSupportAnswers,
-  summarizeRecontactPairs,
-} from "@/lib/qc-recontact";
-import { loadQcRecontactPairsForPage } from "@/lib/queries/qc-recontact";
 import { getDashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
 import {
   fetchPhoneBanksByTag,
@@ -35,7 +28,12 @@ import { loadWideHeaderFieldMap } from "@/lib/stw-wide-header-field-map-store";
 import { loadWideReferenceHeaders } from "@/lib/stw-wide-reference-store";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
-import QcRecontactSection from "@/components/phonebanking/QcRecontactSection";
+import {
+  QcRecontactMatchedCard,
+  QcRecontactMatchedCardFallback,
+  QcRecontactPanel,
+  QcRecontactPanelFallback,
+} from "@/components/phonebanking/QcRecontactAsync";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import TabBar from "@/components/phonebanking/TabBar";
 import PhonebankerAggregateTable from "@/components/phonebanking/PhonebankerAggregateTable";
@@ -736,21 +734,6 @@ export default async function TagPage({ params, searchParams }: Props) {
       : false;
   const activeStartDate = hasAvailableDateInRange ? requestedStartDate : "";
   const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
-  const recontactPayload = isQcTag ? await loadQcRecontactPairsForPage(tagId) : null;
-  const recontactPairs = recontactPayload
-    ? filterPairsByQcDateRange(recontactPayload.pairs, activeStartDate, activeEndDate)
-        .filter((pair) => pairIsUsefulRecontact(pair, surveyScriptProfile))
-        .map((pair) => pairWithSupportAnswers(pair, surveyScriptProfile))
-    : [];
-  const recontactStats = summarizeRecontactPairs(recontactPairs);
-  const recontactHref = (() => {
-    const params = new URLSearchParams({ tab: "overview" });
-    if (activeStartDate) {
-      params.set("date", activeStartDate);
-      if (activeEndDate && activeEndDate !== activeStartDate) params.set("endDate", activeEndDate);
-    }
-    return `/phonebanking/${tagId}?${params.toString()}#qc-recontacts`;
-  })();
   const filteredSlices = activeStartDate
     ? dashboardSlices.filter((s) => isoDateInRange(s.callDate, activeStartDate, activeEndDate))
     : dashboardSlices;
@@ -946,20 +929,14 @@ export default async function TagPage({ params, searchParams }: Props) {
             <div className="font-semibold text-gray-900 dark:text-gray-100">{uniqueCallers.toLocaleString()}</div>
           </div>
           {isQcTag ? (
-            <Link
-              href={recontactHref}
-              className="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50/70 dark:bg-indigo-950/30 px-3 py-2 text-xs hover:border-indigo-400 dark:hover:border-indigo-600 transition-colors"
-            >
-              <div className="text-indigo-700 dark:text-indigo-300">Matched</div>
-              <div className="font-semibold text-gray-900 dark:text-gray-100">
-                {recontactPayload?.hasSnapshot ? recontactStats.matched.toLocaleString() : "—"}
-              </div>
-              <div className="text-gray-500 dark:text-gray-400 mt-0.5">
-                {recontactPayload?.hasSnapshot
-                  ? `${recontactStats.flipped.toLocaleString()} flipped · ${recontactStats.unmatched.toLocaleString()} unmatched`
-                  : "Refresh to match"}
-              </div>
-            </Link>
+            <Suspense fallback={<QcRecontactMatchedCardFallback />}>
+              <QcRecontactMatchedCard
+                tagId={tagId}
+                startDate={activeStartDate}
+                endDate={activeEndDate}
+                surveyScriptProfile={surveyScriptProfile}
+              />
+            </Suspense>
           ) : null}
         </div>
       </div>
@@ -1019,13 +996,15 @@ export default async function TagPage({ params, searchParams }: Props) {
             <h2 className="text-base font-semibold text-gray-700 dark:text-gray-200 mb-3">All Phone Banks</h2>
             <PhoneBankTable phoneBanks={overviewPhoneBanks} tagId={tagId} tagColor={tag.color} />
           </section>
-          {recontactPayload ? (
-            <QcRecontactSection
-              tagId={tagId}
-              pairs={recontactPairs}
-              hasSnapshot={recontactPayload.hasSnapshot}
-              surveyScriptProfile={surveyScriptProfile}
-            />
+          {isQcTag ? (
+            <Suspense fallback={<QcRecontactPanelFallback />}>
+              <QcRecontactPanel
+                tagId={tagId}
+                startDate={activeStartDate}
+                endDate={activeEndDate}
+                surveyScriptProfile={surveyScriptProfile}
+              />
+            </Suspense>
           ) : null}
         </div>
       )}
