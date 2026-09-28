@@ -5,6 +5,7 @@ import { resolveSurveyScriptProfile } from "../campaign-tags";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, matchesPdiOrNameQuery, normalizeRecontactPersonId } from "./ids";
 import { extractCallSurveyLabels, fillMissingCanvassLabel, isWereYouContactedQuestion, surveyRowIsTalkingToCorrectPerson } from "./labels";
+import { recontactNamesMatch } from "./names";
 import {
   knockIsQcSupportChecker,
   knockMatchesPrimaryTag,
@@ -238,6 +239,29 @@ test("summarizeRecontactPairs counts match and flip buckets", () => {
   assert.equal(stats.flipped, 1);
   assert.equal(stats.noPdi, 1);
   assert.equal(stats.unmatched, 1);
+});
+
+test("extractCallSurveyLabels replaces Hang up refused with the polling support answer", () => {
+  const labels = extractCallSurveyLabels(
+    [
+      { questionName: "03 Polling", answerValue: "B. Undecided" },
+      { questionName: "06 Final Result", answerValue: "Hang up refused" },
+    ],
+    "faizahTraci",
+    ["faizah", "malik"]
+  );
+  assert.equal(labels.pollingLabel, "Undecided");
+  assert.equal(labels.finalResultLabel, "Undecided");
+});
+
+test("extractCallSurveyLabels leaves a hang-up in place when no support answer exists", () => {
+  const labels = extractCallSurveyLabels(
+    [{ questionName: "06 Final Result", answerValue: "Hang up refused" }],
+    "faizahTraci",
+    ["faizah", "malik"]
+  );
+  assert.equal(labels.pollingLabel, "");
+  assert.equal(labels.finalResultLabel.toLowerCase().includes("hang up"), true);
 });
 
 test("extractCallSurveyLabels prefers Final Result then polling then canvass", () => {
@@ -762,6 +786,75 @@ test("pairWithSupportAnswers drops priors that have no support label and uses th
   assert.equal(shown.priors[0]?.channel, "canvass");
   assert.equal(shown.changeKind, "held");
   assert.equal(shown.matchStatus, "matched");
+});
+
+test("pairWithSupportAnswers shows polling Undecided when the saved result is Hang up refused", () => {
+  const pair: QcRecontactPair = {
+    pairId: "qc-hang",
+    matchStatus: "matched",
+    changeKind: "unknown",
+    qc: call({
+      callId: "qc-hang",
+      callDate: "2026-09-21",
+      pdiId: "CA1",
+      finalResultLabel: "Hang up refused",
+      pollingLabel: "Undecided",
+      canvassLabel: "Talking to Correct Person",
+    }),
+    priors: [
+      {
+        channel: "canvass",
+        pdiId: "CA1",
+        actorName: "Sam Door",
+        occurredOn: "2026-09-14",
+        listOrAssignment: "Turf",
+        resultLabel: "Undecided",
+        callAt: "2026-09-14T15:00:00",
+      },
+    ],
+  };
+  const shown = pairWithSupportAnswers(pair, "faizahTraci");
+  assert.equal(shown.qc.pollingLabel, "Undecided");
+  assert.equal(shown.qc.finalResultLabel, "Undecided");
+  assert.equal(shown.changeKind, "held");
+});
+
+test("recontact names group order, spacing, and punctuation without merging initials", () => {
+  assert.equal(recontactNamesMatch("Castaneda, Estefany", "Estefany Castaneda"), true);
+  assert.equal(recontactNamesMatch("Luzzepeda", "Luz Zepeda"), true);
+  assert.equal(recontactNamesMatch("Tina M.", "Tina M"), true);
+  assert.equal(recontactNamesMatch("Tina", "Tina R"), false);
+  assert.equal(recontactNamesMatch("Tina M", "Tina R"), false);
+  assert.equal(recontactNamesMatch("Ann A", "Anna"), false);
+  assert.equal(recontactNamesMatch("Luz Zepeda", "Ana Lopez"), false);
+
+  const pair = (actor: string, caller: string, id: string): QcRecontactPair => ({
+    pairId: id,
+    matchStatus: "matched",
+    changeKind: "held",
+    qc: call({ callId: id, callDate: "2026-09-21", phonebankerName: caller, pdiId: id }),
+    priors: [
+      {
+        channel: "canvass",
+        pdiId: id,
+        actorName: actor,
+        occurredOn: "2026-09-14",
+        listOrAssignment: "Turf",
+        resultLabel: "Undecided",
+      },
+    ],
+  });
+  const pairs = [
+    pair("Castaneda, Estefany", "Tina R", "a"),
+    pair("Estefany Castaneda", "Tina", "b"),
+    pair("Luzzepeda", "Tina M.", "c"),
+  ];
+  assert.deepEqual(priorActorNamesForPairs(pairs), ["Castaneda, Estefany", "Luzzepeda"]);
+  assert.deepEqual(qcCallerNamesForPairs(pairs), ["Tina", "Tina M.", "Tina R"]);
+  const display = priorActorNamesForPairs(pairs)[0] ?? "";
+  assert.equal(pairMatchesPriorActor(pairs[1]!, display), true);
+  assert.equal(pairMatchesQcCaller(pairs[0]!, "Tina"), false);
+  assert.equal(pairMatchesQcCaller(pairs[2]!, "Tina M"), true);
 });
 
 test("empty QC voter name falls back to the matched knock sheet voter", () => {

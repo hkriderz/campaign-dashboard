@@ -83,6 +83,7 @@ import {
   applySynthesizedFinalResultsToQuestionRows,
   applySynthesizedHitsToAnswerLines,
   preferredFinalResultQuestionByCampaign,
+  subtractReplacedFinalResultLines,
 } from "@/lib/final-result-synthesis-overlay";
 import { mergeTraciViolationStatsFromBq } from "@/lib/traci-violation-bq";
 import { withInferredContactMetrics } from "@/lib/infer-csv-contact-metrics";
@@ -665,7 +666,8 @@ export default async function TagPage({ params, searchParams }: Props) {
   const synthesizedFrHits = listSynthesizedFinalResults(
     bqCallSurveyForFill,
     surveyScriptProfile,
-    candidateTermsForTag(tag)
+    candidateTermsForTag(tag),
+    { replaceNonSupport: isQcTag }
   );
   applySynthesizedFinalResultsToQuestionRows(
     questionRowsBySlice,
@@ -803,6 +805,11 @@ export default async function TagPage({ params, searchParams }: Props) {
       })),
     ];
   }
+  bqFinalResultBreakdown = subtractReplacedFinalResultLines(
+    bqFinalResultBreakdown,
+    scopedSynthHits,
+    surveyScriptProfile
+  );
   if (bqPollingBreakdown.length > 0) {
     bqPollingBreakdown = consolidateSurveyAnswerLines(bqPollingBreakdown, surveyScriptProfile);
   }

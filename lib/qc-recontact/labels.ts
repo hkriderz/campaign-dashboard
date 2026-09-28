@@ -2,9 +2,10 @@ import {
   effectiveFinalResultAnswerLabelForRollup,
   isPollingQuestionName,
 } from "../daily-aggregate-survey-rollup";
-import { comparableSupportResultFromRows } from "../strong-support-from-survey";
+import { qcSupportFillFromRows } from "../strong-support-from-survey";
 import {
   classifySurveyAnswerDisplayLabel,
+  displayLabelIsSupportBucket,
   genericOutcomeDisplayLabel,
 } from "../survey-answer-consolidation";
 import {
@@ -172,8 +173,15 @@ export function extractCallSurveyLabels(
     }
   }
 
-  if (!finalResultLabel) {
-    finalResultLabel = comparableSupportResultFromRows(rows, profile, terms);
+  if (!displayLabelIsSupportBucket(finalResultLabel)) {
+    if (displayLabelIsSupportBucket(pollingLabel)) {
+      finalResultLabel = pollingLabel;
+    } else {
+      const filled = qcSupportFillFromRows(rows, profile, terms);
+      if (filled && displayLabelIsSupportBucket(filled.displayLabel)) {
+        finalResultLabel = filled.displayLabel;
+      }
+    }
   }
 
   return { finalResultLabel, pollingLabel, canvassLabel, contactedQuestion, contactedAnswer };

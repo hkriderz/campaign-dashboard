@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { apiError, withApiHandler } from "@/lib/api/http";
-import { getTagById, resolveSurveyScriptProfile } from "@/lib/campaign-tags";
+import { getTagById, isDerivedQcTagId, resolveSurveyScriptProfile } from "@/lib/campaign-tags";
 import { fetchTagCallSurveyRowsForFinalFill } from "@/lib/queries/phonebanking";
 import { canonicalizePhonebankerName } from "@/lib/phonebanker-name";
 import {
@@ -72,7 +72,8 @@ export async function GET(
       let hits: SynthesizedFinalResultHit[] = listSynthesizedFinalResults(
         fill,
         profile,
-        candidateTermsForTag(tag)
+        candidateTermsForTag(tag),
+        { replaceNonSupport: isDerivedQcTagId(tagId) }
       );
 
       if (campaignId) {

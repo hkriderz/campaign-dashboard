@@ -276,6 +276,12 @@ export const GENERIC_OUTCOME_LABELS = {
   strongOppose: "Strong oppose",
 } as const;
 
+/** Strong support, undecided, or strong oppose. Hang-up and other dispositions are not. */
+export function displayLabelIsSupportBucket(displayLabel: string): boolean {
+  const family = finalResultFamilyForDisplayLabel(displayLabel.trim());
+  return family === "strongSupport" || family === "undecided" || family === "strongOppose";
+}
+
 /** Map a classified display label onto the three CSV-style Final Result families. */
 export function finalResultFamilyForDisplayLabel(displayLabel: string): FinalResultFamily {
   if (

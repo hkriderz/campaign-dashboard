@@ -8,6 +8,7 @@ import {
   classifiedAnswerIsFinalResultBucket,
   classifiedAnswerIsStrongSupport,
   classifySurveyAnswerDisplayLabel,
+  displayLabelIsSupportBucket,
   isSplitStrongSupportQuestionName,
   isStrongSupportSurveyHit,
 } from "./survey-answer-consolidation";
@@ -234,6 +235,41 @@ function synthesizedSupportSource(
   return null;
 }
 
+export type QcSupportFill = {
+  displayLabel: string;
+  rawAnswer: string;
+  questionName: string;
+};
+
+/**
+ * Support answer used when a QC Final Result is missing or is not SS / Undecided / Oppose.
+ * Polling wins so the result column matches the polling column. Otherwise the ID / vote fill.
+ */
+export function qcSupportFillFromRows(
+  rows: readonly { questionName: string; answerValue: string }[],
+  profile: SurveyScriptProfile,
+  terms: readonly string[],
+  options?: { preferPolling?: boolean }
+): QcSupportFill | null {
+  if (options?.preferPolling) {
+    for (const row of rows) {
+      if (!isPollingQuestionName(row.questionName, profile)) continue;
+      const answer = row.answerValue.trim();
+      if (!answer || answer.toLowerCase() === "[no answer recorded]") continue;
+      const displayLabel = classifySurveyAnswerDisplayLabel(answer, profile);
+      if (!displayLabelIsSupportBucket(displayLabel)) continue;
+      return { displayLabel, rawAnswer: answer, questionName: row.questionName };
+    }
+  }
+  const filled = synthesizedSupportSource(rows, profile, terms);
+  if (!filled || !classifiedAnswerIsFinalResultBucket(filled.answerValue, profile)) return null;
+  return {
+    displayLabel: classifySurveyAnswerDisplayLabel(filled.answerValue, profile),
+    rawAnswer: filled.answerValue,
+    questionName: filled.questionName,
+  };
+}
+
 function explicitFinalResultSource(
   rows: readonly { questionName: string; answerValue: string }[],
   profile: SurveyScriptProfile
@@ -297,6 +333,8 @@ export type SynthesizedFinalResultHit = {
   sourceQuestionName: string;
   sourceAnswerValue: string;
   reason: typeof SYNTHESIS_REASON_MISSING_FR;
+  /** Set when a non-support Final Result such as Hang up refused was replaced. */
+  replacedRawAnswer?: string;
 };
 
 export type FinalResultCallOutcome = {
@@ -305,6 +343,12 @@ export type FinalResultCallOutcome = {
   rawAnswer: string | null;
   sourceQuestionName: string | null;
   sourceAnswerValue: string | null;
+  replacedRawAnswer?: string | null;
+};
+
+export type FinalResultForCallOptions = {
+  /** QC tags: Hang up refused and other non-support Final Results are filled from polling, then ID. */
+  replaceNonSupport?: boolean;
 };
 
 const FR_NONE: FinalResultCallOutcome = {
@@ -323,29 +367,39 @@ export function finalResultForCall(
   rows: readonly Pick<CallSurveyRowForFill, "questionName" | "answerValue" | "surveyResultId">[],
   profile: SurveyScriptProfile,
   terms: readonly string[],
-  hasFinalResultTab: boolean
+  hasFinalResultTab: boolean,
+  options?: FinalResultForCallOptions
 ): FinalResultCallOutcome {
   if (rows.length === 0 || !hasFinalResultTab) return FR_NONE;
   const collapsed = latestRowPerQuestion(rows);
   const explicit = explicitFinalResultSource(collapsed, profile);
-  if (explicit) {
+  const explicitDisplay = explicit
+    ? classifySurveyAnswerDisplayLabel(explicit.answerValue, profile)
+    : null;
+  const replacingNonSupport = Boolean(
+    options?.replaceNonSupport && explicit && explicitDisplay && !displayLabelIsSupportBucket(explicitDisplay)
+  );
+  if (explicit && explicitDisplay && !replacingNonSupport) {
     return {
       kind: "explicit",
-      displayLabel: classifySurveyAnswerDisplayLabel(explicit.answerValue, profile),
+      displayLabel: explicitDisplay,
       rawAnswer: explicit.answerValue,
       sourceQuestionName: explicit.questionName,
       sourceAnswerValue: explicit.answerValue,
     };
   }
-  if (callHasSubstantiveFinalResult(collapsed)) return FR_NONE;
-  const filled = synthesizedSupportSource(collapsed, profile, terms);
-  if (!filled || !classifiedAnswerIsFinalResultBucket(filled.answerValue, profile)) return FR_NONE;
+  if (!options?.replaceNonSupport && callHasSubstantiveFinalResult(collapsed)) return FR_NONE;
+  const filled = qcSupportFillFromRows(collapsed, profile, terms, {
+    preferPolling: Boolean(options?.replaceNonSupport),
+  });
+  if (!filled) return FR_NONE;
   return {
     kind: "synthesized",
-    displayLabel: classifySurveyAnswerDisplayLabel(filled.answerValue, profile),
-    rawAnswer: filled.answerValue,
+    displayLabel: filled.displayLabel,
+    rawAnswer: filled.rawAnswer,
     sourceQuestionName: filled.questionName,
-    sourceAnswerValue: filled.answerValue,
+    sourceAnswerValue: filled.rawAnswer,
+    replacedRawAnswer: replacingNonSupport ? explicit?.answerValue ?? null : null,
   };
 }
 
@@ -398,7 +452,8 @@ export function strongSupportForCall(
 export function listSynthesizedFinalResults(
   rows: readonly CallSurveyRowForFill[],
   profile: SurveyScriptProfile,
-  terms: readonly string[]
+  terms: readonly string[],
+  options?: FinalResultForCallOptions
 ): SynthesizedFinalResultHit[] {
   const byCampaign = new Map<string, CallSurveyRowForFill[]>();
   for (const r of rows) {
@@ -418,7 +473,7 @@ export function listSynthesizedFinalResults(
       byCall.set(r.callId, list);
     }
     for (const [callId, callRows] of byCall) {
-      const outcome = finalResultForCall(callRows, profile, terms, true);
+      const outcome = finalResultForCall(callRows, profile, terms, true, options);
       if (outcome.kind !== "synthesized") continue;
       if (!outcome.displayLabel || !outcome.rawAnswer || !outcome.sourceQuestionName) continue;
       const head = callRows[0]!;
@@ -433,6 +488,7 @@ export function listSynthesizedFinalResults(
         sourceQuestionName: outcome.sourceQuestionName,
         sourceAnswerValue: outcome.sourceAnswerValue ?? outcome.rawAnswer,
         reason: SYNTHESIS_REASON_MISSING_FR,
+        ...(outcome.replacedRawAnswer ? { replacedRawAnswer: outcome.replacedRawAnswer } : {}),
       });
     }
   }

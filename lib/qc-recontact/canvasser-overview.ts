@@ -151,6 +151,85 @@ export function formatOverviewPercent(rateValue: number): string {
   return `${(rateValue * 100).toFixed(2)}%`;
 }
 
+export type OverviewPercentBand = "darkWarm" | "lightWarm" | "none" | "lightGreen" | "darkGreen";
+
+/**
+ * 0–20 dark orange/red, 21–40 light orange/red, 41–60 none, 61–80 light green, 81–100 dark green.
+ * The lower edge of each band is inclusive.
+ */
+export function overviewPercentBand(rateValue: number): OverviewPercentBand {
+  const hundredths = Number.isFinite(rateValue) ? Math.round(rateValue * 10000) : 0;
+  if (hundredths <= 2000) return "darkWarm";
+  if (hundredths <= 4000) return "lightWarm";
+  if (hundredths <= 6000) return "none";
+  if (hundredths <= 8000) return "lightGreen";
+  return "darkGreen";
+}
+
+export function overviewPercentBandClass(rateValue: number): string {
+  switch (overviewPercentBand(rateValue)) {
+    case "darkWarm":
+      return "bg-red-200 text-red-950 dark:bg-red-900/60 dark:text-red-50";
+    case "lightWarm":
+      return "bg-orange-100 text-orange-950 dark:bg-orange-900/35 dark:text-orange-50";
+    case "lightGreen":
+      return "bg-green-100 text-green-950 dark:bg-green-900/35 dark:text-green-50";
+    case "darkGreen":
+      return "bg-green-300 text-green-950 dark:bg-green-800/55 dark:text-green-50";
+    default:
+      return "";
+  }
+}
+
+function addFamilyBlocks(left: CanvasserFamilyBlock, right: CanvasserFamilyBlock): CanvasserFamilyBlock {
+  return {
+    surveyed: left.surveyed + right.surveyed,
+    strongSupport: left.strongSupport + right.strongSupport,
+    undecided: left.undecided + right.undecided,
+    strongOppose: left.strongOppose + right.strongOppose,
+  };
+}
+
+/**
+ * Counts are sums. Percentages use those sums, so a 100% row and a 0% row do not average to 50%
+ * when the rows surveyed different numbers of people.
+ */
+export function summarizeCanvasserOverview(rows: readonly CanvasserOverviewRow[]): CanvasserOverviewRow | null {
+  if (!rows.length) return null;
+  const surveyed = rows.reduce((sum, row) => sum + row.surveyed, 0);
+  const originallyStrongSupport = rows.reduce((sum, row) => sum + row.originallyStrongSupport, 0);
+  const contactedYes = rows.reduce((sum, row) => sum + row.contactedYes, 0);
+  const contactedUnsure = rows.reduce((sum, row) => sum + row.contactedUnsure, 0);
+  const contactedNo = rows.reduce((sum, row) => sum + row.contactedNo, 0);
+  const originalStrongSupportPolling = rows.reduce(
+    (sum, row) => addFamilyBlocks(sum, row.originalStrongSupportPolling),
+    emptyFamilyBlock()
+  );
+  const originalStrongSupportFinal = rows.reduce(
+    (sum, row) => addFamilyBlocks(sum, row.originalStrongSupportFinal),
+    emptyFamilyBlock()
+  );
+  const originalUndecidedFinal = rows.reduce(
+    (sum, row) => addFamilyBlocks(sum, row.originalUndecidedFinal),
+    emptyFamilyBlock()
+  );
+  return {
+    canvasserName: "Total",
+    surveyed,
+    originallyStrongSupport,
+    recallContactRate: rate(contactedYes, surveyed),
+    strongSupportOnPollingRate: rate(originalStrongSupportPolling.strongSupport, originallyStrongSupport),
+    strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
+    contactedYes,
+    contactedUnsure,
+    contactedNo,
+    originalStrongSupportPolling,
+    originalStrongSupportFinal,
+    originalUndecidedFinal,
+    details: [],
+  };
+}
+
 /** Yes / Unsure / No from a raw “Were you contacted?” answer (`A. Yes`, `B. Unsure`). */
 export function classifyContactedAnswer(raw: string): ContactedBucket | null {
   const trimmed = raw.trim();
@@ -383,10 +462,12 @@ function csvLine(values: readonly (string | number)[]): string {
 
 /** Summary block, then every canvasser’s voter rows, in the sheet’s column order. */
 export function buildCanvasserOverviewCsv(tally: CanvasserOverviewTally): string {
+  const totals = summarizeCanvasserOverview(tally.canvassers);
+  const summaryRows = totals ? [totals, ...tally.canvassers] : [...tally.canvassers];
   const lines = [
     csvLine(SUMMARY_GROUP_HEADERS),
     csvLine(SUMMARY_COLUMN_HEADERS),
-    ...tally.canvassers.map((row) => csvLine(summaryDataRow(row))),
+    ...summaryRows.map((row) => csvLine(summaryDataRow(row))),
     "",
     csvLine(CANVASSER_OVERVIEW_DETAIL_HEADERS),
     ...tally.canvassers.flatMap((row) => row.details.map((detail) => csvLine(detailDataRow(detail)))),

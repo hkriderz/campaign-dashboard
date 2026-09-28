@@ -1,6 +1,7 @@
 import { dailyCallerSliceKey } from "./slice-key";
 import { canonicalizePhonebankerName } from "./phonebanker-name";
 import {
+  effectiveFinalResultAnswerLabelForRollup,
   isFinalResultQuestionName,
   type AggregateAnswerLine,
 } from "./daily-aggregate-survey-rollup";
@@ -146,6 +147,47 @@ function fallbackAnswer(
   return csvAnswerForFinalResultFamily(family) ?? hit.rawAnswer;
 }
 
+function decrementReplacedFinalResult(rows: OverlayQuestionRow[], hit: SynthesizedFinalResultHit): void {
+  const raw = hit.replacedRawAnswer?.trim();
+  if (!raw) return;
+  const banker = canonicalizePhonebankerName(hit.phonebankerName);
+  const index = rows.findIndex(
+    (row) =>
+      canonicalizePhonebankerName(row.phonebankerName) === banker &&
+      row.answerValue.trim() === raw &&
+      isFinalResultPivotQuestion(row.questionName) &&
+      row.responseCount > 0
+  );
+  if (index < 0) return;
+  const row = rows[index];
+  if (!row) return;
+  row.responseCount -= 1;
+  if (row.responseCount <= 0) rows.splice(index, 1);
+}
+
+/**
+ * Drop one rollup count for each non-support Final Result that synthesis replaced.
+ * Matches the raw answer, its classified label, or the rollup's effective label.
+ */
+export function subtractReplacedFinalResultLines(
+  lines: readonly AggregateAnswerLine[],
+  hits: readonly SynthesizedFinalResultHit[],
+  profile: SurveyScriptProfile
+): AggregateAnswerLine[] {
+  const next = lines.map((line) => ({ ...line }));
+  for (const hit of hits) {
+    const raw = hit.replacedRawAnswer?.trim();
+    if (!raw) continue;
+    const labels = new Set<string>([raw, classifySurveyAnswerDisplayLabel(raw, profile)]);
+    const rolled = effectiveFinalResultAnswerLabelForRollup("Final Result", raw);
+    if (rolled) labels.add(rolled.trim());
+    const line = next.find((item) => item.count > 0 && labels.has(item.label.trim()));
+    if (!line) continue;
+    line.count -= 1;
+  }
+  return next.filter((line) => line.count > 0);
+}
+
 /**
  * Increment existing Final Result pivot cells for synthesized fills.
  * Creates a matching FR column when the slice has none for that answer.
@@ -170,6 +212,7 @@ export function applySynthesizedFinalResultsToQuestionRows(
     const looksBq = sliceLooksLikeBqSplitScript(rows);
 
     for (const hit of sliceHits) {
+      decrementReplacedFinalResult(rows, hit);
       const matched = matchHitToColumn(hit, columns, profile);
       let questionName = matched?.questionName ?? null;
       let answerValue = matched?.answerValue ?? null;

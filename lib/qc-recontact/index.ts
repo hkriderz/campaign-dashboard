@@ -64,7 +64,10 @@ export {
   classifyContactedAnswer,
   filterPairsByOptionalQcDate,
   formatOverviewPercent,
+  overviewPercentBand,
+  overviewPercentBandClass,
   selectCanvasserOverviewPairs,
+  summarizeCanvasserOverview,
   splitVoterName,
   tallyCanvasserOverview,
 } from "./canvasser-overview";

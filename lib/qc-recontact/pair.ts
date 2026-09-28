@@ -7,6 +7,7 @@ import {
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, normalizeRecontactPersonId } from "./ids";
 import { canvassResultIsTalkingToCorrectPerson, recordedSurveyAnswer } from "./labels";
+import { groupRecontactDisplayNames, recontactNamesMatch } from "./names";
 import type {
   PriorContactSummary,
   QcRecontactChangeKind,
@@ -176,18 +177,32 @@ export function pairIsUsefulRecontact(
   return pairHasQcContact(pair) && qcCallHasRecordedResponse(pair.qc, profile);
 }
 
+/**
+ * A saved Hang up refused (or any non-support result) displays as the polling support answer.
+ * Polling itself is left unchanged, so both columns show Undecided when that was the poll.
+ */
+function fillQcResultFromRecordedPolling(
+  qc: RecontactCallSummary,
+  profile: SurveyScriptProfile
+): RecontactCallSummary {
+  if (isRecordedSupportLabel(qc.finalResultLabel, profile)) return qc;
+  if (!isRecordedSupportLabel(qc.pollingLabel, profile)) return qc;
+  return { ...qc, finalResultLabel: qc.pollingLabel };
+}
+
 /** Drop priors with no support answer and recompute change from the latest one that remains. */
 export function pairWithSupportAnswers(
   pair: QcRecontactPair,
   profile: SurveyScriptProfile = "faizahTraci"
 ): QcRecontactPair {
+  const qc = fillQcResultFromRecordedPolling(pair.qc, profile);
   const priors = pair.priors.filter((prior) => isRecordedSupportLabel(prior.resultLabel, profile));
   const source = firstClassifiablePrior(priors);
   const changeKind = source
-    ? classifyRecontactChange(source.resultLabel, pair.qc.finalResultLabel, profile)
+    ? classifyRecontactChange(source.resultLabel, qc.finalResultLabel, profile)
     : "unknown";
   const matchStatus = pair.matchStatus === "no_pdi" ? "no_pdi" : priors.length > 0 ? "matched" : "unmatched";
-  return { ...pair, priors, matchStatus, changeKind };
+  return { ...pair, qc, priors, matchStatus, changeKind };
 }
 
 export function emptyRecontactSelection(): QcRecontactSelection {
@@ -212,17 +227,14 @@ export function pairMatchesMatchChip(pair: QcRecontactPair, match: RecontactMatc
   return pair.matchStatus === match;
 }
 
-function sortPersonNames(names: Iterable<string>): string[] {
-  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-}
-
 /** Prior phonebanker or canvasser. Text texters do not match. */
 export function pairMatchesPriorActor(pair: QcRecontactPair, actorName: string): boolean {
   const want = actorName.trim();
   if (!want) return true;
   return pair.priors.some(
     (prior) =>
-      (prior.channel === "phonebank" || prior.channel === "canvass") && prior.actorName.trim() === want
+      (prior.channel === "phonebank" || prior.channel === "canvass") &&
+      recontactNamesMatch(prior.actorName, want)
   );
 }
 
@@ -230,28 +242,28 @@ export function pairMatchesPriorActor(pair: QcRecontactPair, actorName: string):
 export function pairMatchesQcCaller(pair: QcRecontactPair, callerName: string): boolean {
   const want = callerName.trim();
   if (!want) return true;
-  return pair.qc.phonebankerName.trim() === want;
+  return recontactNamesMatch(pair.qc.phonebankerName, want);
 }
 
 export function priorActorNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
-  const names = new Set<string>();
+  const names: string[] = [];
   for (const pair of pairs) {
     for (const prior of pair.priors) {
       if (prior.channel !== "phonebank" && prior.channel !== "canvass") continue;
       const name = prior.actorName.trim();
-      if (name) names.add(name);
+      if (name) names.push(name);
     }
   }
-  return sortPersonNames(names);
+  return groupRecontactDisplayNames(names);
 }
 
 export function qcCallerNamesForPairs(pairs: readonly QcRecontactPair[]): string[] {
-  const names = new Set<string>();
+  const names: string[] = [];
   for (const pair of pairs) {
     const name = pair.qc.phonebankerName.trim();
-    if (name) names.add(name);
+    if (name) names.push(name);
   }
-  return sortPersonNames(names);
+  return groupRecontactDisplayNames(names);
 }
 
 /**

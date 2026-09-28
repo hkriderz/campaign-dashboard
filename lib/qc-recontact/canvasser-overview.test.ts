@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   buildCanvasserOverviewCsv,
   formatOverviewPercent,
+  overviewPercentBand,
+  summarizeCanvasserOverview,
   tallyCanvasserOverview,
+  type CanvasserOverviewRow,
 } from "./canvasser-overview";
 import type { PriorContactSummary, QcRecontactPair, RecontactCallSummary } from "./types";
 
@@ -235,6 +238,10 @@ test("Dilan Davila summary matches the Detailed Canvasser View sheet", () => {
 
   const csv = buildCanvasserOverviewCsv(tally);
   assert.match(csv, /Dilan Davila,9,7,88\.89%,42\.86%,42\.86%,8,1,0,7,3,3,1,7,3,3,1,2,1,0,1/);
+  assert.match(
+    csv,
+    /Total,9,7,88\.89%,42\.86%,42\.86%,8,1,0,7,3,3,1,7,3,3,1,2,1,0,1[\s\S]*Dilan Davila,9,7/
+  );
   assert.match(csv, /Maria,Botello/);
 });
 
@@ -274,4 +281,85 @@ test("pairs without a canvass prior are excluded", () => {
   const notUseful = pairFrom(voter, { canvassLabel: "" });
   const tally = tallyCanvasserOverview([phoneOnly, notUseful]);
   assert.deepEqual(tally.canvassers, []);
+  assert.equal(summarizeCanvasserOverview(tally.canvassers), null);
+});
+
+function overviewRow(
+  partial: Pick<CanvasserOverviewRow, "canvasserName" | "surveyed" | "originallyStrongSupport" | "contactedYes"> & {
+    pollingStrongSupport: number;
+    finalStrongSupport: number;
+  }
+): CanvasserOverviewRow {
+  return {
+    canvasserName: partial.canvasserName,
+    surveyed: partial.surveyed,
+    originallyStrongSupport: partial.originallyStrongSupport,
+    recallContactRate: partial.surveyed ? partial.contactedYes / partial.surveyed : 0,
+    strongSupportOnPollingRate: partial.originallyStrongSupport
+      ? partial.pollingStrongSupport / partial.originallyStrongSupport
+      : 0,
+    strongSupportAfterPersuasionRate: partial.originallyStrongSupport
+      ? partial.finalStrongSupport / partial.originallyStrongSupport
+      : 0,
+    contactedYes: partial.contactedYes,
+    contactedUnsure: 0,
+    contactedNo: partial.surveyed - partial.contactedYes,
+    originalStrongSupportPolling: {
+      surveyed: partial.originallyStrongSupport,
+      strongSupport: partial.pollingStrongSupport,
+      undecided: 0,
+      strongOppose: 0,
+    },
+    originalStrongSupportFinal: {
+      surveyed: partial.originallyStrongSupport,
+      strongSupport: partial.finalStrongSupport,
+      undecided: 0,
+      strongOppose: 0,
+    },
+    originalUndecidedFinal: { surveyed: 0, strongSupport: 0, undecided: 0, strongOppose: 0 },
+    details: [],
+  };
+}
+
+test("totals weight percentages by counts instead of averaging row percents", () => {
+  const totals = summarizeCanvasserOverview([
+    overviewRow({
+      canvasserName: "Full",
+      surveyed: 1,
+      originallyStrongSupport: 1,
+      contactedYes: 1,
+      pollingStrongSupport: 1,
+      finalStrongSupport: 1,
+    }),
+    overviewRow({
+      canvasserName: "None",
+      surveyed: 3,
+      originallyStrongSupport: 3,
+      contactedYes: 0,
+      pollingStrongSupport: 0,
+      finalStrongSupport: 0,
+    }),
+  ]);
+  assert.ok(totals);
+  assert.equal(totals.canvasserName, "Total");
+  assert.equal(totals.surveyed, 4);
+  assert.equal(totals.originallyStrongSupport, 4);
+  assert.equal(totals.contactedYes, 1);
+  assert.equal(formatOverviewPercent(totals.recallContactRate), "25.00%");
+  assert.equal(formatOverviewPercent(totals.strongSupportOnPollingRate), "25.00%");
+  assert.equal(formatOverviewPercent(totals.strongSupportAfterPersuasionRate), "25.00%");
+  assert.equal(totals.details.length, 0);
+});
+
+test("percent bands include the lower edge of each range", () => {
+  assert.equal(overviewPercentBand(0), "darkWarm");
+  assert.equal(overviewPercentBand(0.2), "darkWarm");
+  assert.equal(overviewPercentBand(0.21), "lightWarm");
+  assert.equal(overviewPercentBand(0.4), "lightWarm");
+  assert.equal(overviewPercentBand(0.41), "none");
+  assert.equal(overviewPercentBand(0.6), "none");
+  assert.equal(overviewPercentBand(0.61), "lightGreen");
+  assert.equal(overviewPercentBand(0.8), "lightGreen");
+  assert.equal(overviewPercentBand(0.81), "darkGreen");
+  assert.equal(overviewPercentBand(1), "darkGreen");
 });

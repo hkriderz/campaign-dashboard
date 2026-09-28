@@ -8,6 +8,8 @@ import {
   buildCanvasserOverviewCsv,
   canvasserOverviewExportFilename,
   formatOverviewPercent,
+  overviewPercentBandClass,
+  summarizeCanvasserOverview,
   type CanvasserFamilyBlock,
   type CanvasserOverviewDetail,
   type CanvasserOverviewPayload,
@@ -152,6 +154,10 @@ export default function CanvasserOverviewClient() {
 
   const surveyedTotal = useMemo(
     () => (payload?.canvassers ?? []).reduce((sum, row) => sum + row.surveyed, 0),
+    [payload]
+  );
+  const totals = useMemo(
+    () => summarizeCanvasserOverview(payload?.canvassers ?? []),
     [payload]
   );
 
@@ -308,6 +314,7 @@ export default function CanvasserOverviewClient() {
                   </tr>
                 </thead>
                 <tbody>
+                  {totals ? <OverviewTotalRow row={totals} /> : null}
                   {(payload?.canvassers ?? []).map((row) => (
                     <CanvasserRows
                       key={row.canvasserName}
@@ -323,6 +330,35 @@ export default function CanvasserOverviewClient() {
         </div>
       )}
     </div>
+  );
+}
+
+function PercentCell({ rate }: { rate: number }) {
+  return (
+    <td className={`px-2.5 py-1.5 text-right tabular-nums ${overviewPercentBandClass(rate)}`}>
+      {formatOverviewPercent(rate)}
+    </td>
+  );
+}
+
+function OverviewTotalRow({ row }: { row: CanvasserOverviewRow }) {
+  return (
+    <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
+      <td className="px-2.5 py-1.5">Total</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
+      <PercentCell rate={row.recallContactRate} />
+      <PercentCell rate={row.strongSupportOnPollingRate} />
+      <PercentCell rate={row.strongSupportAfterPersuasionRate} />
+      <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
+        {formatNumber(row.contactedYes)}
+      </td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.contactedUnsure)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.contactedNo)}</td>
+      <FamilyCells block={row.originalStrongSupportPolling} />
+      <FamilyCells block={row.originalStrongSupportFinal} />
+      <FamilyCells block={row.originalUndecidedFinal} />
+    </tr>
   );
 }
 
@@ -350,13 +386,9 @@ function CanvasserRows({
         </td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
-        <td className="px-2.5 py-1.5 text-right tabular-nums">{formatOverviewPercent(row.recallContactRate)}</td>
-        <td className="px-2.5 py-1.5 text-right tabular-nums">
-          {formatOverviewPercent(row.strongSupportOnPollingRate)}
-        </td>
-        <td className="px-2.5 py-1.5 text-right tabular-nums">
-          {formatOverviewPercent(row.strongSupportAfterPersuasionRate)}
-        </td>
+        <PercentCell rate={row.recallContactRate} />
+        <PercentCell rate={row.strongSupportOnPollingRate} />
+        <PercentCell rate={row.strongSupportAfterPersuasionRate} />
         <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
           {formatNumber(row.contactedYes)}
         </td>

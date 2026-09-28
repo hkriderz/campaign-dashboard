@@ -397,3 +397,35 @@ test("listSynthesizedFinalResults includes provenance for missing-FR fills", () 
   assert.equal(hits[0]?.sourceAnswerValue, "B. Undecided");
   assert.equal(hits[0]?.reason, "missing_final_result_survey_fill");
 });
+
+test("Hang up refused stays explicit unless QC asks to replace it with polling", () => {
+  const rows = [
+    fillRow({
+      callId: "c-hang",
+      campaignId: "camp-f",
+      questionName: "03 Polling",
+      answerValue: "B. Undecided",
+      surveyResultId: 1,
+    }),
+    fillRow({
+      callId: "c-hang",
+      campaignId: "camp-f",
+      questionName: "Final Result",
+      answerValue: "Hang up refused",
+      surveyResultId: 2,
+    }),
+  ];
+  const explicit = finalResultForCall(rows, "faizahTraci", FAIZAH_TERMS, true);
+  assert.equal(explicit.kind, "explicit");
+  assert.equal(explicit.displayLabel?.toLowerCase().includes("hang up"), true);
+  assert.equal(listSynthesizedFinalResults(rows, "faizahTraci", FAIZAH_TERMS).length, 0);
+
+  const replaced = finalResultForCall(rows, "faizahTraci", FAIZAH_TERMS, true, { replaceNonSupport: true });
+  assert.equal(replaced.kind, "synthesized");
+  assert.equal(replaced.displayLabel, "Undecided");
+  assert.equal(replaced.replacedRawAnswer, "Hang up refused");
+  const hits = listSynthesizedFinalResults(rows, "faizahTraci", FAIZAH_TERMS, { replaceNonSupport: true });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0]?.displayLabel, "Undecided");
+  assert.equal(hits[0]?.replacedRawAnswer, "Hang up refused");
+});
