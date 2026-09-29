@@ -333,7 +333,7 @@ export default function CanvasserOverviewClient() {
   );
 }
 
-function PercentCell({ rate }: { rate: number }) {
+function PercentCell({ rate }: { rate: number | null }) {
   return (
     <td className={`px-2.5 py-1.5 text-right tabular-nums ${overviewPercentBandClass(rate)}`}>
       {formatOverviewPercent(rate)}

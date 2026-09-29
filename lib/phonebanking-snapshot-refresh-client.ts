@@ -33,7 +33,7 @@ export async function fetchActivePhonebankingTags(): Promise<
 
 async function postTagSnapshotRefresh(
   secret: string,
-  body: { tagId: string; clear?: boolean }
+  body: { tagId?: string; clear?: boolean; fullRebuild?: boolean; refreshAll?: boolean; rebuildAllCampaigns?: boolean }
 ): Promise<{ ok: boolean; error?: string }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -60,9 +60,10 @@ export async function refreshPhonebankingTagsSequential(options: {
   tagLabels?: Map<string, string>;
   secret: string;
   clearFirst?: boolean;
+  fullRebuild?: boolean;
   onProgress: (progress: TagRefreshProgress) => void;
 }): Promise<SequentialRefreshResult> {
-  const { tagIds, tagLabels, secret, clearFirst = false, onProgress } = options;
+  const { tagIds, tagLabels, secret, clearFirst = false, fullRebuild = false, onProgress } = options;
   const total = tagIds.length;
   const refreshed: string[] = [];
   const errors: { tagId: string; error: string }[] = [];
@@ -80,6 +81,7 @@ export async function refreshPhonebankingTagsSequential(options: {
     const result = await postTagSnapshotRefresh(secret, {
       tagId,
       clear: clearFirst,
+      fullRebuild: fullRebuild || clearFirst,
     });
 
     if (result.ok) {
@@ -98,6 +100,10 @@ export async function refreshPhonebankingTagsSequential(options: {
   });
 
   return { refreshed, errors };
+}
+
+export async function rebuildAllCampaignsSnapshotRequest(secret: string): Promise<{ ok: boolean; error?: string }> {
+  return postTagSnapshotRefresh(secret, { rebuildAllCampaigns: true });
 }
 
 export function progressToPercent(progress: TagRefreshProgress): number {

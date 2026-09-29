@@ -1,7 +1,11 @@
 import { getPhonebankingTags, getTagById } from "@/lib/campaign-tags";
 import { clearTagSnapshots, snapshotsDisabled } from "@/lib/bq-snapshot-store";
 import { revalidatePhonebankingTagDataCaches } from "@/lib/phonebanking-data-cache";
-import { rebuildTagBqSnapshotsFromBigQuery } from "@/lib/queries/phonebanking";
+import {
+  rebuildAllCampaignsSnapshot,
+  rebuildTagBqSnapshotsFromBigQuery,
+  type TagSnapshotRefreshMode,
+} from "@/lib/queries/phonebanking";
 
 export type SnapshotRefreshResult =
   | {
@@ -20,6 +24,10 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   refreshAll?: boolean;
   tagId?: string;
   clearFirst?: boolean;
+  /** True reloads history since 2025-12-01. False merges the last three Pacific days when snapshots exist. */
+  fullRebuild?: boolean;
+  /** Rewrite only the unfiltered all-campaigns snapshot. */
+  rebuildAllCampaigns?: boolean;
 }): Promise<SnapshotRefreshResult> {
   if (snapshotsDisabled()) {
     return {
@@ -31,6 +39,17 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
 
   const refreshAll = args.refreshAll === true;
   const clearFirst = args.clearFirst === true;
+  const mode: TagSnapshotRefreshMode = args.fullRebuild === true || clearFirst ? "full" : "incremental";
+
+  if (args.rebuildAllCampaigns === true) {
+    try {
+      await rebuildAllCampaignsSnapshot();
+      return { ok: true, tagId: "all-campaigns" };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, status: 500, error: message };
+    }
+  }
 
   if (refreshAll) {
     const refreshed: string[] = [];
@@ -41,7 +60,7 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
         clearTagSnapshots(t.id);
       }
       try {
-        await rebuildTagBqSnapshotsFromBigQuery(t.id);
+        await rebuildTagBqSnapshotsFromBigQuery(t.id, { mode });
         revalidatePhonebankingTagDataCaches(t.id);
         refreshed.push(t.id);
       } catch (err) {
@@ -77,7 +96,7 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   }
 
   try {
-    await rebuildTagBqSnapshotsFromBigQuery(tagId);
+    await rebuildTagBqSnapshotsFromBigQuery(tagId, { mode });
     revalidatePhonebankingTagDataCaches(tagId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

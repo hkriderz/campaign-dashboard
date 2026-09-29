@@ -68,7 +68,7 @@ export default function TagDataRefreshBar({
       phase: "refreshing",
     });
     try {
-      const { res, data } = await postRefresh({ tagId, clear: false });
+      const { res, data } = await postRefresh({ tagId, clear: false, fullRebuild: false });
       if (!res.ok) {
         setMessageTone("err");
         setMessage(data.error ?? res.statusText);
@@ -222,11 +222,11 @@ export default function TagDataRefreshBar({
             ) : null}
             {tagId ? (
               <>
-                <strong>Refresh this tag</strong> updates only the open candidate;{" "}
+                <strong>Refresh this tag</strong> updates only the open candidate.{" "}
               </>
             ) : null}
-            <strong>Refresh all tags</strong> runs a full BigQuery export for every phone-banking tag (one at a time —
-            progress shown below).
+            <strong>Refresh all tags</strong> merges the last three Pacific days for every campaign tag.{" "}
+            <strong>Rebuild</strong> reloads history since Dec 1, 2025. Refresh all runs one tag at a time.
           </span>
         </div>
         <div className="flex flex-col gap-2 shrink-0 sm:items-end">

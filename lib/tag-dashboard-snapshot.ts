@@ -1,9 +1,12 @@
 import { DateTime } from "luxon";
 import {
+  loadAllCampaignsSnapshot,
   loadCallSurveyFillSnapshot,
   loadDailyCallerSnapshot,
   loadPhoneBanksSnapshot,
   loadQuestionStatsSnapshot,
+  loadTextCampaignsSnapshot,
+  loadTextTagStatsSnapshot,
 } from "./bq-snapshot-store";
 
 const LA = "America/Los_Angeles";
@@ -85,5 +88,31 @@ export function getPhonebankingSnapshotsMeta(tagIds: string[]): SnapshotFreshnes
     dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
     hasDailyCaller: perTag.some((m) => m.hasDailyCaller),
     isStale: perTag.some((m) => m.isStale),
+  };
+}
+
+/** Freshness of the unfiltered all-campaigns snapshot written by Rebuild all. */
+export function getAllCampaignsSnapshotMeta(): SnapshotFreshnessMeta {
+  const snap = loadAllCampaignsSnapshot();
+  const dataUpdatedAt = snap?.savedAt ?? null;
+  return {
+    dataUpdatedAt,
+    dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
+    hasDailyCaller: Boolean(snap?.rows?.length),
+    isStale: isSnapshotTimestampStale(dataUpdatedAt),
+  };
+}
+
+/** Freshness of text campaign and tag-stat snapshots for one candidate. */
+export function getTextSnapshotMeta(tagId: string): SnapshotFreshnessMeta {
+  const campaigns = loadTextCampaignsSnapshot(tagId);
+  const stats = loadTextTagStatsSnapshot(tagId);
+  const times = [campaigns?.savedAt, stats?.savedAt].filter(Boolean) as string[];
+  const dataUpdatedAt = times.length ? times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
+  return {
+    dataUpdatedAt,
+    dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
+    hasDailyCaller: Boolean(campaigns?.rows?.length || stats?.rows?.length),
+    isStale: isSnapshotTimestampStale(dataUpdatedAt),
   };
 }

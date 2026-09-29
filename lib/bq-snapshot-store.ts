@@ -1,17 +1,20 @@
 /**
  * File-backed snapshots for tag-scoped dashboard data.
  * Normal reads use these files when present. If a tag has no snapshot file yet, fetch helpers
- * pull BigQuery once, write JSON, then serve from disk on later requests. **Refresh all** always
- * runs a full BigQuery pass and overwrites the files.
+ * pull BigQuery once, write JSON, then serve from disk on later requests. **Refresh** merges the
+ * last three Pacific days when the files already exist. **Rebuild** reloads history since 2025-12-01.
  */
 import fs from "fs";
 import path from "path";
-import type { QcRecontactPair } from "./qc-recontact/types";
+import type { QcRecontactPair, QcTextContactSummary } from "./qc-recontact/types";
+import type { PdiSurveyRow } from "./queries/qc-recontact";
 import type {
   CallSurveyRowForFill,
   PhoneBankSummary,
   PhonebankerQuestionResponseStat,
   TagDailyCallerStat,
+  TextCampaignSummary,
+  TextContactTagStat,
 } from "./types";
 import type { UniqueIdContactEvent } from "./unique-ids/types";
 
@@ -275,6 +278,128 @@ export function saveUniqueIdTextSnapshot(
   fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
 }
 
+export type PdiSurveySnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  rows: PdiSurveyRow[];
+};
+
+export type TextContactsSnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  rows: QcTextContactSummary[];
+};
+
+export type TextCampaignsSnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  rows: TextCampaignSummary[];
+};
+
+export type TextTagStatsSnapshotFile = {
+  version: number;
+  tagId: string;
+  savedAt: string;
+  rows: TextContactTagStat[];
+};
+
+const ALL_CAMPAIGNS_TAG_ID = "all-campaigns";
+
+function loadSnapshotFile<T extends { version: number; tagId: string }>(
+  tagId: string,
+  fileName: string
+): T | null {
+  const fp = path.join(DATA_DIR, safeTag(tagId), fileName);
+  const data = readJson<T>(fp);
+  if (!data || data.version !== SNAPSHOT_VERSION || data.tagId !== tagId) return null;
+  return data;
+}
+
+function saveSnapshotFile<T>(
+  tagId: string,
+  fileName: string,
+  rows: T[],
+  options?: SnapshotSaveOptions
+): void {
+  const dir = ensureDir(tagId);
+  const fp = path.join(dir, fileName);
+  if (!options?.touchEvenIfUnchanged && stableRowsUnchanged(fp, rows)) return;
+  const payload = {
+    version: SNAPSHOT_VERSION,
+    tagId,
+    savedAt: new Date().toISOString(),
+    rows,
+  };
+  fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
+}
+
+export function loadPdiSurveySnapshot(tagId: string): PdiSurveySnapshotFile | null {
+  const data = loadSnapshotFile<PdiSurveySnapshotFile>(tagId, "pdi-survey-rows.json");
+  if (!data || !Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function savePdiSurveySnapshot(
+  tagId: string,
+  rows: PdiSurveyRow[],
+  options?: SnapshotSaveOptions
+): void {
+  saveSnapshotFile(tagId, "pdi-survey-rows.json", rows, options);
+}
+
+export function loadTextContactsSnapshot(tagId: string): TextContactsSnapshotFile | null {
+  const data = loadSnapshotFile<TextContactsSnapshotFile>(tagId, "text-contacts.json");
+  if (!data || !Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function saveTextContactsSnapshot(
+  tagId: string,
+  rows: QcTextContactSummary[],
+  options?: SnapshotSaveOptions
+): void {
+  saveSnapshotFile(tagId, "text-contacts.json", rows, options);
+}
+
+export function loadTextCampaignsSnapshot(tagId: string): TextCampaignsSnapshotFile | null {
+  const data = loadSnapshotFile<TextCampaignsSnapshotFile>(tagId, "text-campaigns.json");
+  if (!data || !Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function saveTextCampaignsSnapshot(
+  tagId: string,
+  rows: TextCampaignSummary[],
+  options?: SnapshotSaveOptions
+): void {
+  saveSnapshotFile(tagId, "text-campaigns.json", rows, options);
+}
+
+export function loadTextTagStatsSnapshot(tagId: string): TextTagStatsSnapshotFile | null {
+  const data = loadSnapshotFile<TextTagStatsSnapshotFile>(tagId, "text-tag-stats.json");
+  if (!data || !Array.isArray(data.rows)) return null;
+  return data;
+}
+
+export function saveTextTagStatsSnapshot(
+  tagId: string,
+  rows: TextContactTagStat[],
+  options?: SnapshotSaveOptions
+): void {
+  saveSnapshotFile(tagId, "text-tag-stats.json", rows, options);
+}
+
+export function loadAllCampaignsSnapshot(): PhoneBanksSnapshotFile | null {
+  return loadPhoneBanksSnapshot(ALL_CAMPAIGNS_TAG_ID);
+}
+
+export function saveAllCampaignsSnapshot(rows: PhoneBankSummary[], options?: SnapshotSaveOptions): void {
+  savePhoneBanksSnapshot(ALL_CAMPAIGNS_TAG_ID, rows, options);
+}
+
 /** Delete all snapshot JSON files for a tag (e.g. before full rebuild). */
 export function clearTagSnapshots(tagId: string): void {
   const dir = path.join(DATA_DIR, safeTag(tagId));
@@ -287,6 +412,10 @@ export function clearTagSnapshots(tagId: string): void {
     "recontact-pairs.json",
     "unique-id-phone.json",
     "unique-id-text.json",
+    "pdi-survey-rows.json",
+    "text-contacts.json",
+    "text-campaigns.json",
+    "text-tag-stats.json",
   ]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) {

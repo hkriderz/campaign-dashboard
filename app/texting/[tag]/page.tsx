@@ -2,6 +2,9 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getTagById, getTextingTags } from "@/lib/campaign-tags";
 import { fetchTextCampaignsByTag, fetchTextContactTagStats } from "@/lib/queries/texting";
+import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
+import BqSnapshotRefreshPanel from "@/components/phonebanking/BqSnapshotRefreshPanel";
+import { getTextSnapshotMeta } from "@/lib/tag-dashboard-snapshot";
 import { buildTextTagRollup, type TextTagQuestionBlock } from "@/lib/texting-tag-rollups";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import TextCampaignTable from "@/components/texting/TextCampaignTable";
@@ -23,6 +26,7 @@ export default async function TextingTagPage({ params }: Props) {
   if (!allowed.has(tag.id)) notFound();
 
   return runServerWithCredentialContext(async () => {
+    const snapshotMeta = getTextSnapshotMeta(tagId);
     let campaigns = [] as Awaited<ReturnType<typeof fetchTextCampaignsByTag>>;
     let tagStats = [] as Awaited<ReturnType<typeof fetchTextContactTagStats>>;
     let error: string | null = null;
@@ -62,6 +66,27 @@ export default async function TextingTagPage({ params }: Props) {
           </Link>
           <p className="section-kicker mt-4">Dispatch</p>
           <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)] mt-1">{tag.label}</h1>
+          <div className="mt-4 space-y-3">
+            <TagDataRefreshBar
+              tagId={tagId}
+              enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
+              localDev={process.env.NODE_ENV === "development"}
+              dataUpdatedAtIso={snapshotMeta.dataUpdatedAt}
+              dataUpdatedAtLabel={snapshotMeta.dataUpdatedAtLabel}
+              isStale={snapshotMeta.isStale}
+              hasSnapshotData={snapshotMeta.hasDailyCaller}
+            />
+            {process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET || process.env.NODE_ENV === "development" ? (
+              <BqSnapshotRefreshPanel
+                tagId={tagId}
+                localDev={process.env.NODE_ENV === "development"}
+                dataUpdatedAtIso={snapshotMeta.dataUpdatedAt}
+                dataUpdatedAtLabel={snapshotMeta.dataUpdatedAtLabel}
+                isStale={snapshotMeta.isStale}
+                hasSnapshotData={snapshotMeta.hasDailyCaller}
+              />
+            ) : null}
+          </div>
           <hr className="section-hero__rule" />
           <p className="section-hero__lede">
             {campaigns.length.toLocaleString()} campaign{campaigns.length !== 1 ? "s" : ""} ·{" "}

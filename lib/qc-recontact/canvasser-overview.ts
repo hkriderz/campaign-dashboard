@@ -48,9 +48,12 @@ export type CanvasserOverviewRow = {
   canvasserName: string;
   surveyed: number;
   originallyStrongSupport: number;
-  recallContactRate: number;
-  strongSupportOnPollingRate: number;
-  strongSupportAfterPersuasionRate: number;
+  /** Null when surveyed is 0. A real 0 means nobody answered Yes. */
+  recallContactRate: number | null;
+  /** Null when nobody was originally strong support. */
+  strongSupportOnPollingRate: number | null;
+  /** Null when nobody was originally strong support. */
+  strongSupportAfterPersuasionRate: number | null;
   contactedYes: number;
   contactedUnsure: number;
   contactedNo: number;
@@ -141,13 +144,13 @@ function emptyFamilyBlock(): CanvasserFamilyBlock {
   return { surveyed: 0, strongSupport: 0, undecided: 0, strongOppose: 0 };
 }
 
-function rate(part: number, whole: number): number {
-  if (!whole) return 0;
+function rate(part: number, whole: number): number | null {
+  if (!whole) return null;
   return part / whole;
 }
 
-export function formatOverviewPercent(rateValue: number): string {
-  if (!Number.isFinite(rateValue)) return "0.00%";
+export function formatOverviewPercent(rateValue: number | null): string {
+  if (rateValue === null || !Number.isFinite(rateValue)) return "N/A";
   return `${(rateValue * 100).toFixed(2)}%`;
 }
 
@@ -157,8 +160,9 @@ export type OverviewPercentBand = "darkWarm" | "lightWarm" | "none" | "lightGree
  * 0–20 dark orange/red, 21–40 light orange/red, 41–60 none, 61–80 light green, 81–100 dark green.
  * The lower edge of each band is inclusive.
  */
-export function overviewPercentBand(rateValue: number): OverviewPercentBand {
-  const hundredths = Number.isFinite(rateValue) ? Math.round(rateValue * 10000) : 0;
+export function overviewPercentBand(rateValue: number | null): OverviewPercentBand | null {
+  if (rateValue === null || !Number.isFinite(rateValue)) return null;
+  const hundredths = Math.round(rateValue * 10000);
   if (hundredths <= 2000) return "darkWarm";
   if (hundredths <= 4000) return "lightWarm";
   if (hundredths <= 6000) return "none";
@@ -166,7 +170,7 @@ export function overviewPercentBand(rateValue: number): OverviewPercentBand {
   return "darkGreen";
 }
 
-export function overviewPercentBandClass(rateValue: number): string {
+export function overviewPercentBandClass(rateValue: number | null): string {
   switch (overviewPercentBand(rateValue)) {
     case "darkWarm":
       return "bg-red-200 text-red-950 dark:bg-red-900/60 dark:text-red-50";

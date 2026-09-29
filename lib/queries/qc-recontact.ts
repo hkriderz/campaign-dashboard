@@ -123,10 +123,13 @@ function hydrateRecontactPairsFromSurveyFill(
 
 export async function fetchTagPdiSurveyRows(
   tag: CampaignTag,
-  options: { requirePdi: boolean }
+  options: { requirePdi: boolean; callDateOnOrAfter?: string }
 ): Promise<PdiSurveyRow[]> {
   const whereClause = buildTagWhereClause(tag);
   const requirePdiSql = options.requirePdi ? `AND TRIM(${CALLEE_PDI_ID_SQL}) != ""` : "";
+  const historyStart = /^\d{4}-\d{2}-\d{2}$/.test(options.callDateOnOrAfter ?? "")
+    ? options.callDateOnOrAfter!
+    : PHONEBANK_WINDOW_START_DATE;
 
   const sql = `
     SELECT
@@ -153,7 +156,7 @@ export async function fetchTagPdiSurveyRows(
     JOIN \`${P}.${D}.campaigns\` campaigns
       ON calls.campaign_id = campaigns.id
     WHERE ${whereClause}
-      AND DATE(COALESCE(calls.connected_at, calls.created_at), 'America/Los_Angeles') >= '${PHONEBANK_WINDOW_START_DATE}'
+      AND DATE(COALESCE(calls.connected_at, calls.created_at), 'America/Los_Angeles') >= '${historyStart}'
       AND survey.deleted_at IS NULL
       AND survey.question_name IS NOT NULL
       ${requirePdiSql}
@@ -178,7 +181,12 @@ export async function fetchTagPdiSurveyRows(
   });
 }
 
-export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promise<QcRecontactPair[]> {
+export function buildQcRecontactPairsFromSources(
+  qcTagId: string,
+  qcRows: readonly PdiSurveyRow[],
+  primaryRows: readonly PdiSurveyRow[],
+  textContacts: Awaited<ReturnType<typeof fetchTagTextContacts>>
+): QcRecontactPair[] {
   const qcTag = getTagById(qcTagId);
   if (!qcTag || !isDerivedQcTagId(qcTagId)) return [];
 
@@ -187,12 +195,6 @@ export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promis
   if (!primaryTag) return [];
 
   const profile = resolveSurveyScriptProfile(qcTag);
-  const [qcRows, primaryRows, textContacts] = await Promise.all([
-    fetchTagPdiSurveyRows(qcTag, { requirePdi: false }),
-    fetchTagPdiSurveyRows(primaryTag, { requirePdi: true }),
-    fetchTagTextContacts(primaryTag, profile),
-  ]);
-
   const terms = candidateTermsForTag(primaryTag);
   const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, terms).filter(
     (qc) => canvassResultIsTalkingToCorrectPerson(qc.canvassLabel) && qcCallHasRecordedResponse(qc, profile)
@@ -204,6 +206,20 @@ export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promis
   );
   const withCanvass = mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, loadKnockIndexRows(), profile);
   return mergeTextPriorsIntoPairs(withCanvass, primaryTag, textContacts, profile);
+}
+
+export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promise<QcRecontactPair[]> {
+  const qcTag = getTagById(qcTagId);
+  if (!qcTag || !isDerivedQcTagId(qcTagId)) return [];
+  const primaryTag = getTagById(primaryTagIdFromQc(qcTagId));
+  if (!primaryTag) return [];
+  const profile = resolveSurveyScriptProfile(qcTag);
+  const [qcRows, primaryRows, textContacts] = await Promise.all([
+    fetchTagPdiSurveyRows(qcTag, { requirePdi: false }),
+    fetchTagPdiSurveyRows(primaryTag, { requirePdi: true }),
+    fetchTagTextContacts(primaryTag, profile),
+  ]);
+  return buildQcRecontactPairsFromSources(qcTagId, qcRows, primaryRows, textContacts);
 }
 
 export async function rebuildQcRecontactSnapshot(qcTagId: string): Promise<QcRecontactPair[]> {

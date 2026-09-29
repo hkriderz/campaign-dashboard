@@ -1,15 +1,13 @@
 import { Suspense } from "react";
-import {
-  fetchAllActivePhoneBankSummaries,
-  fetchPhoneBanksByTag,
-  fetchTagDailyCallerStats,
-} from "@/lib/queries/phonebanking";
+import { fetchPhoneBanksByTag, fetchTagDailyCallerStats } from "@/lib/queries/phonebanking";
+import { loadAllCampaignsSnapshot } from "@/lib/bq-snapshot-store";
 import { getPhonebankingTags } from "@/lib/campaign-tags";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import CandidateGrid from "@/components/phonebanking/CandidateGrid";
 import AllCampaignsDaySection from "@/components/phonebanking/AllCampaignsDaySection";
+import AllCampaignsSnapshotActions from "@/components/phonebanking/AllCampaignsSnapshotActions";
 import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
-import { getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
+import { getAllCampaignsSnapshotMeta, getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
 import { getTombstonedSliceKeys } from "@/lib/csv-slice-tombstones";
 import { buildCandidateStatsFromDailyCallerStats } from "@/lib/phonebanking-candidate-stats";
 import type { CandidateStats, PhoneBankSummary } from "@/lib/types";
@@ -21,6 +19,7 @@ export default async function PhoneBankingPage() {
   return runServerWithCredentialContext(async () => {
   const phonebankingTags = getPhonebankingTags();
   const snapshotsMeta = getPhonebankingSnapshotsMeta(phonebankingTags.map((t) => t.id));
+  const allCampaignsMeta = getAllCampaignsSnapshotMeta();
 
   let candidates: CandidateStats[] = [];
   let error: string | null = null;
@@ -46,11 +45,7 @@ export default async function PhoneBankingPage() {
     error = err instanceof Error ? err.message : String(err);
   }
 
-  try {
-    allCampaigns = await fetchAllActivePhoneBankSummaries();
-  } catch (err) {
-    allCampaignsError = err instanceof Error ? err.message : String(err);
-  }
+  allCampaigns = loadAllCampaignsSnapshot()?.rows ?? [];
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -90,9 +85,18 @@ export default async function PhoneBankingPage() {
         <h2 className="font-display text-2xl font-semibold text-[var(--section-ink)] mb-1">All campaigns</h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm mb-4">
           Same lifecycle and date window as candidate views, without filtering by name. Includes campaigns that
-          do not match any candidate tag (e.g. Ada). Use <strong className="font-medium">Filter by day</strong> to load
-          a single Pacific calendar day (extra BigQuery reads only when a date is chosen).
+          do not match any candidate tag. The list below is the last <strong className="font-medium">Rebuild all</strong>.
+          Use <strong className="font-medium">Filter by day</strong> to load a single Pacific calendar day (that filter
+          still queries BigQuery when a date is chosen).
         </p>
+        <AllCampaignsSnapshotActions
+          enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
+          localDev={process.env.NODE_ENV === "development"}
+          dataUpdatedAtIso={allCampaignsMeta.dataUpdatedAt}
+          dataUpdatedAtLabel={allCampaignsMeta.dataUpdatedAtLabel}
+          isStale={allCampaignsMeta.isStale}
+          hasSnapshotData={allCampaignsMeta.hasDailyCaller}
+        />
         {allCampaignsError ? (
           <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 text-sm text-amber-900 dark:text-amber-200">
             Could not load all-campaigns list:{" "}

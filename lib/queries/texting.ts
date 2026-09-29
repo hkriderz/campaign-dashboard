@@ -1,4 +1,11 @@
 import { runQuery, PROJECT, TEXT_DATASET } from "../bigquery";
+import {
+  loadTextCampaignsSnapshot,
+  loadTextTagStatsSnapshot,
+  saveTextCampaignsSnapshot,
+  saveTextTagStatsSnapshot,
+  snapshotsDisabled,
+} from "../bq-snapshot-store";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { buildTagWhereClause, getTagById } from "../campaign-tags";
 import { toDateString, toNum, toStr } from "./bq-row-parsers";
@@ -31,6 +38,16 @@ function rowToTextCampaign(r: Record<string, unknown>): TextCampaignSummary {
 
 export async function fetchTextCampaignsByTag(tagId: string): Promise<TextCampaignSummary[]> {
   requireDashboardDataAccess();
+  if (!snapshotsDisabled()) {
+    const snap = loadTextCampaignsSnapshot(tagId);
+    if (snap) return snap.rows;
+  }
+  const rows = await fetchTextCampaignsByTagUncached(tagId);
+  if (!snapshotsDisabled()) saveTextCampaignsSnapshot(tagId, rows);
+  return rows;
+}
+
+async function fetchTextCampaignsByTagUncached(tagId: string): Promise<TextCampaignSummary[]> {
   const tag = getTagById(tagId);
   if (!tag) return [];
 
@@ -65,6 +82,16 @@ export async function fetchTextCampaignsByTag(tagId: string): Promise<TextCampai
 
 export async function fetchTextContactTagStats(tagId: string): Promise<TextContactTagStat[]> {
   requireDashboardDataAccess();
+  if (!snapshotsDisabled()) {
+    const snap = loadTextTagStatsSnapshot(tagId);
+    if (snap) return snap.rows;
+  }
+  const rows = await fetchTextContactTagStatsUncached(tagId);
+  if (!snapshotsDisabled()) saveTextTagStatsSnapshot(tagId, rows);
+  return rows;
+}
+
+async function fetchTextContactTagStatsUncached(tagId: string): Promise<TextContactTagStat[]> {
   const tag = getTagById(tagId);
   if (!tag) return [];
 
@@ -98,4 +125,16 @@ export async function fetchTextContactTagStats(tagId: string): Promise<TextConta
     tagCount: toNum(r.tag_count),
     uniqueContacts: toNum(r.unique_contacts),
   }));
+}
+
+/** Full text aggregates since the history floor. Not a three-day slice. */
+export async function rebuildTextSnapshotsFromBigQuery(tagId: string): Promise<void> {
+  requireDashboardDataAccess();
+  if (snapshotsDisabled()) return;
+  const [campaigns, stats] = await Promise.all([
+    fetchTextCampaignsByTagUncached(tagId),
+    fetchTextContactTagStatsUncached(tagId),
+  ]);
+  saveTextCampaignsSnapshot(tagId, campaigns, { touchEvenIfUnchanged: true });
+  saveTextTagStatsSnapshot(tagId, stats, { touchEvenIfUnchanged: true });
 }

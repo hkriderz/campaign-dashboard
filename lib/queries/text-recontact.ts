@@ -47,10 +47,30 @@ function parseTagList(val: unknown): Array<{ tagName: string; tagAt: string }> {
  */
 export async function fetchTagTextContacts(
   tag: CampaignTag,
-  profile: SurveyScriptProfile
+  profile: SurveyScriptProfile,
+  options?: { activeSince?: string }
 ): Promise<QcTextContactSummary[]> {
   const whereClause = buildTagWhereClause(tag);
   const pdiSql = TEXT_PDI_ID_SQL;
+  const activeSince = /^\d{4}-\d{2}-\d{2}$/.test(options?.activeSince ?? "") ? options!.activeSince! : "";
+  const activeSinceSql = activeSince
+    ? `
+        AND (
+          EXISTS (
+            SELECT 1
+            FROM \`${P}.${D}.messages\` AS recent_messages
+            WHERE recent_messages.campaign_contact_id = campaign_contacts.id
+              AND DATE(COALESCE(recent_messages.thread_order_time, recent_messages.created_at), 'America/Los_Angeles') >= '${activeSince}'
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM \`${P}.${D}.campaign_contact_tags\` AS recent_tags
+            WHERE recent_tags.campaign_contact_id = campaign_contacts.id
+              AND recent_tags.deleted_at IS NULL
+              AND DATE(recent_tags.created_at, 'America/Los_Angeles') >= '${activeSince}'
+          )
+        )`
+    : "";
 
   const contactSql = `
     WITH base AS (
@@ -78,6 +98,7 @@ export async function fetchTagTextContacts(
               AND campaign_contact_tags.deleted_at IS NULL
           )
         )
+        ${activeSinceSql}
     ),
     msg AS (
       SELECT

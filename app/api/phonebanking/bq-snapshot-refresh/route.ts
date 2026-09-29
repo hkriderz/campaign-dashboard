@@ -5,13 +5,15 @@ import { runPhonebankingBqSnapshotRefresh } from "@/lib/phonebanking-bq-snapshot
 
 /**
  * POST JSON body:
- * - Single tag: `{ "tagId": "faizah", "clear": false }`
- * - Every phone-banking tag: `{ "refreshAll": true, "clear": false }`
+ * - Single tag, last three Pacific days: `{ "tagId": "faizah", "clear": false }`
+ * - Single tag, full history: `{ "tagId": "faizah", "fullRebuild": true }`
+ * - Every phone-banking tag: `{ "refreshAll": true, "fullRebuild": false }`
+ * - Unfiltered all-campaigns list: `{ "rebuildAllCampaigns": true }`
  *
  * Header: `x-snapshot-secret: <CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET>`
  *
- * Re-runs full BigQuery for snapshot-backed datasets and rewrites JSON on disk.
- * Set `clear: true` to delete existing snapshot files for each affected tag before rebuilding.
+ * `fullRebuild: true` reloads history since 2025-12-01. Omit it to merge the last three Pacific days.
+ * Set `clear: true` to delete existing snapshot files for each affected tag before a full rebuild.
  */
 export async function POST(req: Request) {
   if (!authorizeSnapshotRefresh(req)) {
@@ -22,6 +24,8 @@ export async function POST(req: Request) {
     tagId?: string;
     refreshAll?: boolean;
     clear?: boolean;
+    fullRebuild?: boolean;
+    rebuildAllCampaigns?: boolean;
   } | null;
 
   const { result, sessionId } = await runWithRequestCredentialContext(req, () =>
@@ -29,6 +33,8 @@ export async function POST(req: Request) {
       refreshAll: body?.refreshAll === true,
       tagId: typeof body?.tagId === "string" ? body.tagId : "",
       clearFirst: body?.clear === true,
+      fullRebuild: body?.fullRebuild === true,
+      rebuildAllCampaigns: body?.rebuildAllCampaigns === true,
     })
   );
 

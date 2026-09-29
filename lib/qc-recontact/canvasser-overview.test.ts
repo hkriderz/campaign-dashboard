@@ -245,7 +245,7 @@ test("Dilan Davila summary matches the Detailed Canvasser View sheet", () => {
   assert.match(csv, /Maria,Botello/);
 });
 
-test("zero originally strong support keeps percents at 0", () => {
+test("zero originally strong support leaves the strong-support rates blank", () => {
   const voter = DILAN[4];
   assert.ok(voter);
   const tally = tallyCanvasserOverview([pairFrom(voter, { canvasser: "Solo Lane" })]);
@@ -253,12 +253,16 @@ test("zero originally strong support keeps percents at 0", () => {
   assert.ok(row);
   assert.equal(row.surveyed, 1);
   assert.equal(row.originallyStrongSupport, 0);
-  assert.equal(row.strongSupportOnPollingRate, 0);
-  assert.equal(row.strongSupportAfterPersuasionRate, 0);
-  assert.equal(formatOverviewPercent(row.strongSupportOnPollingRate), "0.00%");
+  assert.equal(row.recallContactRate, 1);
+  assert.equal(formatOverviewPercent(row.recallContactRate), "100.00%");
+  assert.equal(overviewPercentBand(row.recallContactRate), "darkGreen");
+  assert.equal(row.strongSupportOnPollingRate, null);
+  assert.equal(row.strongSupportAfterPersuasionRate, null);
+  assert.equal(formatOverviewPercent(row.strongSupportOnPollingRate), "N/A");
+  assert.equal(formatOverviewPercent(row.strongSupportAfterPersuasionRate), "N/A");
+  assert.equal(overviewPercentBand(row.strongSupportOnPollingRate), null);
   assert.equal(row.originalUndecidedFinal.surveyed, 1);
   assert.equal(row.originalUndecidedFinal.strongSupport, 1);
-  assert.equal(Number.isNaN(row.strongSupportOnPollingRate), false);
 });
 
 test("pairs without a canvass prior are excluded", () => {
@@ -294,13 +298,13 @@ function overviewRow(
     canvasserName: partial.canvasserName,
     surveyed: partial.surveyed,
     originallyStrongSupport: partial.originallyStrongSupport,
-    recallContactRate: partial.surveyed ? partial.contactedYes / partial.surveyed : 0,
+    recallContactRate: partial.surveyed ? partial.contactedYes / partial.surveyed : null,
     strongSupportOnPollingRate: partial.originallyStrongSupport
       ? partial.pollingStrongSupport / partial.originallyStrongSupport
-      : 0,
+      : null,
     strongSupportAfterPersuasionRate: partial.originallyStrongSupport
       ? partial.finalStrongSupport / partial.originallyStrongSupport
-      : 0,
+      : null,
     contactedYes: partial.contactedYes,
     contactedUnsure: 0,
     contactedNo: partial.surveyed - partial.contactedYes,
@@ -362,4 +366,5 @@ test("percent bands include the lower edge of each range", () => {
   assert.equal(overviewPercentBand(0.8), "lightGreen");
   assert.equal(overviewPercentBand(0.81), "darkGreen");
   assert.equal(overviewPercentBand(1), "darkGreen");
+  assert.equal(overviewPercentBand(null), null);
 });

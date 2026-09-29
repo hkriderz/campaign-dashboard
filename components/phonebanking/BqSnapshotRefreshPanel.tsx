@@ -22,12 +22,15 @@ export default function BqSnapshotRefreshPanel({
   dataUpdatedAtLabel,
   isStale,
   hasSnapshotData,
+  localDev = false,
 }: {
   tagId: string;
   dataUpdatedAtIso?: string | null;
   dataUpdatedAtLabel?: string;
   isStale?: boolean;
   hasSnapshotData?: boolean;
+  /** `next dev` may rebuild without typing the snapshot secret. */
+  localDev?: boolean;
 }) {
   const router = useRouter();
   const [secret, setSecret] = useState("");
@@ -61,6 +64,7 @@ export default function BqSnapshotRefreshPanel({
           tagLabels,
           secret: secret.trim(),
           clearFirst,
+          fullRebuild: true,
           onProgress: setProgress,
         });
 
@@ -93,7 +97,7 @@ export default function BqSnapshotRefreshPanel({
             "Content-Type": "application/json",
             "x-snapshot-secret": secret,
           },
-          body: JSON.stringify({ tagId, clear: clearFirst }),
+          body: JSON.stringify({ tagId, clear: clearFirst, fullRebuild: true }),
         });
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) {
@@ -163,9 +167,9 @@ export default function BqSnapshotRefreshPanel({
       />
       <p className="mt-1 text-gray-600 dark:text-gray-400 leading-snug">
         Tag dashboards load from JSON on disk — they do not query BigQuery on every request.{" "}
-        <strong>Refresh this tag / all tags</strong> (above) or <strong>Rebuild history</strong> here runs a full
-        BigQuery pull and overwrites snapshot files. Check <strong>All phone-banking tags</strong> to rebuild every tag
-        (same as the violet button above). “Clear first” applies to each tag being rebuilt.
+        <strong>Refresh</strong> above merges the last three Pacific days. <strong>Rebuild this tag</strong> reloads
+        this candidate since Dec 1, 2025. Check <strong>All phone-banking tags</strong> to rebuild every tag. “Clear
+        first” deletes snapshot files and then reloads full history.
       </p>
       <form onSubmit={onSubmit} className="mt-2 space-y-2">
         <label className="flex items-center gap-2 cursor-pointer">
@@ -197,7 +201,7 @@ export default function BqSnapshotRefreshPanel({
           />
           <button
             type="submit"
-            disabled={status === "loading" || !secret.trim()}
+            disabled={status === "loading" || (!localDev && !secret.trim())}
             className="rounded bg-amber-700 hover:bg-amber-800 disabled:opacity-50 text-white px-3 py-1 text-xs font-medium"
           >
             {status === "loading" ? "Rebuilding…" : allTags ? "Rebuild all tags" : "Rebuild this tag"}

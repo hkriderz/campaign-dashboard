@@ -1,7 +1,9 @@
 import { getTextingTags } from "@/lib/campaign-tags";
 import { fetchTextCampaignsByTag } from "@/lib/queries/texting";
 import { runServerWithCredentialContext } from "@/lib/credentials";
+import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
 import TextCandidateGrid from "@/components/texting/TextCandidateGrid";
+import { getTextSnapshotMeta } from "@/lib/tag-dashboard-snapshot";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import type { TextCandidateStats } from "@/lib/types";
 import Link from "next/link";
@@ -12,6 +14,16 @@ export const dynamic = "force-dynamic";
 export default async function TextingPage() {
   return runServerWithCredentialContext(async () => {
     const tags = getTextingTags();
+    const textMeta = tags
+      .map((tag) => getTextSnapshotMeta(tag.id))
+      .reduce(
+        (latest, meta) => {
+          if (!meta.dataUpdatedAt) return latest;
+          if (!latest.dataUpdatedAt || new Date(meta.dataUpdatedAt) > new Date(latest.dataUpdatedAt)) return meta;
+          return latest;
+        },
+        getTextSnapshotMeta(tags[0]?.id ?? "")
+      );
 
     let candidates: TextCandidateStats[] = [];
     let error: string | null = null;
@@ -48,6 +60,17 @@ export default async function TextingPage() {
           >
             Campaign tags
           </Link>
+        </div>
+
+        <div className="mb-6">
+          <TagDataRefreshBar
+            enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
+            localDev={process.env.NODE_ENV === "development"}
+            dataUpdatedAtIso={textMeta.dataUpdatedAt}
+            dataUpdatedAtLabel={textMeta.dataUpdatedAtLabel}
+            isStale={textMeta.isStale}
+            hasSnapshotData={textMeta.hasDailyCaller}
+          />
         </div>
 
         {error ? (

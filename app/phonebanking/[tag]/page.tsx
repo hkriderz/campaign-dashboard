@@ -972,9 +972,10 @@ export default async function TagPage({ params, searchParams }: Props) {
             totalCalls={aggregateSlices.reduce((s, x) => s + x.totalCalls, 0)}
           />
         )}
-        {process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET ? (
+        {process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET || process.env.NODE_ENV === "development" ? (
           <BqSnapshotRefreshPanel
             tagId={tagId}
+            localDev={process.env.NODE_ENV === "development"}
             dataUpdatedAtIso={snapshotMeta.dataUpdatedAt}
             dataUpdatedAtLabel={snapshotMeta.dataUpdatedAtLabel}
             isStale={snapshotMeta.isStale}

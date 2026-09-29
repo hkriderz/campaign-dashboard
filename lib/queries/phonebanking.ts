@@ -7,6 +7,7 @@ import {
   loadDailyCallerSnapshot,
   loadPhoneBanksSnapshot,
   loadQuestionStatsSnapshot,
+  saveAllCampaignsSnapshot,
   saveCallSurveyFillSnapshot,
   saveDailyCallerSnapshot,
   savePhoneBanksSnapshot,
@@ -14,14 +15,16 @@ import {
   snapshotsDisabled,
 } from "../bq-snapshot-store";
 import { cachedBq } from "../bq-cache";
-import { buildTagWhereClause, campaignNameMatchesTag, getPhonebankingTags, getTagById, isDerivedQcTagId, resolveSurveyScriptProfile } from "../campaign-tags";
+import { buildTagWhereClause, campaignNameMatchesTag, getPhonebankingTags, getTagById, resolveSurveyScriptProfile } from "../campaign-tags";
 import { phonebankingPhoneBanksTag } from "../phonebanking-data-cache";
 import {
   phonebankerDailyStatHasVisibleWork,
   tagDailyCallerHasWorkBeyondLoggedHours,
 } from "../phonebank-session-work";
 import { canonicalizePhonebankerName } from "../phonebanker-name";
+import { questionStatsFromFillRows } from "../question-stats-from-fill";
 import { stampAndKeepCampaignDayRawCalls } from "../raw-stw-calls";
+import { laThreeDayWindowStart, mergeRowsByCallDate } from "../snapshot-merge";
 import {
   applyCallLevelStrongSupportToDailyCaller,
   candidateTermsForTag,
@@ -200,6 +203,16 @@ async function fetchPhoneBanksByTagUncached(tagId: string): Promise<PhoneBankSum
 export async function fetchAllActivePhoneBankSummaries(): Promise<PhoneBankSummary[]> {
   requireDashboardDataAccess();
   return cachedBq(["fetchAllActivePhoneBankSummaries"], () => fetchAllActivePhoneBankSummariesUncached());
+}
+
+/** Full unfiltered campaign list since 2025-12-01, written for the All campaigns table. */
+export async function rebuildAllCampaignsSnapshot(): Promise<PhoneBankSummary[]> {
+  requireDashboardDataAccess();
+  const rows = await fetchAllActivePhoneBankSummariesUncached();
+  if (!snapshotsDisabled()) {
+    saveAllCampaignsSnapshot(rows, { touchEvenIfUnchanged: true });
+  }
+  return rows;
 }
 
 async function fetchAllActivePhoneBankSummariesUncached(): Promise<PhoneBankSummary[]> {
@@ -616,7 +629,12 @@ export async function fetchPhoneBankDetail(
   // Per-phonebanker daily stats — same as `stw_phonebanker_survey_export.py` `daily_summary`:
   // time-in-calls and logged-in both sum each `callers` row in `caller_data` (no merged-session math).
   const dailySql = `
-    WITH caller_activity AS (
+    WITH scoped_callers AS (
+      SELECT callers.id AS caller_id
+      FROM \`${P}.${D}.callers\` AS callers
+      WHERE callers.campaign_id = '${campaignId}'
+    ),
+    caller_activity AS (
       SELECT
         calls.caller_id,
         MAX(
@@ -629,6 +647,7 @@ export async function fetchPhoneBankDetail(
           )
         ) AS last_call_end_time
       FROM \`${P}.${D}.calls\` AS calls
+      WHERE calls.caller_id IN (SELECT caller_id FROM scoped_callers)
       GROUP BY calls.caller_id
     ),
     caller_data AS (
@@ -940,7 +959,10 @@ export async function fetchTagDailyCallerStats(
   return rows.map(withDailyCallerMetricDefaults);
 }
 
-async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDailyCallerStat[]> {
+async function fetchTagDailyCallerStatsUncached(
+  tagId: string,
+  historyStart: string = PHONEBANK_WINDOW_START_DATE
+): Promise<TagDailyCallerStat[]> {
   const tag = getTagById(tagId);
   if (!tag) return [];
 
@@ -998,7 +1020,15 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
     : "";
 
   const sql = `
-    WITH caller_activity AS (
+    WITH scoped_callers AS (
+      SELECT callers.id AS caller_id
+      FROM \`${P}.${D}.callers\` callers
+      JOIN \`${P}.${D}.campaigns\` campaigns
+        ON callers.campaign_id = campaigns.id
+      WHERE ${whereClause}
+        AND DATE(callers.created_at, 'America/Los_Angeles') >= '${historyStart}'
+    ),
+    caller_activity AS (
       SELECT
         calls.caller_id,
         MAX(
@@ -1011,6 +1041,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
           )
         ) AS last_call_end_time
       FROM \`${P}.${D}.calls\` calls
+      WHERE calls.caller_id IN (SELECT caller_id FROM scoped_callers)
       GROUP BY calls.caller_id
     ),
     caller_data AS (
@@ -1040,7 +1071,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
         ON callers.campaign_id = campaigns.id
       LEFT JOIN caller_activity ca ON callers.id = ca.caller_id
       WHERE ${whereClause}
-        AND DATE(callers.created_at, 'America/Los_Angeles') >= '2025-12-01'
+        AND DATE(callers.created_at, 'America/Los_Angeles') >= '${historyStart}'
     ),
     survey_base_staging AS (
       SELECT
@@ -1061,7 +1092,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       JOIN \`${P}.${D}.campaigns\` campaigns
         ON calls.campaign_id = campaigns.id
       WHERE ${whereClause}
-        AND DATE(callers.created_at, 'America/Los_Angeles') >= '2025-12-01'
+        AND DATE(callers.created_at, 'America/Los_Angeles') >= '${historyStart}'
         AND survey.deleted_at IS NULL
         AND survey.question_name IS NOT NULL
     ),
@@ -1266,7 +1297,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       JOIN \`${P}.${D}.campaigns\` campaigns
         ON calls.campaign_id = campaigns.id
       WHERE ${whereClause}
-        AND DATE(calls.created_at, 'America/Los_Angeles') >= '2025-12-01'
+        AND DATE(calls.created_at, 'America/Los_Angeles') >= '${historyStart}'
       GROUP BY campaigns.id, campaigns.name, CAST(DATETIME(calls.created_at, 'America/Los_Angeles') AS DATE)
     ),
     dial_counts AS (
@@ -1282,7 +1313,7 @@ async function fetchTagDailyCallerStatsUncached(tagId: string): Promise<TagDaily
       LEFT JOIN \`${P}.${D}.calls\` calls
         ON callers.id = calls.caller_id
       WHERE ${whereClause}
-        AND DATE(callers.created_at, 'America/Los_Angeles') >= '2025-12-01'
+        AND DATE(callers.created_at, 'America/Los_Angeles') >= '${historyStart}'
       GROUP BY campaigns.id, campaigns.name, callers.name, CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE)
     ),
     metric_grain AS (
@@ -1399,95 +1430,21 @@ export async function fetchTagPhonebankerQuestionStats(
   options?: { snapshotFullRebuild?: boolean }
 ): Promise<PhonebankerQuestionResponseStat[]> {
   requireDashboardDataAccess();
-  if (snapshotsDisabled()) {
-    const full = await fetchTagPhonebankerQuestionStatsUncached(tagId);
-    return full.sort(sortQuestionResponseStats);
+  if (!options?.snapshotFullRebuild && !snapshotsDisabled()) {
+    const snap = loadQuestionStatsSnapshot(tagId);
+    if (snap) return snap.rows.sort(sortQuestionResponseStats);
   }
 
-  if (options?.snapshotFullRebuild) {
-    const full = await fetchTagPhonebankerQuestionStatsUncached(tagId);
-    const rows = full.sort(sortQuestionResponseStats);
-    saveQuestionStatsSnapshot(tagId, rows, { touchEvenIfUnchanged: true });
-    return rows;
+  const fill = await fetchTagCallSurveyRowsForFinalFill(tagId, {
+    snapshotFullRebuild: options?.snapshotFullRebuild === true,
+  });
+  const rows = questionStatsFromFillRows(fill);
+  if (!snapshotsDisabled()) {
+    saveQuestionStatsSnapshot(tagId, rows, {
+      touchEvenIfUnchanged: options?.snapshotFullRebuild === true,
+    });
   }
-
-  const snap = loadQuestionStatsSnapshot(tagId);
-  if (snap) {
-    return snap.rows.sort(sortQuestionResponseStats);
-  }
-  const full = await fetchTagPhonebankerQuestionStatsUncached(tagId);
-  const rows = full.sort(sortQuestionResponseStats);
-  saveQuestionStatsSnapshot(tagId, rows);
   return rows;
-}
-
-async function fetchTagPhonebankerQuestionStatsUncached(
-  tagId: string
-): Promise<PhonebankerQuestionResponseStat[]> {
-  const tag = getTagById(tagId);
-  if (!tag) return [];
-
-  const whereClause = buildTagWhereClause(tag);
-
-  const sql = `
-    WITH base AS (
-      SELECT
-        campaigns.id AS campaign_id,
-        campaigns.name AS campaign_name,
-        CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
-        callers.name AS phonebanker_name,
-        COALESCE(survey.question_name, '[Unknown Question]') AS question_name,
-        COALESCE(NULLIF(TRIM(survey.answer_value), ''), '[No Answer Recorded]') AS answer_value,
-        calls.id AS call_id
-      FROM \`${P}.${D}.survey_results\` survey
-      JOIN \`${P}.${D}.calls\` calls
-        ON survey.call_id = calls.id
-      JOIN \`${P}.${D}.callers\` callers
-        ON calls.caller_id = callers.id
-      JOIN \`${P}.${D}.campaigns\` campaigns
-        ON calls.campaign_id = campaigns.id
-      WHERE ${whereClause}
-        AND DATE(callers.created_at, 'America/Los_Angeles') >= '2025-12-01'
-        AND survey.deleted_at IS NULL
-        AND survey.question_name IS NOT NULL
-    )
-    SELECT
-      campaign_id,
-      campaign_name,
-      call_date,
-      phonebanker_name,
-      question_name,
-      answer_value,
-      COUNT(DISTINCT call_id) AS response_count
-    FROM base
-    GROUP BY campaign_id, campaign_name, call_date, phonebanker_name, question_name, answer_value
-    ORDER BY call_date DESC, campaign_name, phonebanker_name, question_name, answer_value
-  `;
-
-  const rows = await runQuery<Record<string, unknown>>(sql);
-  const merged = new Map<string, PhonebankerQuestionResponseStat>();
-  for (const r of rows) {
-    const campaignId = toStr(r.campaign_id);
-    const campaignName = toStr(r.campaign_name);
-    const callDate = toDateString(r.call_date) ?? "";
-    const phonebankerName = canonicalizePhonebankerName(toStr(r.phonebanker_name));
-    const questionName = toStr(r.question_name);
-    const answerValue = toStr(r.answer_value);
-    const key = `${campaignId}::${callDate}::${phonebankerName}::${questionName}::${answerValue}`;
-    if (!merged.has(key)) {
-      merged.set(key, {
-        campaignId,
-        campaignName,
-        callDate,
-        phonebankerName,
-        questionName,
-        answerValue,
-        responseCount: 0,
-      });
-    }
-    merged.get(key)!.responseCount += toNum(r.response_count);
-  }
-  return Array.from(merged.values()).sort(sortQuestionResponseStats);
 }
 
 function sortCallSurveyFill(a: CallSurveyRowForFill, b: CallSurveyRowForFill): number {
@@ -1527,13 +1484,30 @@ export async function fetchTagCallSurveyRowsForFinalFill(
   if (snap) {
     return snap.rows.sort(sortCallSurveyFill);
   }
-  const full = await fetchTagCallSurveyRowsForFinalFillUncached(tagId);
-  const rows = full.sort(sortCallSurveyFill);
-  saveCallSurveyFillSnapshot(tagId, rows);
-  return rows;
+  return loadFillSnapshotCold(tagId);
 }
 
-async function fetchTagCallSurveyRowsForFinalFillUncached(tagId: string): Promise<CallSurveyRowForFill[]> {
+const fillColdFlight = new Map<string, Promise<CallSurveyRowForFill[]>>();
+
+function loadFillSnapshotCold(tagId: string): Promise<CallSurveyRowForFill[]> {
+  const existing = fillColdFlight.get(tagId);
+  if (existing) return existing;
+  const promise = (async () => {
+    const full = await fetchTagCallSurveyRowsForFinalFillUncached(tagId);
+    const rows = full.sort(sortCallSurveyFill);
+    saveCallSurveyFillSnapshot(tagId, rows);
+    return rows;
+  })().finally(() => {
+    fillColdFlight.delete(tagId);
+  });
+  fillColdFlight.set(tagId, promise);
+  return promise;
+}
+
+async function fetchTagCallSurveyRowsForFinalFillUncached(
+  tagId: string,
+  historyStart: string = PHONEBANK_WINDOW_START_DATE
+): Promise<CallSurveyRowForFill[]> {
   const tag = getTagById(tagId);
   if (!tag) return [];
 
@@ -1557,7 +1531,7 @@ async function fetchTagCallSurveyRowsForFinalFillUncached(tagId: string): Promis
     JOIN \`${P}.${D}.campaigns\` campaigns
       ON calls.campaign_id = campaigns.id
     WHERE ${whereClause}
-      AND DATE(callers.created_at, 'America/Los_Angeles') >= '2025-12-01'
+      AND DATE(callers.created_at, 'America/Los_Angeles') >= '${historyStart}'
       AND survey.deleted_at IS NULL
       AND survey.question_name IS NOT NULL
     ORDER BY call_date DESC, campaign_name, call_id, survey_result_id
@@ -1576,40 +1550,64 @@ async function fetchTagCallSurveyRowsForFinalFillUncached(tagId: string): Promis
   }));
 }
 
+export type TagSnapshotRefreshMode = "full" | "incremental";
+
 /**
- * Full BigQuery refresh for all snapshot-backed tag datasets; overwrites on-disk JSON for this tag.
+ * Rewrite snapshot JSON for one tag.
+ * `incremental` merges the last three Pacific days into date-grained phone files when those
+ * files already exist. `full` reloads history since 2025-12-01. A missing daily or fill file
+ * takes the full path. Phone-bank totals and text campaign aggregates are always a full query.
  */
-export async function rebuildTagBqSnapshotsFromBigQuery(tagId: string): Promise<void> {
+export async function rebuildTagBqSnapshotsFromBigQuery(
+  tagId: string,
+  options?: { mode?: TagSnapshotRefreshMode }
+): Promise<void> {
   if (snapshotsDisabled()) return;
-  const [daily, , fill] = await Promise.all([
-    fetchTagDailyCallerStats(tagId, { snapshotFullRebuild: true }),
-    fetchTagPhonebankerQuestionStats(tagId, { snapshotFullRebuild: true }),
-    fetchTagCallSurveyRowsForFinalFill(tagId, { snapshotFullRebuild: true }),
-  ]);
+  const mode = options?.mode === "incremental" ? "incremental" : "full";
   const tag = getTagById(tagId);
+  const canIncremental =
+    mode === "incremental" &&
+    loadDailyCallerSnapshot(tagId) != null &&
+    loadCallSurveyFillSnapshot(tagId) != null;
+  const historyStart = canIncremental ? laThreeDayWindowStart() : PHONEBANK_WINDOW_START_DATE;
+
+  const [dailyFresh, fillFresh] = await Promise.all([
+    fetchTagDailyCallerStatsUncached(tagId, historyStart),
+    fetchTagCallSurveyRowsForFinalFillUncached(tagId, historyStart),
+  ]);
+  let daily = stampAndKeepCampaignDayRawCalls(dailyFresh, tagDailyCallerHasWorkBeyondLoggedHours).sort(
+    sortTagDailyCallerStats
+  );
+  let fill = fillFresh.sort(sortCallSurveyFill);
+  if (canIncremental) {
+    const windowStart = historyStart;
+    daily = mergeRowsByCallDate(loadDailyCallerSnapshot(tagId)?.rows ?? [], daily, windowStart);
+    fill = mergeRowsByCallDate(loadCallSurveyFillSnapshot(tagId)?.rows ?? [], fill, windowStart);
+    daily = stampAndKeepCampaignDayRawCalls(daily, tagDailyCallerHasWorkBeyondLoggedHours).sort(
+      sortTagDailyCallerStats
+    );
+    fill = fill.sort(sortCallSurveyFill);
+  }
   if (tag && fill.length > 0) {
-    const patched = applyCallLevelStrongSupportToDailyCaller(
+    daily = applyCallLevelStrongSupportToDailyCaller(
       daily,
       fill,
       resolveSurveyScriptProfile(tag),
       candidateTermsForTag(tag)
     );
-    saveDailyCallerSnapshot(tagId, patched, { touchEvenIfUnchanged: true });
   }
+  saveDailyCallerSnapshot(tagId, daily, { touchEvenIfUnchanged: true });
+  saveCallSurveyFillSnapshot(tagId, fill, { touchEvenIfUnchanged: true });
+  saveQuestionStatsSnapshot(tagId, questionStatsFromFillRows(fill), { touchEvenIfUnchanged: true });
+
   const banks = await fetchPhoneBanksByTagUncached(tagId);
   savePhoneBanksSnapshot(tagId, banks, { touchEvenIfUnchanged: true });
-  if (isDerivedQcTagId(tagId)) {
-    const { rebuildQcRecontactSnapshot } = await import("./qc-recontact");
-    await rebuildQcRecontactSnapshot(tagId);
-  } else if (tag) {
-    const { rebuildPhoneUniqueIdSnapshot, rebuildTextUniqueIdSnapshot } = await import("./unique-id-contacts");
-    const [phoneIds, textIds] = await Promise.all([
-      rebuildPhoneUniqueIdSnapshot(tag),
-      rebuildTextUniqueIdSnapshot(tag),
-    ]);
-    const uniqueIdErrors = [phoneIds.error, textIds.error].filter((item): item is string => Boolean(item));
-    if (uniqueIdErrors.length) {
-      throw new Error(uniqueIdErrors.join(" "));
-    }
+
+  if (tag?.includeInTexting) {
+    const { rebuildTextSnapshotsFromBigQuery } = await import("./texting");
+    await rebuildTextSnapshotsFromBigQuery(tagId);
   }
+
+  const { refreshRecontactAndUniqueSnapshots } = await import("./recontact-unique-refresh");
+  await refreshRecontactAndUniqueSnapshots(tagId, canIncremental ? "incremental" : "full");
 }
