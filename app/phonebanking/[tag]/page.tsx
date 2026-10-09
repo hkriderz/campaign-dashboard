@@ -370,7 +370,7 @@ export default async function TagPage({ params, searchParams }: Props) {
         )
       : undefined;
 
-  /** Merge likely-duplicate dialer names per campaign day (e.g. "Car5" vs "Carmen Acosta"). */
+  /** Merge likely-duplicate dialer names per campaign day (e.g. last-name typos). */
   const phonebankerRepBySlice = buildPhonebankerRepMapBySlice(bqDailyCaller, csvRowsSafe);
   bqDailyCaller = mergeTagDailyCallerStats(
     bqDailyCaller.map((r) => ({

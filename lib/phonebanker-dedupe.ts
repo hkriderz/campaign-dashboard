@@ -1,8 +1,10 @@
 /**
  * Merge phonebanker rows that are probably the same person when STW shows variant names
- * (e.g. "Car5" vs "Carmen Acosta") without relying solely on string normalization.
+ * (e.g. typo last names "Gabriel Guerrero" / "Gabriel Guerroro").
  *
  * Clustering is **per campaign day** (slice): names are never merged across dates or campaigns.
+ * First-only labels never merge with first+last (Brenda ≠ Brenda Salas). First-name fuzzy
+ * matching is disabled so similar first names (Brenda / Freyda) stay distinct.
  */
 
 import { normalizeName } from "./csv-parser";
@@ -50,15 +52,6 @@ export function primaryDedupeKey(canonicalName: string): string {
   return fullAlphaCompact(canonicalName);
 }
 
-function prefixKeysMergeable(ka: string, kb: string): boolean {
-  if (!ka || !kb) return false;
-  const [s, l] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
-  if (s.length < 3) return false;
-  if (!l.startsWith(s)) return false;
-  if (s.length === 3 && l.length - s.length > 6) return false;
-  return true;
-}
-
 export function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   const m = a.length;
@@ -80,16 +73,43 @@ export function levenshtein(a: string, b: string): number {
   return row[n]!;
 }
 
-/** True when two canonical display names likely refer to one dialer. */
+function lastNameKey(nameTokens: string[]): string {
+  if (nameTokens.length < 2) return "";
+  return nameTokens[nameTokens.length - 1]!.replace(/[^a-z]/gi, "").toLowerCase();
+}
+
+/** True when both sides have last names that match or are a small typo apart. */
+function lastNamesCompatible(ta: string[], tb: string[]): boolean {
+  const la = lastNameKey(ta);
+  const lb = lastNameKey(tb);
+  if (!la || !lb) return false;
+  if (la === lb) return true;
+  const shortLen = Math.min(la.length, lb.length);
+  if (shortLen >= 4 && levenshtein(la, lb) <= 2) return true;
+  return false;
+}
+
+/**
+ * True when two canonical display names likely refer to one dialer.
+ * Never merges first-only with first+last, or similar-but-different first names.
+ */
 export function phonebankerLabelsLikelySamePerson(a: string, b: string): boolean {
   if (a === b) return true;
   const ta = tokens(a);
   const tb = tokens(b);
+
+  // Different name shape (first-only vs first+last) → never merge.
+  if (ta.length !== tb.length && (ta.length === 1 || tb.length === 1)) {
+    return false;
+  }
+
   const k1 = primaryDedupeKey(a);
   const k2 = primaryDedupeKey(b);
-  if (k1 === k2) return true;
 
+  // Both multi-token: require compatible last names before any first-name logic.
   if (ta.length >= 2 && tb.length >= 2) {
+    if (!lastNamesCompatible(ta, tb)) return false;
+    if (k1 === k2) return true;
     const fa = fullAlphaCompact(a);
     const fb = fullAlphaCompact(b);
     if (fa === fb) return true;
@@ -97,10 +117,8 @@ export function phonebankerLabelsLikelySamePerson(a: string, b: string): boolean
     return false;
   }
 
-  if (prefixKeysMergeable(k1, k2)) return true;
-  const shortK = Math.min(k1.length, k2.length);
-  if (shortK >= 4 && levenshtein(k1, k2) <= 2) return true;
-  return false;
+  // Both single-token: exact first-name key only (no fuzzy Brenda ≈ Freyda).
+  return Boolean(k1) && k1 === k2;
 }
 
 /** Prefer the richest label (more letters, fewer digits, longer). */
