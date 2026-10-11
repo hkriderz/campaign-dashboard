@@ -22,6 +22,7 @@ const nextConfig: NextConfig = {
       stringIgnores.push("**/data/bq-snapshots/**");
       stringIgnores.push("**/data/district-classifier/**");
       stringIgnores.push("**/data/canvassing-reports/**");
+      stringIgnores.push("**/data/auth/**");
       config.watchOptions = {
         ...config.watchOptions,
         ignored: stringIgnores,

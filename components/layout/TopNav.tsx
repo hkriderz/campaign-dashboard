@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import WhaleMark from "@/components/brand/WhaleMark";
+import UserMenu from "@/components/auth/UserMenu";
 import ThemeToggle from "./ThemeToggle";
 
 const MODES = [
@@ -35,8 +36,8 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
       className="sticky top-0 z-40 border-b border-[var(--section-rule)] bg-[var(--section-paper)]"
       style={{ minHeight: "var(--app-header-height)" }}
     >
-      <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 flex items-center justify-between gap-2 min-h-[3.25rem] h-auto py-2 sm:py-0 sm:h-[3.25rem]">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="max-w-screen-2xl mx-auto px-3 sm:px-6 flex items-center gap-2 sm:gap-4 min-h-[3.25rem] h-auto py-2 sm:py-0 sm:h-[3.25rem]">
+        <div className="flex items-center gap-2 min-w-0 shrink-0">
           {showMenu ? (
             <button
               type="button"
@@ -58,11 +59,10 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
           </Link>
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-          <nav
-            className="flex items-center gap-0 sm:gap-1 overflow-x-auto max-w-[52vw] sm:max-w-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            aria-label="Main navigation"
-          >
+        <nav
+          className="flex min-w-0 flex-1 items-center justify-center gap-0 sm:gap-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          aria-label="Main navigation"
+        >
             {MODES.map((mode) => {
               const isActive = activeMode === mode.href;
               return (
@@ -82,7 +82,9 @@ export default function TopNav({ showSidebarToggle = false, onOpenSidebar }: Pro
                 </Link>
               );
             })}
-          </nav>
+        </nav>
+        <div className="flex shrink-0 items-center gap-2 border-l border-[var(--section-rule)] pl-2 sm:gap-3 sm:pl-3">
+          <UserMenu />
           <ThemeToggle />
         </div>
       </div>

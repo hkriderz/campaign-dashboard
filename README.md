@@ -337,17 +337,18 @@ On `next dev` only, **Refresh this tag (local)** / **Refresh all tags (local)** 
 
 ---
 
-## Section access password (Canvassing + District Classifier)
+## Staff logins
 
-Phonebanking, texting, and PDI mapper/syncer keep the existing GCP/PDI credential upload. Canvassing and District Classifier can be locked with a shared staff password:
+The dashboard requires a login. Accounts are stored in `data/auth/users.json` on the app’s data directory. There is no separate auth service.
 
-- Set `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` on the VPS (long random string, 20+ characters). Leave it unset locally so `next dev` stays open.
-- Entering the password once unlocks **both** sections for that browser session (HttpOnly `cd_access` cookie bound to `cd_session`).
-- Canvassing and district API routes return `401` until the session is unlocked.
-- Failed unlocks: **10 tries per 15 minutes** per session and IP, then “Too many attempts. Try again later.”
-- Changing the env password invalidates every existing unlock. Use HTTPS in production and set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
+- **Viewer:** the normal dashboard. Cannot save or append campaign tags, and cannot open PDI Mapper, Syncer, or Text Syncer.
+- **Editor:** viewer, plus campaign tags and those PDI tools.
+- **Admin:** editor, plus **Settings** to create accounts, change roles, disable accounts, and set passwords for everyone except the superadmin.
+- **Superadmin:** one account, created on first boot from `CAMPAIGN_DASHBOARD_ADMIN_LOGIN` and `CAMPAIGN_DASHBOARD_ADMIN_PASSWORD` when the user file is empty. Other admins cannot delete, disable, demote, or change its password. The superadmin can change their own password.
 
-This is a staff door code, not per-user login. Do not commit the password.
+Set `CAMPAIGN_DASHBOARD_AUTH_SECRET` in production. Local `next dev` uses a built-in dev secret if it is unset. Failed logins: **10 tries per 15 minutes** per IP. On HTTPS set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
+
+GCP/PDI credential upload is separate from these logins. Snapshot rebuilds stay on `POST /api/phonebanking/bq-snapshot-refresh` with `x-snapshot-secret`. Saving campaign tags does not refresh BigQuery.
 
 ---
 

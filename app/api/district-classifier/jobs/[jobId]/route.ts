@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { liveSessionDenied } from "@/lib/auth/http";
 import { getDistrictJob, markStaleDistrictJobsFailed } from "@/lib/district-classifier/store";
 import { cancelDistrictClassificationJob } from "@/lib/district-classifier/runner";
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 
 export async function GET(_req: Request, context: RouteContext) {
+  const denied = await liveSessionDenied(_req);
+  if (denied) return denied;
   const { jobId } = await context.params;
   markStaleDistrictJobsFailed();
   const job = getDistrictJob(jobId);
@@ -20,6 +23,8 @@ export async function GET(_req: Request, context: RouteContext) {
 }
 
 export async function PATCH(req: Request, context: RouteContext) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   const { jobId } = await context.params;
   const job = getDistrictJob(jobId);
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import { withCredentialContext } from "@/lib/credentials";
 import { compareSyncParity } from "@/lib/pdi-tools/sync/parity";
 import type { SyncRunOptions } from "@/lib/pdi-tools/sync/types";
@@ -17,6 +18,8 @@ function todayIsoDate(): string {
 
 export const POST = withCredentialContext(
   async (req) => {
+    const denied = await editorDenied(req);
+    if (denied) return denied;
     let body: ParityBody;
     try {
       body = (await req.json()) as ParityBody;

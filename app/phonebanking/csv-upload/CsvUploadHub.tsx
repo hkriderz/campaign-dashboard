@@ -136,7 +136,7 @@ export default function CsvUploadHub({
   const [newTagLabel, setNewTagLabel] = useState("");
   const [newTagTerms, setNewTagTerms] = useState("");
   const [newTagMode, setNewTagMode] = useState<"phonebanking" | "both">("phonebanking");
-  const [newTagWriteKey, setNewTagWriteKey] = useState("");
+  const [canCreateTag, setCanCreateTag] = useState(false);
   const [newTagBusy, setNewTagBusy] = useState(false);
   const [importFetchNonce, setImportFetchNonce] = useState(0);
   const [clearLogBusy, setClearLogBusy] = useState(false);
@@ -205,6 +205,24 @@ export default function CsvUploadHub({
       setMetaLoading(false);
     }
   }, [hubTagId, tags]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store", credentials: "same-origin" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { user?: { role?: string } };
+        const role = body.user?.role;
+        if (!cancelled) setCanCreateTag(role === "editor" || role === "admin" || role === "superadmin");
+      } catch {
+        /* viewers stay unable to create tags */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     void loadMeta();
@@ -661,8 +679,6 @@ export default function CsvUploadHub({
     setMessage("");
     try {
       const headers: HeadersInit = { "Content-Type": "application/json" };
-      const key = newTagWriteKey.trim();
-      if (key) headers["x-campaign-tags-append-secret"] = key;
       const res = await fetch("/api/campaign-tags/append", {
         method: "POST",
         headers,
@@ -1153,6 +1169,7 @@ export default function CsvUploadHub({
             </select>
           </label>
 
+          {canCreateTag ? (
           <button
             type="button"
             onClick={() => setNewTagOpen((o) => !o)}
@@ -1160,14 +1177,13 @@ export default function CsvUploadHub({
           >
             {newTagOpen ? "Hide new tag form" : "＋ New campaign tag…"}
           </button>
+          ) : null}
 
-          {newTagOpen ? (
+          {canCreateTag && newTagOpen ? (
             <div className="space-y-2 border-t border-indigo-200/70 dark:border-indigo-800/50 pt-3">
               <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400">
                 Appends one row to <code className="rounded bg-white/80 dark:bg-gray-900/80 px-0.5">campaign-tags.json</code>.
-                Server must allow writes: set{" "}
-                <code className="text-[10px]">ALLOW_INSECURE_TAG_APPEND=1</code> for trusted local use, or set{" "}
-                <code className="text-[10px]">CAMPAIGN_TAGS_APPEND_SECRET</code> and paste it below.
+                Editors and admins can save this from their login.
               </p>
               <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300">
                 Display label <span className="text-red-600">*</span>
@@ -1214,17 +1230,6 @@ export default function CsvUploadHub({
                   <option value="phonebanking">Phone banking</option>
                   <option value="both">Both (canvassing + phone)</option>
                 </select>
-              </label>
-              <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300">
-                Append secret (optional)
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={newTagWriteKey}
-                  onChange={(e) => setNewTagWriteKey(e.target.value)}
-                  className="mt-0.5 block w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-2 py-1 text-xs"
-                  placeholder="CAMPAIGN_TAGS_APPEND_SECRET"
-                />
               </label>
               <button
                 type="button"

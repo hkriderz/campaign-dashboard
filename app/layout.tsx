@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { getAuthUserFromCookies } from "@/lib/auth/current";
+import { isPublicAuthPath, safeNextPath } from "@/lib/auth/public-paths";
 import { IBM_Plex_Sans, Newsreader } from "next/font/google";
 import {
   DEFAULT_THEME,
@@ -40,6 +43,16 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const headerStore = await headers();
+  const pathname = headerStore.get("x-cd-pathname") ?? "";
+  if (pathname && !isPublicAuthPath(pathname)) {
+    const user = await getAuthUserFromCookies();
+    if (!user) {
+      const next = safeNextPath(pathname);
+      redirect(next === "/" ? "/login" : `/login?next=${encodeURIComponent(next)}`);
+    }
+  }
+
   const cookieStore = await cookies();
   const theme =
     parseThemeMode(cookieStore.get(THEME_STORAGE_KEY)?.value) ?? DEFAULT_THEME;

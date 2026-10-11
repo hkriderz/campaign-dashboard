@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { liveSessionDenied } from "@/lib/auth/http";
 import type { DistrictScanResult } from "@/lib/district-classifier/types";
 
 export const runtime = "nodejs";
@@ -64,6 +65,8 @@ function suggestMapping(columns: string[]): DistrictScanResult["suggestedMapping
 }
 
 export async function POST(req: Request) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   try {
     const form = await req.formData();
     const file = form.get("file");

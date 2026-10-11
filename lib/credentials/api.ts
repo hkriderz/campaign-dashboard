@@ -1,5 +1,6 @@
 import "server-only";
 
+import { assertLiveSession, AuthRequiredError } from "@/lib/auth/current";
 import { resolveContextFromRequest } from "./context";
 import { assertDataAccessAllowed, credentialsRequiredResponse, type DataAccessRequirements } from "./gate";
 import { runWithCredentialContextAsync } from "./store";
@@ -17,6 +18,14 @@ export function withCredentialContext(
   requirements?: DataAccessRequirements
 ): (req: Request) => Promise<Response> {
   return async (req: Request) => {
+    try {
+      await assertLiveSession(req);
+    } catch (err) {
+      if (err instanceof AuthRequiredError) {
+        return Response.json({ error: "Unauthorized", code: 401 }, { status: 401 });
+      }
+      throw err;
+    }
     const ctx = resolveContextFromRequest(req);
     try {
       return await runWithCredentialContextAsync(ctx, async () => {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
@@ -9,6 +10,8 @@ import {
 import { listSyncReportFiles } from "@/lib/pdi-tools/sync-report-files";
 
 export async function GET(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   const ctx = resolveContextFromRequest(req);
 
   try {

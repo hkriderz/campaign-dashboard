@@ -1,3 +1,4 @@
+import { editorDenied } from "@/lib/auth/http";
 import {
   getSyncRun,
   subscribeSyncRun,
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ runId: string }> };
 
 export async function GET(_req: Request, context: RouteContext) {
+  const denied = await editorDenied(_req);
+  if (denied) return denied;
   const { runId } = await context.params;
   const run = getSyncRun(runId);
 

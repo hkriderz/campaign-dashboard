@@ -80,3 +80,17 @@ export type {
   CanvasserOverviewTally,
   ContactedBucket,
 } from "./canvasser-overview";
+export {
+  buildPhonebankerOverviewCsv,
+  phonebankerOverviewExportFilename,
+  selectPhonebankerOverviewPairs,
+  summarizePhonebankerOverview,
+  tallyPhonebankerOverview,
+} from "./phonebanker-overview";
+export type {
+  PhonebankerOverviewCandidate,
+  PhonebankerOverviewDetail,
+  PhonebankerOverviewPayload,
+  PhonebankerOverviewRow,
+  PhonebankerOverviewTally,
+} from "./phonebanker-overview";

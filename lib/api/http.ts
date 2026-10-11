@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertLiveSession, AuthRequiredError } from "@/lib/auth/current";
 import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
@@ -46,6 +47,7 @@ export function withApiHandler<T>(
   options?: ApiHandlerOptions
 ): Promise<NextResponse<ApiSuccessBody<T> | ApiErrorBody>> {
   const execute = async (): Promise<T> => {
+    await assertLiveSession(options?.req);
     if (options?.req) {
       const ctx = resolveContextFromRequest(options.req);
       return runWithCredentialContextAsync(ctx, async () => {
@@ -61,7 +63,7 @@ export function withApiHandler<T>(
   return execute()
     .then((data) => apiOk(data))
     .catch((err) => {
-      if (err instanceof CredentialsRequiredError) {
+      if (err instanceof AuthRequiredError || err instanceof CredentialsRequiredError) {
         return apiError(err.message, 401);
       }
       const message = errorMessage(err);

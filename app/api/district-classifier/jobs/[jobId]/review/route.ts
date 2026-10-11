@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { liveSessionDenied } from "@/lib/auth/http";
 import {
   getDistrictJob,
   listDistrictReviewRows,
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string }> };
 
 export async function GET(_req: Request, context: RouteContext) {
+  const denied = await liveSessionDenied(_req);
+  if (denied) return denied;
   const { jobId } = await context.params;
   const job = getDistrictJob(jobId);
 

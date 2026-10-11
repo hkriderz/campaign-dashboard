@@ -1,3 +1,4 @@
+import { editorDenied } from "@/lib/auth/http";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { NextResponse } from "next/server";
@@ -19,6 +20,8 @@ function attachmentName(fileName: string): string {
 }
 
 export async function GET(req: Request, { params }: RouteParams) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   const ctx = resolveContextFromRequest(req);
   const { fileName } = await params;
 

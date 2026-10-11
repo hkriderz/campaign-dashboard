@@ -45,6 +45,8 @@ data/canvassing-non-contact-patterns/
 # Knock index + gap reports (PRIMARYID / voter PII)
 data/canvassing-reports/
 data/regression/
+# Staff accounts and sessions (password hashes)
+data/auth/
 output/
 
 # Local reference exports (may contain voter/canvasser PII)

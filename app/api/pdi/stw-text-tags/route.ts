@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import { withCredentialContext } from "@/lib/credentials";
 import { runQuery } from "@/lib/bigquery";
 import { buildNithyaTextCampaignStwData } from "@/lib/pdi-tools/text-tag-stw-data";
@@ -6,7 +7,9 @@ import { buildTextTagCatalogQuery } from "@/lib/pdi-tools/sync/text-query";
 import { TEXT_MAPPING_SURVEY_NAME } from "@/lib/pdi-tools/channel";
 
 export const GET = withCredentialContext(
-  async () => {
+  async (req) => {
+    const denied = await editorDenied(req);
+    if (denied) return denied;
     const rows = await runQuery<{ campaign_name: string; tag_name: string }>(buildTextTagCatalogQuery());
     const catalogRows = rows.map((r) => ({
       campaignName: String(r.campaign_name ?? "").trim(),

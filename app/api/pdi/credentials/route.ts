@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { liveSessionDenied } from "@/lib/auth/http";
 import * as fs from "fs";
 import {
   attachSessionCookie,
@@ -20,6 +21,8 @@ import {
 const MAX_FILE_BYTES = 1_500_000;
 
 export async function GET(req: Request) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   ensureServerBootstrapped();
   const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
 
@@ -38,6 +41,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   ensureServerBootstrapped();
   const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
 

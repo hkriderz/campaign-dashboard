@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { isAuthUser, liveSessionDenied, requireEditorUser } from "@/lib/auth/http";
 import {
   attachSessionCookie,
   resolveContextFromRequestWithSession,
@@ -26,7 +27,9 @@ function requireSnapshotSecret(req: Request): boolean {
  * POST — replace `campaign-tags.json`, reload in-memory tags, optionally refresh all BQ snapshots.
  * POST header: `x-snapshot-secret: <CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET>`
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   const editor = getCampaignTagsConfigForEditor();
   const activePhonebankingTags = getActivePhonebankingTagRows();
 
@@ -40,8 +43,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  if (!requireSnapshotSecret(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const secretOk = requireSnapshotSecret(req);
+  if (!secretOk) {
+    const editor = await requireEditorUser(req);
+    if (!isAuthUser(editor)) return editor;
   }
 
   const body = (await req.json().catch(() => null)) as {
@@ -72,7 +77,7 @@ export async function POST(req: Request) {
       >
     | undefined;
 
-  if (body?.refreshBigQuery === true) {
+  if (secretOk && body?.refreshBigQuery === true) {
     const { runPhonebankingBqSnapshotRefresh } = await import(
       "@/lib/phonebanking-bq-snapshot-refresh"
     );

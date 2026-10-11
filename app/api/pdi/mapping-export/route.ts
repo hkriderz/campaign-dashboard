@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import { listMappingFiles, saveMappingExport } from "@/lib/pdi-tools/mapping-files";
 import type { MappingOutput } from "@/lib/pdi-tools/types";
 import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 export async function POST(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   let body: { mapping?: MappingOutput; channel?: string };
   try {
     body = (await req.json()) as { mapping?: MappingOutput; channel?: string };

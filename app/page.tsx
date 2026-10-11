@@ -1,5 +1,6 @@
 import Link from "next/link";
 import WhaleMark from "@/components/brand/WhaleMark";
+import UserMenu from "@/components/auth/UserMenu";
 import ThemeToggle from "@/components/layout/ThemeToggle";
 
 const MODES = [
@@ -51,7 +52,8 @@ export default function LandingPage() {
       data-section="home"
       className="relative min-h-screen bg-[var(--section-paper)] text-[var(--section-ink)] px-4 py-10 sm:px-8 sm:py-16"
     >
-      <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50">
+      <div className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50 flex items-center gap-3">
+        <UserMenu />
         <ThemeToggle />
       </div>
 

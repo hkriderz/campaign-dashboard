@@ -1,3 +1,4 @@
+import { getAuthUserFromCookies, userCanEdit } from "@/lib/auth/current";
 import {
   getActivePhonebankingTagRows,
   getCampaignTagsConfigForEditor,
@@ -9,14 +10,17 @@ import CampaignTagsClient from "./CampaignTagsClient";
 
 export const dynamic = "force-dynamic";
 
-export default function CampaignTagsPage() {
+export default async function CampaignTagsPage() {
   const editor = getCampaignTagsConfigForEditor();
   const snapshotsMeta = getPhonebankingSnapshotsMeta(
     getPhonebankingTags().map((t) => t.id)
   );
 
+  const user = await getAuthUserFromCookies();
+
   return (
     <CampaignTagsClient
+      canEdit={userCanEdit(user)}
       initialTags={editor.tags}
       initialSource={editor.source}
       initialActiveTags={getActivePhonebankingTagRows()}

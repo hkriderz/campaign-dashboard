@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  ACCESS_COOKIE_NAME,
-  accessPasswordEnabled,
-  getAccessPassword,
-  isGatedSectionApiPath,
-} from "@/lib/access/config";
-import { verifyAccessToken } from "@/lib/access/token";
+import { isPublicAuthPath, safeNextPath } from "@/lib/auth/public-paths";
+import { AUTH_COOKIE_NAME, getAuthSecret, verifyAuthToken } from "@/lib/auth/token";
 import {
   SESSION_COOKIE_NAME,
   SESSION_REQUEST_HEADER,
@@ -17,46 +12,48 @@ import { createSessionId, isValidSessionId } from "@/lib/credentials/session-id"
 
 export { SESSION_REQUEST_HEADER };
 
-function denyGatedApi(sessionId: string): NextResponse {
-  const response = NextResponse.json({ error: "Unauthorized", code: 401 }, { status: 401 });
-  response.cookies.set(SESSION_COOKIE_NAME, sessionId, getSessionCookieOptions());
-  return response;
-}
-
 export async function middleware(request: NextRequest) {
-  const passwordOn = accessPasswordEnabled();
-  const credentialsOn = sessionCredentialsEnabled();
-
-  if (!passwordOn && !credentialsOn) {
-    return NextResponse.next();
-  }
-
   const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-cd-pathname", request.nextUrl.pathname);
+
+  const credentialsOn = sessionCredentialsEnabled();
   let sessionId = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  if (!isValidSessionId(sessionId)) {
+  if (credentialsOn && !isValidSessionId(sessionId)) {
     sessionId = createSessionId();
   }
-  requestHeaders.set(SESSION_REQUEST_HEADER, sessionId);
+  if (credentialsOn && sessionId) {
+    requestHeaders.set(SESSION_REQUEST_HEADER, sessionId);
+  }
 
+  const { pathname, search } = request.nextUrl;
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const authOk = Boolean(await verifyAuthToken(token, getAuthSecret()));
   const cookieOptions = getSessionCookieOptions();
-  const accessToken = request.cookies.get(ACCESS_COOKIE_NAME)?.value;
-  const accessOk =
-    passwordOn && (await verifyAccessToken(sessionId, accessToken, getAccessPassword()));
 
-  if (passwordOn && isGatedSectionApiPath(request.nextUrl.pathname) && !accessOk) {
-    return denyGatedApi(sessionId);
+  const attachSession = (response: NextResponse) => {
+    if (credentialsOn && sessionId) {
+      response.cookies.set(SESSION_COOKIE_NAME, sessionId, cookieOptions);
+    }
+    return response;
+  };
+
+  if (!isPublicAuthPath(pathname) && !authOk) {
+    if (pathname.startsWith("/api/")) {
+      return attachSession(
+        NextResponse.json({ error: "Unauthorized", code: 401 }, { status: 401 })
+      );
+    }
+    const login = new URL("/login", request.url);
+    const next = safeNextPath(`${pathname}${search}`);
+    if (next !== "/") login.searchParams.set("next", next);
+    return attachSession(NextResponse.redirect(login));
   }
 
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
-
-  response.cookies.set(SESSION_COOKIE_NAME, sessionId, cookieOptions);
-  if (accessOk && accessToken) {
-    response.cookies.set(ACCESS_COOKIE_NAME, accessToken, cookieOptions);
-  }
-
-  return response;
+  return attachSession(
+    NextResponse.next({
+      request: { headers: requestHeaders },
+    })
+  );
 }
 
 export const config = {

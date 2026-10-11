@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import { spawn } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
@@ -172,6 +173,8 @@ async function runPythonSync(body: ValidatedSyncBody, ctx: ReturnType<typeof res
 }
 
 export async function POST(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   const ctx = resolveContextFromRequest(req);
 
   try {

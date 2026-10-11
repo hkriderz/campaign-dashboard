@@ -54,6 +54,14 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 Canvasser QC Overview
               </Link>
               <Link
+                href="/canvassing/phonebankers"
+                onClick={onNavClick}
+                className={navLinkClass(pathname.startsWith("/canvassing/phonebankers"))}
+              >
+                <span className="w-1.5 h-1.5 rounded-none bg-sky-700 dark:bg-sky-400 flex-shrink-0" />
+                Phonebanker QC Overview
+              </Link>
+              <Link
                 href="/canvassing"
                 onClick={onNavClick}
                 className={navLinkClass(pathname === "/canvassing")}

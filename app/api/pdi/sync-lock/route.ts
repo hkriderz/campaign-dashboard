@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
@@ -27,11 +28,15 @@ async function withSyncLockAccess<T>(req: Request, fn: () => Promise<T>): Promis
 }
 
 export async function GET(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
   return withSyncLockAccess(req, () => getSyncLockStatus(channel));
 }
 
 export async function DELETE(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
   return withSyncLockAccess(req, async () => {
     const previous = await getSyncLockStatus(channel);

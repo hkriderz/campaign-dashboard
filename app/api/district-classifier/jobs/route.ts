@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { liveSessionDenied, liveSessionDeniedFromCookies } from "@/lib/auth/http";
 import {
   createDistrictJob,
   listDistrictJobs,
@@ -64,6 +65,8 @@ function formText(form: FormData, key: keyof DistrictColumnMapping): string {
 }
 
 export async function GET() {
+  const denied = await liveSessionDeniedFromCookies();
+  if (denied) return denied;
   if (!isDistrictClassificationRunning()) {
     markStaleDistrictJobsFailed();
   }
@@ -71,6 +74,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const denied = await liveSessionDenied(req);
+  if (denied) return denied;
   try {
     if (!isDistrictClassificationRunning()) {
       markStaleDistrictJobsFailed();

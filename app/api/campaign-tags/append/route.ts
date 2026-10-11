@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthUserFromRequest, userCanEdit } from "@/lib/auth/current";
 import {
   getCampaignTagsConfigForEditor,
   reloadCampaignTagsFromDisk,
@@ -25,14 +26,17 @@ function canAppend(req: NextRequest): boolean {
  * and send header `x-campaign-tags-append-secret`.
  */
 export async function POST(req: NextRequest) {
-  if (!canAppend(req)) {
+  const editor = await getAuthUserFromRequest(req);
+  if (!canAppend(req) && !userCanEdit(editor)) {
     return NextResponse.json(
       {
         ok: false,
-        error:
-          "Tag append is disabled. Set ALLOW_INSECURE_TAG_APPEND=1 for local-only use, or set CAMPAIGN_TAGS_APPEND_SECRET and send it as header x-campaign-tags-append-secret.",
+        error: editor
+          ? "Editors can add campaign tags."
+          : "Tag append is disabled. Set ALLOW_INSECURE_TAG_APPEND=1 for trusted local use, or set CAMPAIGN_TAGS_APPEND_SECRET and send it as header x-campaign-tags-append-secret.",
+        code: editor ? 403 : 401,
       },
-      { status: 401 }
+      { status: editor ? 403 : 401 }
     );
   }
 

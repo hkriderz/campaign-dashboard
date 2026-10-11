@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getAuthUserFromCookies, userCanEdit } from "@/lib/auth/current";
 import { sessionCredentialsEnabled } from "@/lib/credentials";
 import PdiCredentialsSection from "@/components/pdi-tools/PdiCredentialsSection";
 import SectionHero from "@/components/brand/SectionHero";
@@ -27,7 +28,9 @@ const TOOLS = [
   },
 ] as const;
 
-export default function PdiPage() {
+export default async function PdiPage() {
+  const user = await getAuthUserFromCookies();
+  const tools = userCanEdit(user) ? TOOLS : [];
   return (
     <div className="p-6 lg:p-8 overflow-y-auto bg-[var(--section-paper)]">
       <div className="max-w-3xl mx-auto">
@@ -37,8 +40,13 @@ export default function PdiPage() {
           lede="Mapping and sync tools for the Scale to Win → PDI pipeline."
         />
 
+        {tools.length === 0 ? (
+          <p className="text-sm text-[var(--section-muted)] border-y border-[var(--section-rule)] py-5">
+            Mapper and sync tools are available to editors and admins. You can still upload credentials below for phone banking and texting.
+          </p>
+        ) : (
         <ol className="divide-y divide-[var(--section-rule)] border-y border-[var(--section-rule)]">
-          {TOOLS.map((tool) => (
+          {tools.map((tool) => (
             <li key={tool.href}>
               <Link
                 href={tool.href}
@@ -62,9 +70,11 @@ export default function PdiPage() {
             </li>
           ))}
         </ol>
+        )}
 
         <PdiCredentialsSection sessionMode={sessionCredentialsEnabled()} />
 
+        {tools.length > 0 ? (
         <div className="mt-10 border border-dashed border-[var(--section-accent)] bg-[color-mix(in_srgb,var(--section-accent)_8%,transparent)] p-5">
           <p className="section-kicker mb-2">How it fits together</p>
           <p className="text-sm text-[var(--section-ink)]">
@@ -81,6 +91,7 @@ export default function PdiPage() {
             on this page for live API refresh and sync.
           </p>
         </div>
+        ) : null}
       </div>
     </div>
   );

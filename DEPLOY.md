@@ -39,7 +39,9 @@ Ensure these are **not** committed: `.env.local`, `credentials/*.json`, `starlit
 | `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS` | Multi-user | Set to `1` so each browser must upload its own GCP/PDI keys |
 | `CAMPAIGN_DASHBOARD_ALLOW_GLOBAL_CREDENTIALS` | Optional | Default `1`; set `0` to disable env/global fallback for sessions |
 | `CAMPAIGN_DASHBOARD_SESSION_CREDENTIALS_TTL_HOURS` | Optional | Prune idle session credential folders (default `72`) |
-| `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` | Recommended | Long random staff password (20+ chars). Locks Canvassing and District Classifier until one unlock per browser session |
+| `CAMPAIGN_DASHBOARD_AUTH_SECRET` | Yes in production | Long random string (32+ chars). Signs login cookies. Required when `NODE_ENV=production` |
+| `CAMPAIGN_DASHBOARD_ADMIN_LOGIN` | First boot | Your superadmin login. Used only when `data/auth/users.json` has no accounts |
+| `CAMPAIGN_DASHBOARD_ADMIN_PASSWORD` | First boot | Password for that superadmin (8+ characters). Not reset on later restarts |
 | `NODE_ENV` | Auto | `production` in image |
 
 ### Multi-user session credentials (recommended for shared Dokploy URL)
@@ -60,16 +62,16 @@ Idle session folders are deleted automatically after `CAMPAIGN_DASHBOARD_SESSION
 
 **HTTPS:** set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
 
-### Section access password (Canvassing + District Classifier)
+### Staff logins
 
-Phonebanking / texting / PDI tools stay on the GCP/PDI upload gate. Canvassing and District Classifier use a simpler shared password:
+Everyone signs in at `/login`. Accounts live in `data/auth/users.json` on the data volume (the Next.js process, not a separate database). Roles are `viewer`, `editor`, `admin`, and one `superadmin`.
 
-1. Set `CAMPAIGN_DASHBOARD_ACCESS_PASSWORD` to a long random value in Dokploy only — never commit it.
-2. Visitors enter it once; the HttpOnly `cd_access` cookie unlocks **both** sections for that browser session (same `cd_session` identity).
-3. `/api/canvassing/*` and `/api/district-classifier/*` return `401` until unlocked.
-4. Failed unlocks are limited to **10 tries per 15 minutes** per session and IP. Rotating the env password invalidates every existing unlock.
+1. Set `CAMPAIGN_DASHBOARD_AUTH_SECRET` to a long random value. In production, login fails closed without it.
+2. Set `CAMPAIGN_DASHBOARD_ADMIN_LOGIN` and `CAMPAIGN_DASHBOARD_ADMIN_PASSWORD` before the first boot. If the user file is empty, that pair becomes the **superadmin**. Later restarts do not reset it.
+3. Sign in as that superadmin and create other accounts under **Settings**. Other admins cannot delete, disable, demote, or change the superadmin password.
+4. On HTTPS, set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1`.
 
-Leave the variable unset for local `next dev`. On HTTPS, set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1` so the unlock POST is not sent over cleartext.
+Viewers can use the dashboard. They cannot save campaign tags or open PDI Mapper, Syncer, or Text Syncer. Editors can. Admins can also manage accounts and set passwords for everyone except the superadmin. GCP/PDI key upload is unchanged. Nightly snapshot refresh still uses `x-snapshot-secret` and does not need a login cookie.
 
 ### GCP JSON via env (single-tenant / cron only)
 
@@ -83,7 +85,15 @@ On first server request, the app writes `credentials/gcp-service-account.json` a
 
 ## 4. Domain & HTTPS
 
-In Dokploy, attach your domain and enable TLS (Let’s Encrypt). The app listens on `0.0.0.0:3000`.
+The app listens on `0.0.0.0:3000` and does not terminate TLS. Dokploy’s Traefik does. A self-signed certificate (Firefox `MOZILLA_PKIX_ERROR_SELF_SIGNED_CERT` on the generated `*.sslip.io` host) means Let’s Encrypt never issued a cert for that name.
+
+1. Open ports **80** and **443** to the internet. Let’s Encrypt HTTP-01 needs port 80.
+2. Prefer a DNS name you control. Create an **A record** to the VPS address (`45.80.152.68` for the current host) and attach that domain on the Dokploy application.
+3. In Dokploy, turn **HTTPS** on for the domain and set the certificate resolver to **Let’s Encrypt**. The generated `sslip.io` hostname can use the same setting if you keep it, but a real domain is the one to share.
+4. If issuance fails, read the Traefik ACME log before retrying. Typical causes are port 80 blocked, the name not reaching this server, or a rate limit.
+5. After the browser shows a normal padlock, set `CAMPAIGN_DASHBOARD_SESSION_COOKIE_SECURE=1` and redeploy so login cookies are not sent over plain HTTP.
+
+Do not use the browser’s “Proceed” / risk bypass as the fix.
 
 ## 5. Post-deploy checks
 

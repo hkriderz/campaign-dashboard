@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { NextResponse } from "next/server";
+import { liveSessionDenied } from "@/lib/auth/http";
 import { resolveDistrictExportPath } from "@/lib/district-classifier/store";
 
 export const runtime = "nodejs";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 type RouteContext = { params: Promise<{ jobId: string; fileName: string }> };
 
 export async function GET(_req: Request, context: RouteContext) {
+  const denied = await liveSessionDenied(_req);
+  if (denied) return denied;
   const { jobId, fileName } = await context.params;
   const filePath = resolveDistrictExportPath(jobId, fileName);
 

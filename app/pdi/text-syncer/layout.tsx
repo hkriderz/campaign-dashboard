@@ -1,12 +1,16 @@
+import { redirect } from "next/navigation";
 import SessionCredentialsGate from "@/components/credentials/SessionCredentialsGate";
+import { getAuthUserFromCookies, userCanEdit } from "@/lib/auth/current";
 
 export const dynamic = "force-dynamic";
 
-export default function PdiTextSyncerLayout({
+export default async function PdiTextSyncerLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const user = await getAuthUserFromCookies();
+  if (!userCanEdit(user)) redirect("/pdi");
   return (
     <SessionCredentialsGate
       requirements={{ gcp: true, pdi: true }}

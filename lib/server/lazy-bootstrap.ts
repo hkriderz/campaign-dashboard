@@ -92,6 +92,7 @@ export function resolveDataRoot(): string {
 export function ensureRuntimeDataDirs(): void {
   const root = resolveDataRoot();
   const dirs = [
+    path.join(root, "data", "auth"),
     path.join(root, "data", "bq-snapshots"),
     path.join(root, "credentials"),
     path.join(root, "credentials", "sessions"),

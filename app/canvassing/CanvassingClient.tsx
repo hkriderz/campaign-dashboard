@@ -96,6 +96,12 @@ function formatDuration(value: number | null | undefined): string {
   return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Over-10 gap sum, or the longest gap when every gap is 10 minutes or less. */
+function gapLengthTotalMinutes(stat: CanvasserGapStats): number {
+  if (stat.totalGapMinutesOver10 > 0) return stat.totalGapMinutesOver10;
+  return stat.largestGapMinutes;
+}
+
 /** Short duration for notes/chats (e.g. 1h 20m, 45m). */
 function formatDurationReadable(value: number | null | undefined): string {
   if (value === null || value === undefined) return "n/a";
@@ -197,7 +203,7 @@ function knockPivotCsv(stats: CanvasserGapStats[]): string {
         formatTime(stat.largestGapEndAt),
         formatTime(stat.firstKnockAt),
         formatTime(stat.mostRecentKnockAt),
-        formatDuration(stat.totalGapMinutesOver10),
+        formatDuration(gapLengthTotalMinutes(stat)),
         formatDuration(stat.averageNonZeroGapMinutes),
       ])
     );
@@ -218,7 +224,7 @@ function knockPivotTsv(stats: CanvasserGapStats[]): string {
         formatTime(stat.largestGapEndAt),
         formatTime(stat.firstKnockAt),
         formatTime(stat.mostRecentKnockAt),
-        formatDuration(stat.totalGapMinutesOver10),
+        formatDuration(gapLengthTotalMinutes(stat)),
         formatDuration(stat.averageNonZeroGapMinutes),
       ])
     );
@@ -656,7 +662,7 @@ function CanvasserStatsTable({
                 <td className="py-3 pr-4 tabular-nums">{formatTime(row.largestGapEndAt)}</td>
                 <td className="py-3 pr-4 tabular-nums">{formatTime(row.firstKnockAt)}</td>
                 <td className="py-3 pr-4 tabular-nums">{formatTime(row.mostRecentKnockAt)}</td>
-                <td className="py-3 pr-4 tabular-nums">{formatDuration(row.totalGapMinutesOver10)}</td>
+                <td className="py-3 pr-4 tabular-nums">{formatDuration(gapLengthTotalMinutes(row))}</td>
                 <td className="py-3 pr-4 tabular-nums">{formatDuration(row.averageNonZeroGapMinutes)}</td>
               </tr>
             ))}

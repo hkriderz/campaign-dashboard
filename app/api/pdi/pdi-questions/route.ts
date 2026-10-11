@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import * as fs from "fs";
 import * as path from "path";
 import { withCredentialContext } from "@/lib/credentials";
@@ -88,6 +89,8 @@ function loadCachedQuestions(): PdiQuestion[] {
 
 export const GET = withCredentialContext(
   async (req) => {
+    const denied = await editorDenied(req);
+    if (denied) return denied;
     const source = new URL(req.url).searchParams.get("source");
 
     let questions: PdiQuestion[];

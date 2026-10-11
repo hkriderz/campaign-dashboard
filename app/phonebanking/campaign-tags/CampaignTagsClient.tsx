@@ -69,12 +69,14 @@ function newEmptyRow(): StoredCampaignTagV1 {
 }
 
 export default function CampaignTagsClient({
+  canEdit,
   initialTags,
   initialSource,
   initialActiveTags,
   configPath,
   snapshotsMeta,
 }: {
+  canEdit: boolean;
   initialTags: StoredCampaignTagV1[];
   initialSource: "file" | "default";
   initialActiveTags: ActiveTagRow[];
@@ -88,14 +90,10 @@ export default function CampaignTagsClient({
   const [activeTags, setActiveTags] = useState<ActiveTagRow[]>(initialActiveTags);
   const [activeLoading, setActiveLoading] = useState(false);
   const [source, setSource] = useState(initialSource);
-  const [secret, setSecret] = useState("");
-  const [refreshBq, setRefreshBq] = useState(false);
-  const [clearSnapshots, setClearSnapshots] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "err">("ok");
   const scrollNewCandidateIndexRef = useRef<number | null>(null);
-  const secretInputRef = useRef<HTMLInputElement>(null);
   const [removingIndex, setRemovingIndex] = useState<number | null>(null);
 
   const loadActive = useCallback(async (opts?: { showSpinner?: boolean }) => {
@@ -183,18 +181,9 @@ export default function CampaignTagsClient({
     });
   }
 
-  function showSecretError(text: string) {
-    setMessageTone("err");
-    setMessage(text);
-    secretInputRef.current?.focus();
-  }
-
   async function onSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!secret.trim()) {
-      showSecretError("Enter the snapshot secret to save. It is required to write tags to disk.");
-      return;
-    }
+    if (!canEdit) return;
 
     const prepared = rows.map((r) => {
       const id = r.id.trim() || slugify(r.label);
@@ -223,61 +212,24 @@ export default function CampaignTagsClient({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-snapshot-secret": secret,
         },
         body: JSON.stringify({
           tags: prepared,
-          refreshBigQuery: refreshBq,
-          clearSnapshots: refreshBq && clearSnapshots,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         activePhonebankingTags?: ActiveTagRow[];
-        snapshotRefresh?: {
-          ok?: boolean;
-          error?: string;
-          message?: string;
-          refreshed?: string[];
-          errors?: { tagId: string; error: string }[];
-        } | null;
       };
 
       if (!res.ok) {
-        if (res.status === 401 || data.error === "Unauthorized") {
-          showSecretError("That snapshot secret is incorrect. Check it and try again.");
-          return;
-        }
         setMessageTone("err");
         setMessage(data.error ?? res.statusText);
         return;
       }
 
-      const snap = data.snapshotRefresh;
-      if (refreshBq && snap && "ok" in snap && snap.ok === false) {
-        setMessageTone("err");
-        setMessage(
-          `Saved campaign tags, but BigQuery refresh failed: ${snap.error ?? "unknown error"}.`
-        );
-      } else if (
-        refreshBq &&
-        snap &&
-        "errors" in snap &&
-        Array.isArray(snap.errors) &&
-        snap.errors.length > 0
-      ) {
-        setMessageTone("err");
-        setMessage(
-          `Saved. Some snapshot rebuilds failed: ${snap.errors.map((e) => `${e.tagId}: ${e.error}`).join("; ")}.`
-        );
-      } else {
-        setMessageTone("ok");
-        setMessage(
-          refreshBq
-            ? "Saved campaign tags and refreshed BigQuery snapshots for all phone-banking tags."
-            : "Saved campaign tags. Reload or revisit a candidate page to use new slugs."
-        );
-      }
+      setMessageTone("ok");
+      setMessage("Saved campaign tags. Reload or revisit a candidate page to use new slugs.");
       if (data.activePhonebankingTags) {
         setActiveTags(data.activePhonebankingTags);
       }
@@ -319,7 +271,7 @@ export default function CampaignTagsClient({
           <code className="text-xs bg-gray-100 dark:bg-gray-800 px-1 rounded">
             {configPath}
           </code>
-          . Saving writes that file and uses the same snapshot secret as BigQuery refresh. When no
+          . Saving writes that file only. It does not refresh BigQuery snapshots. When no
           file exists yet, defaults are built in until you save once.
         </p>
         <p className="text-xs text-gray-500 dark:text-gray-500 mt-2">
@@ -334,12 +286,12 @@ export default function CampaignTagsClient({
         <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4 bg-gray-50/50 dark:bg-gray-800/20">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-              Save changes
+              {canEdit ? "Save changes" : "View only"}
             </p>
             <p className="text-xs text-gray-600 dark:text-gray-400">
-              Enter the snapshot secret, then save. The secret is required to write tags to disk
-              (same value as BigQuery snapshot refresh). Add candidate only adds a form row and
-              does not need the secret.
+              {canEdit
+                ? "Save writes campaign tags to disk. It does not rebuild BigQuery snapshots."
+                : "Viewers can read tags. An editor or admin can add or change them."}
             </p>
           </div>
           <SnapshotFreshnessLine
@@ -349,58 +301,25 @@ export default function CampaignTagsClient({
             hasSnapshotData={snapshotsMeta.hasDailyCaller}
             emptySnapshotHint="(no snapshots on disk for any tag yet)"
           />
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="font-medium text-gray-800 dark:text-gray-200">
-              Snapshot secret <span className="text-red-600 dark:text-red-400">required to save</span>
-            </span>
-            <input
-              ref={secretInputRef}
-              type="password"
-              autoComplete="off"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-              placeholder="Paste the snapshot secret"
-              aria-required="true"
-              aria-invalid={messageTone === "err" && message.toLowerCase().includes("secret")}
-              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm max-w-md"
-            />
-          </label>
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={refreshBq}
-                onChange={(e) => setRefreshBq(e.target.checked)}
-              />
-              Re-run BigQuery snapshot jobs for every active tag after save
-            </label>
-            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
-              <input
-                type="checkbox"
-                checked={clearSnapshots}
-                onChange={(e) => setClearSnapshots(e.target.checked)}
-                disabled={!refreshBq}
-              />
-              Clear existing snapshots first
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button
-              type="button"
-              onClick={addCandidate}
-              disabled={removingIndex !== null}
-              className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm disabled:opacity-50"
-            >
-              Add candidate
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium"
-            >
-              {saving ? "Saving…" : "Save to disk"}
-            </button>
-          </div>
+          {canEdit ? (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={addCandidate}
+                disabled={removingIndex !== null}
+                className="rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-3 py-2 text-sm disabled:opacity-50"
+              >
+                Add candidate
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-md bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 text-sm font-medium"
+              >
+                {saving ? "Saving…" : "Save to disk"}
+              </button>
+            </div>
+          ) : null}
           {message ? (
             <p
               role="status"
@@ -475,6 +394,7 @@ export default function CampaignTagsClient({
         {rows.map((row, i) => (
           <fieldset
             key={i}
+            disabled={!canEdit}
             id={`campaign-tag-candidate-${i}`}
             className={[
               "rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-4 bg-white dark:bg-gray-900/40 scroll-mt-24",

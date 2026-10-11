@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { editorDenied } from "@/lib/auth/http";
 import {
   listMappingFiles,
   saveUploadedMappingFile,
@@ -6,6 +7,8 @@ import {
 import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
 
 export async function GET(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   try {
     const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
     const payload = listMappingFiles(channel);
@@ -17,6 +20,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const denied = await editorDenied(req);
+  if (denied) return denied;
   try {
     const channel = parsePdiSyncChannel(new URL(req.url).searchParams.get("channel"));
     const form = await req.formData();
