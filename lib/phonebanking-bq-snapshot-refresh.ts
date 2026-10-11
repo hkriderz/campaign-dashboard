@@ -4,6 +4,7 @@ import { revalidatePhonebankingTagDataCaches } from "@/lib/phonebanking-data-cac
 import {
   rebuildAllCampaignsSnapshot,
   rebuildTagBqSnapshotsFromBigQuery,
+  refreshTagsFromSharedDialerScan,
   type TagSnapshotRefreshMode,
 } from "@/lib/queries/phonebanking";
 
@@ -24,7 +25,7 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   refreshAll?: boolean;
   tagId?: string;
   clearFirst?: boolean;
-  /** True reloads history since 2025-12-01. False merges the last three Pacific days when snapshots exist. */
+  /** True reloads history since 2025-12-01. False reads since the last query start, minus one Pacific day. */
   fullRebuild?: boolean;
   /** Rewrite only the unfiltered all-campaigns snapshot. */
   rebuildAllCampaigns?: boolean;
@@ -54,18 +55,38 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   if (refreshAll) {
     const refreshed: string[] = [];
     const errors: { tagId: string; error: string }[] = [];
+    const tags = getPhonebankingTags();
 
-    for (const t of getPhonebankingTags()) {
-      if (clearFirst) {
-        clearTagSnapshots(t.id);
+    if (mode === "incremental") {
+      const shared = await refreshTagsFromSharedDialerScan(tags.map((tag) => tag.id));
+      for (const tagId of shared.refreshed) {
+        revalidatePhonebankingTagDataCaches(tagId);
+        refreshed.push(tagId);
       }
-      try {
-        await rebuildTagBqSnapshotsFromBigQuery(t.id, { mode });
-        revalidatePhonebankingTagDataCaches(t.id);
-        refreshed.push(t.id);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        errors.push({ tagId: t.id, error: message });
+      errors.push(...shared.errors);
+      for (const tagId of shared.needsFull) {
+        try {
+          await rebuildTagBqSnapshotsFromBigQuery(tagId, { mode: "full" });
+          revalidatePhonebankingTagDataCaches(tagId);
+          refreshed.push(tagId);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          errors.push({ tagId, error: message });
+        }
+      }
+    } else {
+      for (const t of tags) {
+        if (clearFirst) {
+          clearTagSnapshots(t.id);
+        }
+        try {
+          await rebuildTagBqSnapshotsFromBigQuery(t.id, { mode });
+          revalidatePhonebankingTagDataCaches(t.id);
+          refreshed.push(t.id);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          errors.push({ tagId: t.id, error: message });
+        }
       }
     }
 

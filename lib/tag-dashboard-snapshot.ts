@@ -3,10 +3,15 @@ import {
   loadAllCampaignsSnapshot,
   loadCallSurveyFillSnapshot,
   loadDailyCallerSnapshot,
+  loadPdiSurveySnapshot,
   loadPhoneBanksSnapshot,
   loadQuestionStatsSnapshot,
+  loadRecontactPairsSnapshot,
   loadTextCampaignsSnapshot,
+  loadTextContactsSnapshot,
   loadTextTagStatsSnapshot,
+  loadUniqueIdPhoneSnapshot,
+  loadUniqueIdTextSnapshot,
 } from "./bq-snapshot-store";
 
 const LA = "America/Los_Angeles";
@@ -47,20 +52,28 @@ function isSnapshotTimestampStale(dataUpdatedAt: string | null): boolean {
  * Latest `savedAt` across dashboard snapshot files for a tag, plus display labels.
  */
 export function getTagDashboardSnapshotMeta(tagId: string): SnapshotFreshnessMeta {
-  const dc = loadDailyCallerSnapshot(tagId);
-  const pb = loadPhoneBanksSnapshot(tagId);
-  const qs = loadQuestionStatsSnapshot(tagId);
-  const cf = loadCallSurveyFillSnapshot(tagId);
-  const times = [dc?.savedAt, pb?.savedAt, qs?.savedAt, cf?.savedAt].filter(Boolean) as string[];
-  let dataUpdatedAt: string | null = null;
-  if (times.length) {
-    dataUpdatedAt = times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b));
-  }
-  const dataUpdatedAtLabel = formatSnapshotUpdatedLabel(dataUpdatedAt);
-  const hasDailyCaller = Boolean(dc?.rows?.length);
-  const isStale = isSnapshotTimestampStale(dataUpdatedAt);
-
-  return { dataUpdatedAt, dataUpdatedAtLabel, hasDailyCaller, isStale };
+  const files = [
+    loadDailyCallerSnapshot(tagId),
+    loadPhoneBanksSnapshot(tagId),
+    loadQuestionStatsSnapshot(tagId),
+    loadCallSurveyFillSnapshot(tagId),
+    loadTextCampaignsSnapshot(tagId),
+    loadTextTagStatsSnapshot(tagId),
+    loadTextContactsSnapshot(tagId),
+    loadRecontactPairsSnapshot(tagId),
+    loadUniqueIdPhoneSnapshot(tagId),
+    loadUniqueIdTextSnapshot(tagId),
+    loadPdiSurveySnapshot(tagId),
+  ];
+  const times = files.map((file) => file?.savedAt).filter(Boolean) as string[];
+  const dataUpdatedAt = times.length ? times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
+  const daily = files[0];
+  return {
+    dataUpdatedAt,
+    dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
+    hasDailyCaller: Boolean(daily && "rows" in daily && Array.isArray(daily.rows) && daily.rows.length > 0),
+    isStale: isSnapshotTimestampStale(dataUpdatedAt),
+  };
 }
 
 /**
@@ -103,16 +116,14 @@ export function getAllCampaignsSnapshotMeta(): SnapshotFreshnessMeta {
   };
 }
 
-/** Freshness of text campaign and tag-stat snapshots for one candidate. */
+/** Same savedAt as the phone tag bar: the newest snapshot file for this tag. */
 export function getTextSnapshotMeta(tagId: string): SnapshotFreshnessMeta {
+  const meta = getTagDashboardSnapshotMeta(tagId);
   const campaigns = loadTextCampaignsSnapshot(tagId);
   const stats = loadTextTagStatsSnapshot(tagId);
-  const times = [campaigns?.savedAt, stats?.savedAt].filter(Boolean) as string[];
-  const dataUpdatedAt = times.length ? times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
   return {
-    dataUpdatedAt,
-    dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
-    hasDailyCaller: Boolean(campaigns?.rows?.length || stats?.rows?.length),
-    isStale: isSnapshotTimestampStale(dataUpdatedAt),
+    ...meta,
+    hasDailyCaller:
+      meta.hasDailyCaller || Boolean(campaigns?.rows?.length || stats?.rows?.length),
   };
 }

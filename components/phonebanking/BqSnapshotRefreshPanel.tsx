@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import RefreshProgressBar from "@/components/shared/RefreshProgressBar";
 import SnapshotFreshnessLine from "@/components/phonebanking/SnapshotFreshnessLine";
+import RebuildCostDialog from "@/components/phonebanking/RebuildCostDialog";
 import {
   fetchActivePhonebankingTags,
   progressToPercent,
@@ -39,9 +40,16 @@ export default function BqSnapshotRefreshPanel({
   const [status, setStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
   const [message, setMessage] = useState("");
   const [progress, setProgress] = useState<TagRefreshProgress | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (status === "loading" || (!localDev && !secret.trim())) return;
+    setConfirmOpen(true);
+  }
+
+  async function runRebuild() {
+    setConfirmOpen(false);
     setStatus("loading");
     setMessage("");
     setProgress(null);
@@ -167,9 +175,10 @@ export default function BqSnapshotRefreshPanel({
       />
       <p className="mt-1 text-gray-600 dark:text-gray-400 leading-snug">
         Tag dashboards load from JSON on disk — they do not query BigQuery on every request.{" "}
-        <strong>Refresh</strong> above merges the last three Pacific days. <strong>Rebuild this tag</strong> reloads
-        this candidate since Dec 1, 2025. Check <strong>All phone-banking tags</strong> to rebuild every tag. “Clear
-        first” deletes snapshot files and then reloads full history.
+        <strong>Refresh</strong> above loads everything since the last refresh, plus the previous Pacific day.{" "}
+        <strong>Rebuild this tag</strong> reloads this candidate since Dec 1, 2025. Check{" "}
+        <strong>All phone-banking tags</strong> to rebuild every tag. “Clear first” deletes snapshot files and then
+        reloads full history.
       </p>
       <form onSubmit={onSubmit} className="mt-2 space-y-2">
         <label className="flex items-center gap-2 cursor-pointer">
@@ -221,6 +230,7 @@ export default function BqSnapshotRefreshPanel({
       {status === "err" && message ? (
         <p className="mt-2 text-red-700 dark:text-red-400">{message}</p>
       ) : null}
+      <RebuildCostDialog open={confirmOpen} onCancel={() => setConfirmOpen(false)} onConfirm={() => void runRebuild()} />
     </div>
   );
 }

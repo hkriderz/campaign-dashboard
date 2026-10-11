@@ -5,6 +5,8 @@ export type SnapshotFreshnessProps = {
   hasSnapshotData?: boolean;
   /** Shown when `hasSnapshotData` is false (tag vs global wording). */
   emptySnapshotHint?: string;
+  /** Prefix before the timestamp. */
+  label?: string;
   className?: string;
 };
 
@@ -14,11 +16,12 @@ export default function SnapshotFreshnessLine({
   isStale,
   hasSnapshotData,
   emptySnapshotHint,
+  label = "Data updated at",
   className = "",
 }: SnapshotFreshnessProps) {
   return (
     <p className={["text-xs text-gray-600 dark:text-gray-400", className].filter(Boolean).join(" ")}>
-      <span className="font-semibold text-gray-800 dark:text-gray-200">Data updated at </span>
+      <span className="font-semibold text-gray-800 dark:text-gray-200">{label} </span>
       {dataUpdatedAtIso ? (
         <time dateTime={dataUpdatedAtIso}>{dataUpdatedAtLabel ?? dataUpdatedAtIso}</time>
       ) : (

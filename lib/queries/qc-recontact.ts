@@ -1,7 +1,13 @@
 import { cache } from "react";
 import { runQuery, PROJECT, DATASET } from "../bigquery";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
-import { pdiIdExtractSql } from "@/lib/pdi-tools/sync/pdi-id-sql";
+import { pdiIdExtractSql, selectPdiIdFromJson } from "@/lib/pdi-tools/sync/pdi-id-sql";
+import {
+  calleeIndexWindowStart,
+  lookupCalleeIdentity,
+  mergeCalleeIdentityIndex,
+} from "../bq-identity-index";
+import { createdAtOnOrAfterSql } from "../snapshot-merge";
 import {
   loadCallSurveyFillSnapshot,
   loadRecontactPairsSnapshot,
@@ -121,15 +127,65 @@ function hydrateRecontactPairsFromSurveyFill(
   });
 }
 
+const calleeCatchUpFor = new Set<string>();
+
+/** Append callees created since the index watermark. Does not scan historical JSON. */
+export async function appendCalleeIdentityCatchUp(queryStartedAt: string): Promise<void> {
+  if (calleeCatchUpFor.has(queryStartedAt)) return;
+  const windowStart = calleeIndexWindowStart();
+  if (!windowStart) return;
+  const sql = `
+    SELECT
+      CAST(id AS STRING) AS callee_id,
+      COALESCE(data, '') AS callee_data
+    FROM \`${P}.${D}.callees\`
+    WHERE DATE(created_at, 'America/Los_Angeles') >= '${windowStart}'
+      AND ${createdAtOnOrAfterSql("created_at", windowStart)}
+  `;
+  const rows = await runQuery<Record<string, unknown>>(sql);
+  mergeCalleeIdentityIndex(
+    rows.map((row) => {
+      const identity = extractCalleeIdentity(toStr(row.callee_data));
+      return {
+        calleeId: toStr(row.callee_id),
+        pdiId: normalizeRecontactPersonId(selectPdiIdFromJson(toStr(row.callee_data))),
+        voterName: identity.voterName,
+        voterAddress: identity.voterAddress,
+      };
+    }),
+    queryStartedAt
+  );
+  calleeCatchUpFor.add(queryStartedAt);
+}
+
 export async function fetchTagPdiSurveyRows(
   tag: CampaignTag,
-  options: { requirePdi: boolean; callDateOnOrAfter?: string }
+  options: { requirePdi: boolean; callDateOnOrAfter?: string; omitCalleeJson?: boolean; queryStartedAt?: string }
 ): Promise<PdiSurveyRow[]> {
   const whereClause = buildTagWhereClause(tag);
-  const requirePdiSql = options.requirePdi ? `AND TRIM(${CALLEE_PDI_ID_SQL}) != ""` : "";
   const historyStart = /^\d{4}-\d{2}-\d{2}$/.test(options.callDateOnOrAfter ?? "")
     ? options.callDateOnOrAfter!
     : PHONEBANK_WINDOW_START_DATE;
+  const omitJson = options.omitCalleeJson === true;
+  const requirePdiSql = !omitJson && options.requirePdi ? `AND TRIM(${CALLEE_PDI_ID_SQL}) != ""` : "";
+  const identitySql = omitJson
+    ? `CAST(calls.callee_id AS STRING) AS callee_id`
+    : `CAST(calls.callee_id AS STRING) AS callee_id,
+      ${CALLEE_PDI_ID_SQL} AS pdi_id,
+      COALESCE(callees.data, '') AS callee_data`;
+  const calleeJoin = omitJson
+    ? ""
+    : `JOIN \`${P}.${D}.callees\` callees
+      ON calls.callee_id = callees.id`;
+
+  const rangeSql = omitJson
+    ? `
+      AND ${createdAtOnOrAfterSql("calls.created_at", historyStart)}
+      AND (
+        calls.connected_at IS NULL
+        OR ${createdAtOnOrAfterSql("calls.connected_at", historyStart)}
+      )`
+    : "";
 
   const sql = `
     SELECT
@@ -142,43 +198,63 @@ export async function fetchTagPdiSurveyRows(
         DATETIME(COALESCE(calls.connected_at, calls.created_at), 'America/Los_Angeles')
       ) AS call_at,
       callers.name AS phonebanker_name,
-      ${CALLEE_PDI_ID_SQL} AS pdi_id,
-      COALESCE(callees.data, '') AS callee_data,
+      ${identitySql},
       COALESCE(survey.question_name, '') AS question_name,
       TRIM(COALESCE(survey.answer_value, '')) AS answer_value
     FROM \`${P}.${D}.survey_results\` survey
     JOIN \`${P}.${D}.calls\` calls
       ON survey.call_id = calls.id
-    JOIN \`${P}.${D}.callees\` callees
-      ON calls.callee_id = callees.id
+    ${calleeJoin}
     JOIN \`${P}.${D}.callers\` callers
       ON calls.caller_id = callers.id
     JOIN \`${P}.${D}.campaigns\` campaigns
       ON calls.campaign_id = campaigns.id
     WHERE ${whereClause}
       AND DATE(COALESCE(calls.connected_at, calls.created_at), 'America/Los_Angeles') >= '${historyStart}'
+      ${rangeSql}
       AND survey.deleted_at IS NULL
       AND survey.question_name IS NOT NULL
       ${requirePdiSql}
   `;
 
   const rows = await runQuery<Record<string, unknown>>(sql);
-  return rows.map((r) => {
-    const identity = extractCalleeIdentity(toStr(r.callee_data));
+  const mapped = rows.map((r) => {
+    const fromJson = omitJson ? null : extractCalleeIdentity(toStr(r.callee_data));
+    const fromIndex = omitJson ? lookupCalleeIdentity(toStr(r.callee_id)) : null;
+    const pdiId = omitJson
+      ? normalizeRecontactPersonId(fromIndex?.pdiId ?? "")
+      : normalizeRecontactPersonId(toStr(r.pdi_id));
     return {
+      calleeId: toStr(r.callee_id),
       callId: toStr(r.call_id),
       campaignId: toStr(r.campaign_id),
       campaignName: toStr(r.campaign_name),
       callDate: toDateString(r.call_date) ?? "",
       callAt: toStr(r.call_at),
       phonebankerName: canonicalizePhonebankerName(toStr(r.phonebanker_name)),
-      pdiId: normalizeRecontactPersonId(toStr(r.pdi_id)),
-      voterName: identity.voterName,
-      voterAddress: identity.voterAddress,
+      pdiId,
+      voterName: (omitJson ? fromIndex?.voterName : fromJson?.voterName) ?? "",
+      voterAddress: (omitJson ? fromIndex?.voterAddress : fromJson?.voterAddress) ?? "",
       questionName: toStr(r.question_name),
       answerValue: toStr(r.answer_value),
     };
   });
+
+  if (!omitJson && options.queryStartedAt) {
+    mergeCalleeIdentityIndex(
+      mapped.map((row) => ({
+        calleeId: row.calleeId,
+        pdiId: row.pdiId,
+        voterName: row.voterName,
+        voterAddress: row.voterAddress,
+      })),
+      options.queryStartedAt
+    );
+  }
+
+  return mapped
+    .filter((row) => (!omitJson && options.requirePdi ? row.pdiId !== "" : true))
+    .map(({ calleeId: _calleeId, ...row }) => row);
 }
 
 export function buildQcRecontactPairsFromSources(

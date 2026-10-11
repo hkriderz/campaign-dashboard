@@ -35,6 +35,7 @@ data/pdi-mappings/
 
 # Local BQ snapshot cache (regenerated on server)
 data/bq-snapshots/
+data/bq-cost-log.jsonl
 
 # District classifier runtime data — may contain uploaded voter/contact CSVs
 data/district-classifier/

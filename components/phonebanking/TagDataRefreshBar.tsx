@@ -5,9 +5,8 @@ import { useState } from "react";
 import RefreshProgressBar from "@/components/shared/RefreshProgressBar";
 import SnapshotFreshnessLine from "@/components/phonebanking/SnapshotFreshnessLine";
 import {
-  fetchActivePhonebankingTags,
   progressToPercent,
-  refreshPhonebankingTagsSequential,
+  refreshAllPhonebankingTags,
   type TagRefreshProgress,
 } from "@/lib/phonebanking-snapshot-refresh-client";
 import { dispatchTombstoneOverlapCheck } from "@/lib/tombstone-overlap-events";
@@ -107,23 +106,7 @@ export default function TagDataRefreshBar({
     });
 
     try {
-      const tags = await fetchActivePhonebankingTags();
-      const tagIds = tags.map((t) => t.id);
-      const tagLabels = new Map(tags.map((t) => [t.id, t.label]));
-
-      if (tagIds.length === 0) {
-        setMessageTone("warn");
-        setMessage("No phone-banking tags to refresh.");
-        return;
-      }
-
-      const { refreshed, errors } = await refreshPhonebankingTagsSequential({
-        tagIds,
-        tagLabels,
-        secret: localDev ? secret.trim() : secret.trim(),
-        clearFirst: false,
-        onProgress: setProgress,
-      });
+      const { refreshed, errors } = await refreshAllPhonebankingTags(secret.trim());
 
       if (refreshed.length === 0 && errors.length > 0) {
         setMessageTone("err");
@@ -222,11 +205,12 @@ export default function TagDataRefreshBar({
             ) : null}
             {tagId ? (
               <>
-                <strong>Refresh this tag</strong> updates only the open candidate.{" "}
+                <strong>Refresh this tag</strong> loads everything since the last refresh, plus the previous Pacific
+                day.{" "}
               </>
             ) : null}
-            <strong>Refresh all tags</strong> merges the last three Pacific days for every campaign tag.{" "}
-            <strong>Rebuild</strong> reloads history since Dec 1, 2025. Refresh all runs one tag at a time.
+            <strong>Refresh all tags</strong> loads everything since the last refresh, plus the previous Pacific day,
+            for every campaign tag. <strong>Rebuild</strong> reloads history since Dec 1, 2025.
           </span>
         </div>
         <div className="flex flex-col gap-2 shrink-0 sm:items-end">

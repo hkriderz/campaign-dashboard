@@ -3,7 +3,8 @@ import { fetchTextCampaignsByTag } from "@/lib/queries/texting";
 import { runServerWithCredentialContext } from "@/lib/credentials";
 import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
 import TextCandidateGrid from "@/components/texting/TextCandidateGrid";
-import { getTextSnapshotMeta } from "@/lib/tag-dashboard-snapshot";
+import { getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
+import BqSpendMeter from "@/components/phonebanking/BqSpendMeter";
 import ErrorBanner from "@/components/shared/ErrorBanner";
 import type { TextCandidateStats } from "@/lib/types";
 import Link from "next/link";
@@ -14,16 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function TextingPage() {
   return runServerWithCredentialContext(async () => {
     const tags = getTextingTags();
-    const textMeta = tags
-      .map((tag) => getTextSnapshotMeta(tag.id))
-      .reduce(
-        (latest, meta) => {
-          if (!meta.dataUpdatedAt) return latest;
-          if (!latest.dataUpdatedAt || new Date(meta.dataUpdatedAt) > new Date(latest.dataUpdatedAt)) return meta;
-          return latest;
-        },
-        getTextSnapshotMeta(tags[0]?.id ?? "")
-      );
+    const textMeta = getPhonebankingSnapshotsMeta(tags.map((tag) => tag.id));
 
     let candidates: TextCandidateStats[] = [];
     let error: string | null = null;
@@ -80,6 +72,7 @@ export default async function TextingPage() {
             <TextCandidateGrid candidates={candidates} />
           </section>
         )}
+        <BqSpendMeter />
       </div>
     );
   });

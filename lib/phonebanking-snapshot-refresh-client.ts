@@ -15,6 +15,8 @@ type RefreshApiResponse = {
   ok?: boolean;
   error?: string;
   message?: string;
+  refreshed?: string[];
+  errors?: { tagId: string; error: string }[];
 };
 
 export async function fetchActivePhonebankingTags(): Promise<
@@ -34,7 +36,7 @@ export async function fetchActivePhonebankingTags(): Promise<
 async function postTagSnapshotRefresh(
   secret: string,
   body: { tagId?: string; clear?: boolean; fullRebuild?: boolean; refreshAll?: boolean; rebuildAllCampaigns?: boolean }
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; refreshed?: string[]; errors?: { tagId: string; error: string }[] }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -46,10 +48,21 @@ async function postTagSnapshotRefresh(
     body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as RefreshApiResponse;
+  const refreshed = Array.isArray(data.refreshed) ? data.refreshed : undefined;
+  const errors = Array.isArray(data.errors) ? data.errors : undefined;
   if (!res.ok) {
-    return { ok: false, error: data.error ?? data.message ?? res.statusText };
+    return { ok: false, error: data.error ?? data.message ?? res.statusText, refreshed, errors };
   }
-  return { ok: true };
+  return { ok: true, refreshed, errors };
+}
+
+/** One request. The server scans dialer tables once and splits rows by campaign name. */
+export async function refreshAllPhonebankingTags(secret: string): Promise<SequentialRefreshResult> {
+  const result = await postTagSnapshotRefresh(secret, { refreshAll: true, fullRebuild: false });
+  if (!result.ok && !(result.refreshed && result.refreshed.length > 0)) {
+    throw new Error(result.error ?? "Refresh all tags failed");
+  }
+  return { refreshed: result.refreshed ?? [], errors: result.errors ?? [] };
 }
 
 /**

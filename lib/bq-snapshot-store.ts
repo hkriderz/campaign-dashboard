@@ -1,8 +1,9 @@
 /**
  * File-backed snapshots for tag-scoped dashboard data.
  * Normal reads use these files when present. If a tag has no snapshot file yet, fetch helpers
- * pull BigQuery once, write JSON, then serve from disk on later requests. **Refresh** merges the
- * last three Pacific days when the files already exist. **Rebuild** reloads history since 2025-12-01.
+ * pull BigQuery once, write JSON, then serve from disk on later requests. **Refresh** reads from the
+ * last successful query start minus one Pacific day when a watermark exists. **Rebuild** reloads
+ * history since 2025-12-01.
  */
 import fs from "fs";
 import path from "path";
@@ -400,7 +401,6 @@ export function saveAllCampaignsSnapshot(rows: PhoneBankSummary[], options?: Sna
   savePhoneBanksSnapshot(ALL_CAMPAIGNS_TAG_ID, rows, options);
 }
 
-/** Delete all snapshot JSON files for a tag (e.g. before full rebuild). */
 export function clearTagSnapshots(tagId: string): void {
   const dir = path.join(DATA_DIR, safeTag(tagId));
   if (!fs.existsSync(dir)) return;
@@ -416,6 +416,7 @@ export function clearTagSnapshots(tagId: string): void {
     "text-contacts.json",
     "text-campaigns.json",
     "text-tag-stats.json",
+    "refresh-watermark.json",
   ]) {
     const fp = path.join(dir, name);
     if (fs.existsSync(fp)) {
@@ -426,4 +427,28 @@ export function clearTagSnapshots(tagId: string): void {
       }
     }
   }
+}
+
+export type RefreshWatermarkFile = {
+  version: number;
+  tagId: string;
+  /** When this tag's last successful refresh queries started (ISO). */
+  queryStartedAt: string;
+};
+
+export function loadRefreshWatermark(tagId: string): string | null {
+  const data = loadSnapshotFile<RefreshWatermarkFile>(tagId, "refresh-watermark.json");
+  const at = data?.queryStartedAt?.trim() ?? "";
+  return at || null;
+}
+
+export function saveRefreshWatermark(tagId: string, queryStartedAt: string): void {
+  const dir = ensureDir(tagId);
+  const fp = path.join(dir, "refresh-watermark.json");
+  const payload: RefreshWatermarkFile = {
+    version: SNAPSHOT_VERSION,
+    tagId,
+    queryStartedAt,
+  };
+  fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
 }

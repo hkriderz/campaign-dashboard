@@ -8,6 +8,7 @@ import {
 } from "../bq-snapshot-store";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { buildTagWhereClause, getTagById } from "../campaign-tags";
+import { createdAtOnOrAfterSql, upsertById } from "../snapshot-merge";
 import { toDateString, toNum, toStr } from "./bq-row-parsers";
 import type { TextCampaignSummary, TextCampaignUiStatus, TextContactTagStat } from "../types";
 
@@ -91,11 +92,19 @@ export async function fetchTextContactTagStats(tagId: string): Promise<TextConta
   return rows;
 }
 
-async function fetchTextContactTagStatsUncached(tagId: string): Promise<TextContactTagStat[]> {
+async function fetchTextContactTagStatsUncached(
+  tagId: string,
+  campaignIds?: ReadonlySet<string>
+): Promise<TextContactTagStat[]> {
   const tag = getTagById(tagId);
   if (!tag) return [];
 
   const whereClause = buildTagWhereClause(tag);
+  const idList = campaignIds ? [...campaignIds].filter((id) => /^[A-Za-z0-9_-]+$/.test(id)) : [];
+  if (campaignIds && idList.length === 0) return [];
+  const campaignFilter = idList.length
+    ? `AND CAST(campaigns.id AS STRING) IN (${idList.map((id) => `'${id}'`).join(", ")})`
+    : "";
 
   const sql = `
     SELECT
@@ -113,6 +122,7 @@ async function fetchTextContactTagStatsUncached(tagId: string): Promise<TextCont
       AND campaign_contact_tags.deleted_at IS NULL
       AND tags.deleted_at IS NULL
       AND DATE(campaigns.created_at, 'America/Los_Angeles') >= '${TEXT_WINDOW_START_DATE}'
+      ${campaignFilter}
     GROUP BY campaigns.id, campaigns.name, tags.name
     ORDER BY campaigns.name, tag_name
   `;
@@ -127,7 +137,7 @@ async function fetchTextContactTagStatsUncached(tagId: string): Promise<TextCont
   }));
 }
 
-/** Full text aggregates since the history floor. Not a three-day slice. */
+/** Full text aggregates since the history floor. Not a window slice. */
 export async function rebuildTextSnapshotsFromBigQuery(tagId: string): Promise<void> {
   requireDashboardDataAccess();
   if (snapshotsDisabled()) return;
@@ -137,4 +147,65 @@ export async function rebuildTextSnapshotsFromBigQuery(tagId: string): Promise<v
   ]);
   saveTextCampaignsSnapshot(tagId, campaigns, { touchEvenIfUnchanged: true });
   saveTextTagStatsSnapshot(tagId, stats, { touchEvenIfUnchanged: true });
+}
+
+async function fetchTextCampaignsTouchedSince(
+  tagId: string,
+  windowStart: string
+): Promise<TextCampaignSummary[]> {
+  const tag = getTagById(tagId);
+  if (!tag) return [];
+  const whereClause = buildTagWhereClause(tag);
+  const sql = `
+    SELECT
+      campaigns.id AS campaign_id,
+      campaigns.name AS campaign_name,
+      CAST(campaigns.status AS STRING) AS raw_status,
+      COALESCE(campaigns.contact_count, 0) AS contact_count,
+      campaigns.started_at AS started_at,
+      campaigns.created_at AS created_at
+    FROM \`${P}.${D}.campaigns\` AS campaigns
+    WHERE ${whereClause}
+      AND DATE(campaigns.created_at, 'America/Los_Angeles') >= '${TEXT_WINDOW_START_DATE}'
+      AND (
+        ${createdAtOnOrAfterSql("campaigns.created_at", windowStart)}
+        OR EXISTS (
+          SELECT 1
+          FROM \`${P}.${D}.campaign_contacts\` AS campaign_contacts
+          WHERE campaign_contacts.campaign_id = campaigns.id
+            AND DATE(campaign_contacts.created_at, 'America/Los_Angeles') >= '${windowStart}'
+            AND ${createdAtOnOrAfterSql("campaign_contacts.created_at", windowStart)}
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM \`${P}.${D}.campaign_contact_tags\` AS campaign_contact_tags
+          WHERE campaign_contact_tags.campaign_id = campaigns.id
+            AND campaign_contact_tags.deleted_at IS NULL
+            AND DATE(campaign_contact_tags.created_at, 'America/Los_Angeles') >= '${windowStart}'
+            AND ${createdAtOnOrAfterSql("campaign_contact_tags.created_at", windowStart)}
+        )
+      )
+    ORDER BY campaigns.created_at DESC
+  `;
+  const rows = await runQuery<Record<string, unknown>>(sql);
+  return rows.map(rowToTextCampaign);
+}
+
+/** Upsert campaigns and tag rows touched since the refresh window. Does not scan contact JSON. */
+export async function refreshTextSnapshotsIncremental(tagId: string, windowStart: string): Promise<void> {
+  requireDashboardDataAccess();
+  if (snapshotsDisabled()) return;
+  const freshCampaigns = await fetchTextCampaignsTouchedSince(tagId, windowStart);
+  const existingCampaigns = loadTextCampaignsSnapshot(tagId)?.rows ?? [];
+  saveTextCampaignsSnapshot(
+    tagId,
+    upsertById(existingCampaigns, freshCampaigns, (row) => row.campaignId),
+    { touchEvenIfUnchanged: true }
+  );
+  const activeIds = new Set(freshCampaigns.map((row) => row.campaignId).filter(Boolean));
+  if (activeIds.size === 0) return;
+  const freshStats = await fetchTextContactTagStatsUncached(tagId, activeIds);
+  const existingStats = loadTextTagStatsSnapshot(tagId)?.rows ?? [];
+  const kept = existingStats.filter((row) => !activeIds.has(row.campaignId));
+  saveTextTagStatsSnapshot(tagId, [...kept, ...freshStats], { touchEvenIfUnchanged: true });
 }

@@ -4,7 +4,7 @@ export function isPublicAuthPath(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (pathname === "/api/auth/login") return true;
   if (pathname === "/api/phonebanking/bq-snapshot-refresh") return true;
-  if (pathname === "/icon.png" || pathname === "/apple-icon.png") return true;
+  if (pathname === "/icon.png" || pathname === "/apple-icon.png" || pathname === "/whale-icon.png") return true;
   return false;
 }
 

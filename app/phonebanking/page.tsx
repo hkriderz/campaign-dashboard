@@ -6,7 +6,7 @@ import { runServerWithCredentialContext } from "@/lib/credentials";
 import CandidateGrid from "@/components/phonebanking/CandidateGrid";
 import AllCampaignsDaySection from "@/components/phonebanking/AllCampaignsDaySection";
 import AllCampaignsSnapshotActions from "@/components/phonebanking/AllCampaignsSnapshotActions";
-import TagDataRefreshBar from "@/components/phonebanking/TagDataRefreshBar";
+import BqSpendMeter from "@/components/phonebanking/BqSpendMeter";
 import { getAllCampaignsSnapshotMeta, getPhonebankingSnapshotsMeta } from "@/lib/tag-dashboard-snapshot";
 import { getTombstonedSliceKeys } from "@/lib/csv-slice-tombstones";
 import { buildCandidateStatsFromDailyCallerStats } from "@/lib/phonebanking-candidate-stats";
@@ -56,13 +56,17 @@ export default async function PhoneBankingPage() {
       />
 
       <div className="mb-6">
-        <TagDataRefreshBar
+        <AllCampaignsSnapshotActions
           enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
           localDev={process.env.NODE_ENV === "development"}
-          dataUpdatedAtIso={snapshotsMeta.dataUpdatedAt}
-          dataUpdatedAtLabel={snapshotsMeta.dataUpdatedAtLabel}
-          isStale={snapshotsMeta.isStale}
-          hasSnapshotData={snapshotsMeta.hasDailyCaller}
+          dataUpdatedAtIso={allCampaignsMeta.dataUpdatedAt}
+          dataUpdatedAtLabel={allCampaignsMeta.dataUpdatedAtLabel}
+          isStale={allCampaignsMeta.isStale}
+          hasSnapshotData={allCampaignsMeta.hasDailyCaller}
+          tagsUpdatedAtIso={snapshotsMeta.dataUpdatedAt}
+          tagsUpdatedAtLabel={snapshotsMeta.dataUpdatedAtLabel}
+          tagsStale={snapshotsMeta.isStale}
+          tagsHaveData={snapshotsMeta.hasDailyCaller}
         />
       </div>
 
@@ -89,14 +93,6 @@ export default async function PhoneBankingPage() {
           Use <strong className="font-medium">Filter by day</strong> to load a single Pacific calendar day (that filter
           still queries BigQuery when a date is chosen).
         </p>
-        <AllCampaignsSnapshotActions
-          enabled={Boolean(process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET)}
-          localDev={process.env.NODE_ENV === "development"}
-          dataUpdatedAtIso={allCampaignsMeta.dataUpdatedAt}
-          dataUpdatedAtLabel={allCampaignsMeta.dataUpdatedAtLabel}
-          isStale={allCampaignsMeta.isStale}
-          hasSnapshotData={allCampaignsMeta.hasDailyCaller}
-        />
         {allCampaignsError ? (
           <div className="rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 text-sm text-amber-900 dark:text-amber-200">
             Could not load all-campaigns list:{" "}
@@ -110,6 +106,7 @@ export default async function PhoneBankingPage() {
           </Suspense>
         )}
       </section>
+      <BqSpendMeter />
     </div>
   );
   });

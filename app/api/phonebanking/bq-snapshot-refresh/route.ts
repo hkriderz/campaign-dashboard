@@ -5,14 +5,14 @@ import { runPhonebankingBqSnapshotRefresh } from "@/lib/phonebanking-bq-snapshot
 
 /**
  * POST JSON body:
- * - Single tag, last three Pacific days: `{ "tagId": "faizah", "clear": false }`
+ * - Single tag, since the last refresh minus one Pacific day: `{ "tagId": "faizah", "clear": false }`
  * - Single tag, full history: `{ "tagId": "faizah", "fullRebuild": true }`
  * - Every phone-banking tag: `{ "refreshAll": true, "fullRebuild": false }`
  * - Unfiltered all-campaigns list: `{ "rebuildAllCampaigns": true }`
  *
  * Header: `x-snapshot-secret: <CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET>`
  *
- * `fullRebuild: true` reloads history since 2025-12-01. Omit it to merge the last three Pacific days.
+ * `fullRebuild: true` reloads history since 2025-12-01. Omit it to read rows created since the last query start, minus one Pacific day.
  * Set `clear: true` to delete existing snapshot files for each affected tag before a full rebuild.
  */
 export async function POST(req: Request) {
