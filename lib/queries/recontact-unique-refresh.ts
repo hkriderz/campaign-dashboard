@@ -24,7 +24,7 @@ import {
   primaryTagIdFromQc,
   type PdiSurveyRow,
 } from "./qc-recontact";
-import { appendTextContactPdiCatchUp, fetchTagTextContacts } from "./text-recontact";
+import { fetchTagTextContacts } from "./text-recontact";
 import type { QcTextContactSummary } from "../qc-recontact/types";
 
 function tagHasPhone(tag: CampaignTag): boolean {
@@ -85,7 +85,6 @@ async function loadMergedTextContacts(
   const profile = resolveSurveyScriptProfile(tag);
   const existing = loadTextContactsSnapshot(tag.id);
   const useWindow = incremental && existing != null && Boolean(windowStart);
-  if (useWindow) await appendTextContactPdiCatchUp(queryStartedAt);
   const fresh = await fetchTagTextContacts(
     tag,
     profile,

@@ -1,10 +1,6 @@
 import { PROJECT, TEXT_DATASET, runQuery } from "../bigquery";
 import { buildTagWhereClause } from "../campaign-tags";
-import {
-  lookupTextContactPdi,
-  mergeTextContactPdiIndex,
-  textPdiIndexWindowStart,
-} from "../bq-identity-index";
+import { mergeTextContactPdiIndex, readTextContactPdiIndex } from "../bq-identity-index";
 import { canonicalizePhonebankerName } from "../phonebanker-name";
 import { selectPdiIdFromJson } from "../pdi-tools/sync/pdi-id-sql";
 import { TEXT_PDI_ID_SQL } from "../pdi-tools/sync/text-query";
@@ -72,30 +68,66 @@ export async function fetchTagTextContacts(
   return rows;
 }
 
-const textPdiCatchUpFor = new Set<string>();
+const CONTACT_ID_CHUNK = 200;
 
-/** Append contact JSON created since the index watermark. Historical JSON stays unread. */
-export async function appendTextContactPdiCatchUp(queryStartedAt: string): Promise<void> {
-  if (textPdiCatchUpFor.has(queryStartedAt)) return;
-  const windowStart = textPdiIndexWindowStart();
-  if (!windowStart) return;
-  const sql = `
-    SELECT
-      CAST(id AS STRING) AS contact_id,
-      COALESCE(data, '') AS contact_data
-    FROM \`${P}.${D}.campaign_contacts\`
-    WHERE DATE(created_at, 'America/Los_Angeles') >= '${windowStart}'
-      AND ${createdAtOnOrAfterSql("created_at", windowStart)}
-  `;
-  const rows = await runQuery<Record<string, unknown>>(sql);
-  mergeTextContactPdiIndex(
-    rows.map((row) => ({
-      contactId: toStr(row.contact_id),
-      pdiId: selectPdiIdFromJson(toStr(row.contact_data)),
-    })),
-    queryStartedAt
-  );
-  textPdiCatchUpFor.add(queryStartedAt);
+function isSafeContactId(value: string): boolean {
+  return /^[a-zA-Z0-9-]+$/.test(value);
+}
+
+/**
+ * Read contact JSON only for this result's contacts that still have no PDI id.
+ * A partial write does not move the index watermark.
+ */
+async function fillMissingTextContactPdi(
+  rows: QcTextContactSummary[],
+  byContactId: Record<string, string>,
+  windowStart: string | null
+): Promise<void> {
+  if (!windowStart || !/^\d{4}-\d{2}-\d{2}$/.test(windowStart)) return;
+  const missing: string[] = [];
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const id = row.campaignContactId;
+    if (!isSafeContactId(id) || seen.has(id) || byContactId[id] || row.pdiId) continue;
+    seen.add(id);
+    missing.push(id);
+  }
+  if (missing.length === 0) return;
+
+  const entries: Array<{ contactId: string; pdiId: string }> = [];
+  for (let i = 0; i < missing.length; i += CONTACT_ID_CHUNK) {
+    const list = missing
+      .slice(i, i + CONTACT_ID_CHUNK)
+      .map((id) => `'${id}'`)
+      .join(",");
+    const sql = `
+      SELECT
+        CAST(id AS STRING) AS contact_id,
+        COALESCE(data, '') AS contact_data
+      FROM \`${P}.${D}.campaign_contacts\`
+      WHERE CAST(id AS STRING) IN (${list})
+        AND DATE(created_at, 'America/Los_Angeles') >= '${windowStart}'
+        AND ${createdAtOnOrAfterSql("created_at", windowStart)}
+    `;
+    const queried = await runQuery<Record<string, unknown>>(sql);
+    for (const row of queried) {
+      const contactId = toStr(row.contact_id);
+      const pdiId = selectPdiIdFromJson(toStr(row.contact_data));
+      if (!contactId || !pdiId) continue;
+      entries.push({ contactId, pdiId });
+    }
+  }
+  if (entries.length === 0) return;
+
+  mergeTextContactPdiIndex(entries, null);
+  for (const entry of entries) {
+    if (!byContactId[entry.contactId]) byContactId[entry.contactId] = entry.pdiId;
+  }
+  for (const row of rows) {
+    if (row.pdiId) continue;
+    const pdiId = byContactId[row.campaignContactId];
+    if (pdiId) row.pdiId = pdiId;
+  }
 }
 
 async function fetchTagTextContactsInWindow(
@@ -189,7 +221,10 @@ async function fetchTagTextContactsInWindow(
   `;
 
   const contactRows = await runQuery<TextContactRow>(contactSql);
-  return contactRowsToSummaries(contactRows, tag, profile, true);
+  const index = readTextContactPdiIndex();
+  const summaries = contactRowsToSummaries(contactRows, tag, profile, true, index.byContactId);
+  await fillMissingTextContactPdi(summaries, index.byContactId, index.windowStart);
+  return summaries;
 }
 
 async function fetchTagTextContactsFull(
@@ -302,7 +337,8 @@ function contactRowsToSummaries(
   contactRows: TextContactRow[],
   tag: CampaignTag,
   profile: SurveyScriptProfile,
-  fromWindow: boolean
+  fromWindow: boolean,
+  pdiByContactId?: Record<string, string>
 ): QcTextContactSummary[] {
   const out: QcTextContactSummary[] = [];
   for (const row of contactRows) {
@@ -323,7 +359,7 @@ function contactRowsToSummaries(
       campaignContactId,
       campaignId: toStr(row.campaign_id),
       campaignName: toStr(row.campaign_name),
-      pdiId: fromWindow ? lookupTextContactPdi(campaignContactId) || queriedPdi : queriedPdi,
+      pdiId: fromWindow ? pdiByContactId?.[campaignContactId] || queriedPdi : queriedPdi,
       texterName: canonicalizePhonebankerName(toStr(row.texter_name)),
       occurredOn: occurredOnFromStamp(occurredAt),
       occurredAt,
@@ -333,10 +369,6 @@ function contactRowsToSummaries(
     });
   }
   return out;
-}
-
-function isSafeContactId(value: string): boolean {
-  return /^[a-zA-Z0-9-]+$/.test(value);
 }
 
 /** Live conversation for one STW Text campaign contact. */

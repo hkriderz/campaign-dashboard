@@ -57,6 +57,18 @@ export function lookupTextContactPdi(contactId: string): string {
   return loadTextIndex().byContactId[contactId] ?? "";
 }
 
+/** One read of the text PDI index for a contact fetch. Do not look up one id at a time. */
+export function readTextContactPdiIndex(): {
+  byContactId: Record<string, string>;
+  windowStart: string | null;
+} {
+  const data = loadTextIndex();
+  return {
+    byContactId: data.byContactId,
+    windowStart: data.queryStartedAt ? refreshWindowStartDate(data.queryStartedAt) : null,
+  };
+}
+
 export function lookupCalleeIdentity(calleeId: string): CalleeIdentityRecord | null {
   if (!calleeId) return null;
   return loadCalleeIndex().byCalleeId[calleeId] ?? null;
