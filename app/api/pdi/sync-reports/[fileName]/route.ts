@@ -6,7 +6,8 @@ import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
   credentialsRequiredResponse,
-  serverCredentialContext,
+  accountCredentialContext,
+  resolveContextFromRequest,
   runWithCredentialContextAsync,
 } from "@/lib/credentials";
 import { resolveSyncReportFilePath } from "@/lib/pdi-tools/sync-report-files";
@@ -22,7 +23,7 @@ function attachmentName(fileName: string): string {
 export async function GET(req: Request, { params }: RouteParams) {
   const denied = await editorDenied(req);
   if (denied) return denied;
-  const ctx = serverCredentialContext();
+  const ctx = accountCredentialContext(resolveContextFromRequest(req));
   const { fileName } = await params;
 
   try {

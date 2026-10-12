@@ -207,9 +207,11 @@ export default function PdiCredentialsSection({
                 <>
                   storing under <code className="text-[11px] break-all">{status.credentialsDir}</code>
                 </>
+              ) : status.gcp.configured || status.pdi.configured ? (
+                <>using the credentials stored on this server</>
               ) : (
                 <span className="text-amber-700 dark:text-amber-300">
-                  waiting for session cookie — save again after the page loads
+                  server credentials are missing — a file saved here is kept for this browser
                 </span>
               )}
             </div>

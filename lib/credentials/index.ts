@@ -38,6 +38,7 @@ export {
   credentialsDirLabel,
   type RequestCredentialResolution,
 } from "./context";
+export { accountCredentialContext } from "./account-context";
 export { attachSessionCookie } from "./session-cookie";
 export {
   resolveCredentialsDir,

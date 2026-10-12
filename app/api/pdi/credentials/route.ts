@@ -3,9 +3,9 @@ import { liveSessionDenied } from "@/lib/auth/http";
 import * as fs from "fs";
 import {
   attachSessionCookie,
+  accountCredentialContext,
   resolveContextFromRequestWithSession,
   runWithCredentialContextAsync,
-  serverCredentialContext,
   sessionCredentialsEnabled,
   touchSessionMeta,
   pruneStaleSessionCredentials,
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
   if (denied) return denied;
   ensureServerBootstrapped();
   const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
-  const accountCtx = serverCredentialContext();
+  const accountCtx = accountCredentialContext(ctx);
 
   const res = await runWithCredentialContextAsync(accountCtx, async () => {
     try {

@@ -4,14 +4,15 @@ import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
   credentialsRequiredResponse,
-  serverCredentialContext,
+  accountCredentialContext,
+  resolveContextFromRequest,
   runWithCredentialContextAsync,
 } from "@/lib/credentials";
 import { parsePdiSyncChannel } from "@/lib/pdi-tools/channel";
 import { clearSyncLock, getSyncLockStatus } from "@/lib/pdi-tools/sync/sync-lock";
 
 async function withSyncLockAccess<T>(req: Request, fn: () => Promise<T>): Promise<Response> {
-  const ctx = serverCredentialContext();
+  const ctx = accountCredentialContext(resolveContextFromRequest(req));
 
   try {
     return await runWithCredentialContextAsync(ctx, async () => {

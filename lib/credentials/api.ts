@@ -1,7 +1,8 @@
 import "server-only";
 
 import { assertLiveSession, AuthRequiredError } from "@/lib/auth/current";
-import { serverCredentialContext } from "./context";
+import { accountCredentialContext } from "./account-context";
+import { resolveContextFromRequestWithSession } from "./context";
 import { assertDataAccessAllowed, credentialsRequiredResponse, type DataAccessRequirements } from "./gate";
 import { runWithCredentialContextAsync } from "./store";
 import type { CredentialContext } from "./types";
@@ -26,7 +27,7 @@ export function withCredentialContext(
       }
       throw err;
     }
-    const ctx = serverCredentialContext();
+    const ctx = accountCredentialContext(resolveContextFromRequestWithSession(req).ctx);
     try {
       return await runWithCredentialContextAsync(ctx, async () => {
         if (requirements) {

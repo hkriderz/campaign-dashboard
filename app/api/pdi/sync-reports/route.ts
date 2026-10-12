@@ -4,7 +4,8 @@ import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
   credentialsRequiredResponse,
-  serverCredentialContext,
+  accountCredentialContext,
+  resolveContextFromRequest,
   runWithCredentialContextAsync,
 } from "@/lib/credentials";
 import { listSyncReportFiles } from "@/lib/pdi-tools/sync-report-files";
@@ -12,7 +13,7 @@ import { listSyncReportFiles } from "@/lib/pdi-tools/sync-report-files";
 export async function GET(req: Request) {
   const denied = await editorDenied(req);
   if (denied) return denied;
-  const ctx = serverCredentialContext();
+  const ctx = accountCredentialContext(resolveContextFromRequest(req));
 
   try {
     return await runWithCredentialContextAsync(ctx, async () => {

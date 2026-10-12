@@ -6,7 +6,8 @@ import * as path from "path";
 import {
   CredentialsRequiredError,
   credentialsRequiredResponse,
-  serverCredentialContext,
+  accountCredentialContext,
+  resolveContextFromRequest,
   runWithCredentialContextAsync,
   assertDataAccessAllowed,
   type CredentialContext,
@@ -176,7 +177,7 @@ async function runPythonSync(body: ValidatedSyncBody, ctx: CredentialContext) {
 export async function POST(req: Request) {
   const denied = await editorDenied(req);
   if (denied) return denied;
-  const ctx = serverCredentialContext();
+  const ctx = accountCredentialContext(resolveContextFromRequest(req));
 
   try {
     return await runWithCredentialContextAsync(ctx, async () => {
