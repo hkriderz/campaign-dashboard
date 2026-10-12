@@ -21,7 +21,7 @@ function meetsRequirements(status: CredentialStatus, req: DataAccessRequirements
 }
 
 function isSessionReady(status: CredentialStatus, req: DataAccessRequirements): boolean {
-  return status.credentialScope === "session" && meetsRequirements(status, req);
+  return meetsRequirements(status, req);
 }
 
 type Props = {
@@ -39,7 +39,7 @@ export default function SessionCredentialsGateClient({
   children,
   requirements = { gcp: true },
   title = "Upload your credentials",
-  description = "Each browser session requires its own GCP and PDI credentials. Upload the files below to access dashboard data. Nothing is shared with other visitors.",
+  description = "Signed-in accounts use the credentials stored on this server. Upload is only needed when those files are missing.",
 }: Props) {
   const [phase, setPhase] = useState<"loading" | "ready" | "needs">("loading");
 
@@ -100,7 +100,7 @@ export default function SessionCredentialsGateClient({
           {needsPdi ? <li>PDI username, password, and API token</li> : null}
         </ul>
         <p className="mt-3 text-xs text-[var(--section-muted)]">
-          Credentials are stored only for this browser session on the server and are not visible to other users.
+          These files stay on the server. A signed-in account does not upload its own copy.
         </p>
       </div>
       <PdiCredentialsSection

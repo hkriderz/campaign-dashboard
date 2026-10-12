@@ -33,6 +33,7 @@ export {
   resolveContextFromCookies,
   resolveContextFromRequest,
   resolveContextFromRequestWithSession,
+  serverCredentialContext,
   issueNewSessionId,
   credentialsDirLabel,
   type RequestCredentialResolution,

@@ -80,17 +80,24 @@ export async function rebuildTextUniqueIdSnapshot(tag: CampaignTag): Promise<Uni
   }
 }
 
+function withQcPhoneEvents(tag: CampaignTag, load: UniqueIdChannelLoad): UniqueIdChannelLoad {
+  if (tag.id.startsWith("qc-") || snapshotsDisabled()) return load;
+  const qc = loadUniqueIdPhoneSnapshot(`qc-${tag.id}`);
+  if (!qc?.rows.length) return load;
+  return { ...load, events: [...load.events, ...qc.rows] };
+}
+
 export async function loadPhoneUniqueIdEvents(
   tag: CampaignTag,
   options: { buildIfMissing?: boolean } = {}
 ): Promise<UniqueIdChannelLoad> {
   if (!tagHasPhone(tag)) return emptyLoad();
   const snap = snapshotsDisabled() ? null : loadUniqueIdPhoneSnapshot(tag.id);
-  if (snap) return { events: snap.rows, savedAt: snap.savedAt };
+  if (snap) return withQcPhoneEvents(tag, { events: snap.rows, savedAt: snap.savedAt });
   if (!options.buildIfMissing) {
     return emptyLoad("Phone unique-ID snapshot is missing. Refresh phone & text to load it.");
   }
-  return rebuildPhoneUniqueIdSnapshot(tag);
+  return withQcPhoneEvents(tag, await rebuildPhoneUniqueIdSnapshot(tag));
 }
 
 export async function loadTextUniqueIdEvents(

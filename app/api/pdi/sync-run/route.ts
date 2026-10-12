@@ -6,9 +6,10 @@ import * as path from "path";
 import {
   CredentialsRequiredError,
   credentialsRequiredResponse,
-  resolveContextFromRequest,
+  serverCredentialContext,
   runWithCredentialContextAsync,
   assertDataAccessAllowed,
+  type CredentialContext,
 } from "@/lib/credentials";
 import { resolveMappingFilePathById } from "@/lib/pdi-tools/mapping-files";
 import { pdiToolsProcessEnv } from "@/lib/pdi-tools/resolve-pdi-credentials";
@@ -81,7 +82,7 @@ function validateSyncBody(body: SyncBody): { ok: true; body: ValidatedSyncBody }
   };
 }
 
-async function runPythonSync(body: ValidatedSyncBody, ctx: ReturnType<typeof resolveContextFromRequest>) {
+async function runPythonSync(body: ValidatedSyncBody, ctx: CredentialContext) {
   const python = process.env.PYTHON_EXECUTABLE ?? (process.platform === "win32" ? "python" : "python3");
   const scriptDir = resolveStwToPdiScriptDir();
   const cwd = ensurePdiSyncExportsDir();
@@ -175,7 +176,7 @@ async function runPythonSync(body: ValidatedSyncBody, ctx: ReturnType<typeof res
 export async function POST(req: Request) {
   const denied = await editorDenied(req);
   if (denied) return denied;
-  const ctx = resolveContextFromRequest(req);
+  const ctx = serverCredentialContext();
 
   try {
     return await runWithCredentialContextAsync(ctx, async () => {

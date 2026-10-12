@@ -53,7 +53,13 @@ const SESSION_STATE_KEY = "canvassing.knockAnalysis.v4";
 const CUSTOM_GAP_MIN_MINUTES = 11;
 const CUSTOM_GAP_MAX_MINUTES = 180;
 
-type ResultsTab = "pivot" | "gaps" | "shift";
+type ResultsTab = "pivot" | "gaps" | "shift" | "gapLengths" | "gapDetails" | "bigGapDetails";
+
+const RESULTS_TABS: ResultsTab[] = ["pivot", "gaps", "shift", "gapLengths", "gapDetails", "bigGapDetails"];
+
+function isResultsTab(value: unknown): value is ResultsTab {
+  return typeof value === "string" && RESULTS_TABS.includes(value as ResultsTab);
+}
 
 type PersistedKnockAnalysisState = {
   reportName: string;
@@ -134,6 +140,50 @@ function formatTimeShort(value: string | null): string {
         hour: "numeric",
         minute: "2-digit",
       });
+}
+
+/** Sheet-style duration with unpadded hours, e.g. 0:15:00 or 3:03:00. */
+function formatSheetDuration(minutes: number): string {
+  const totalSeconds = Math.max(0, Math.round(minutes * 60));
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours}:${String(mins).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatGapClock(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatGapDetail(gap: CanvassingGapDetail): string {
+  const mins = Math.round(gap.gapMinutes);
+  const response = gap.endResponse.trim() || "n/a";
+  return `(${formatGapClock(gap.startAt)}-${formatGapClock(gap.endAt)}, ${mins} mins, ends w/ ${response})`;
+}
+
+type CanvasserGapRow = {
+  canvasserName: string;
+  gaps: CanvassingGapDetail[];
+};
+
+function groupGapsChronologically(gaps: CanvassingGapDetail[]): CanvasserGapRow[] {
+  const byName = new Map<string, CanvassingGapDetail[]>();
+  for (const gap of gaps) {
+    const group = byName.get(gap.canvasserName) ?? [];
+    group.push(gap);
+    byName.set(gap.canvasserName, group);
+  }
+  return [...byName.entries()]
+    .map(([canvasserName, group]) => ({
+      canvasserName,
+      gaps: [...group].sort((a, b) => a.startAt.localeCompare(b.startAt) || a.endAt.localeCompare(b.endAt)),
+    }))
+    .sort((a, b) => canvasserLastNameSortKey(a.canvasserName).localeCompare(canvasserLastNameSortKey(b.canvasserName)));
 }
 
 function formatReportDate(value: string | null | undefined): string {
@@ -231,6 +281,27 @@ function knockPivotTsv(stats: CanvasserGapStats[]): string {
   }
 
   return rows.join("\n");
+}
+
+function gapMatrixTsv(rows: CanvasserGapRow[], mode: "length" | "detail"): string {
+  const columnCount = rows.reduce((max, row) => Math.max(max, row.gaps.length), 0);
+  const gapHeaders = Array.from({ length: columnCount }, (_, index) => `Gap ${index + 1}`);
+  const headers =
+    mode === "length" ? ["Canvasser", "Total Gap Length", ...gapHeaders] : ["Canvasser", ...gapHeaders];
+  const lines = [tsvLine(headers)];
+  for (const row of rows) {
+    const cells = row.gaps.map((gap) =>
+      mode === "length" ? formatSheetDuration(gap.gapMinutes) : formatGapDetail(gap)
+    );
+    while (cells.length < columnCount) cells.push("");
+    if (mode === "length") {
+      const total = row.gaps.reduce((sum, gap) => sum + gap.gapMinutes, 0);
+      lines.push(tsvLine([row.canvasserName, formatSheetDuration(total), ...cells]));
+    } else {
+      lines.push(tsvLine([row.canvasserName, ...cells]));
+    }
+  }
+  return lines.join("\n");
 }
 
 function gapsListTsv(gaps: CanvassingGapDetail[], includeDetails: boolean): string {
@@ -478,10 +549,7 @@ function readPersistedState(): PersistedKnockAnalysisState {
     const parsed = JSON.parse(raw) as Partial<PersistedKnockAnalysisState>;
     const mode: KnockAnalysisReportMode = parsed.reportMode === "final" ? "final" : "lunch";
     const modeDefaults = defaultShiftSettings(mode);
-    const tab =
-      parsed.activeResultsTab === "gaps" || parsed.activeResultsTab === "shift"
-        ? parsed.activeResultsTab
-        : "pivot";
+    const tab = isResultsTab(parsed.activeResultsTab) ? parsed.activeResultsTab : "pivot";
     return {
       reportName: typeof parsed.reportName === "string" ? parsed.reportName : "",
       reportDate: typeof parsed.reportDate === "string" ? parsed.reportDate : "",
@@ -669,6 +737,89 @@ function CanvasserStatsTable({
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function GapMatrixTable({
+  title,
+  emptyLabel,
+  gaps,
+  mode,
+  onCopyText,
+}: {
+  title: string;
+  emptyLabel: string;
+  gaps: CanvassingGapDetail[];
+  mode: "length" | "detail";
+  onCopyText: CopyTextHandler;
+}) {
+  const rows = groupGapsChronologically(gaps);
+  const columnCount = rows.reduce((max, row) => Math.max(max, row.gaps.length), 0);
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">{title}</h2>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {rows.length} canvassers
+            {columnCount ? ` · up to ${columnCount} gaps` : ""}
+          </p>
+        </div>
+        <CopyMiniButton
+          label="Copy Table"
+          onClick={() => onCopyText(gapMatrixTsv(rows, mode), `${title} copied for Sheets.`)}
+        />
+      </div>
+      {rows.length ? (
+        <div className="mt-4 max-h-[70vh] overflow-auto">
+          <table className="min-w-full border-collapse text-sm">
+            <thead className="sticky top-0 z-20 bg-white shadow-sm dark:bg-gray-900">
+              <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="sticky left-0 z-30 bg-white py-2 pr-4 dark:bg-gray-900">Canvasser</th>
+                {mode === "length" ? (
+                  <th className="bg-white py-2 pr-4 dark:bg-gray-900">Total Gap Length</th>
+                ) : null}
+                {Array.from({ length: columnCount }, (_, index) => (
+                  <th key={index} className="bg-white py-2 pr-4 dark:bg-gray-900">
+                    Gap {index + 1}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 dark:divide-white/10">
+              {rows.map((row) => {
+                const total = row.gaps.reduce((sum, gap) => sum + gap.gapMinutes, 0);
+                return (
+                  <tr key={row.canvasserName} className="text-gray-700 dark:text-gray-300">
+                    <td className="sticky left-0 z-10 whitespace-nowrap bg-white py-3 pr-4 font-medium text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+                      {row.canvasserName}
+                    </td>
+                    {mode === "length" ? (
+                      <td className="whitespace-nowrap py-3 pr-4 tabular-nums">{formatSheetDuration(total)}</td>
+                    ) : null}
+                    {Array.from({ length: columnCount }, (_, index) => {
+                      const gap = row.gaps[index];
+                      const text = gap
+                        ? mode === "length"
+                          ? formatSheetDuration(gap.gapMinutes)
+                          : formatGapDetail(gap)
+                        : "";
+                      return (
+                        <td key={index} className="whitespace-nowrap py-3 pr-4 tabular-nums">
+                          {text}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">{emptyLabel}</p>
+      )}
     </div>
   );
 }
@@ -1007,6 +1158,15 @@ function ReportResults({
         <button type="button" onClick={() => onTabChange("gaps")} className={tabClass("gaps")}>
           {gapsTabLabel}
         </button>
+        <button type="button" onClick={() => onTabChange("gapLengths")} className={tabClass("gapLengths")}>
+          Gap lengths
+        </button>
+        <button type="button" onClick={() => onTabChange("gapDetails")} className={tabClass("gapDetails")}>
+          Gap details
+        </button>
+        <button type="button" onClick={() => onTabChange("bigGapDetails")} className={tabClass("bigGapDetails")}>
+          Big gap details
+        </button>
         <button type="button" onClick={() => onTabChange("pivot")} className={tabClass("pivot")}>
           Pivot
         </button>
@@ -1064,6 +1224,36 @@ function ReportResults({
             onCopyText={onCopyText}
           />
         </div>
+      ) : null}
+
+      {activeTab === "gapLengths" ? (
+        <GapMatrixTable
+          title="Gap lengths"
+          emptyLabel="No gaps over 10 minutes for this report."
+          gaps={result.gapDetails}
+          mode="length"
+          onCopyText={onCopyText}
+        />
+      ) : null}
+
+      {activeTab === "gapDetails" ? (
+        <GapMatrixTable
+          title="Gap details"
+          emptyLabel="No gaps over 10 minutes for this report."
+          gaps={result.gapDetails}
+          mode="detail"
+          onCopyText={onCopyText}
+        />
+      ) : null}
+
+      {activeTab === "bigGapDetails" ? (
+        <GapMatrixTable
+          title="Big gap details"
+          emptyLabel="No gaps over 30 minutes for this report."
+          gaps={result.bigGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes > 30)}
+          mode="detail"
+          onCopyText={onCopyText}
+        />
       ) : null}
 
       {activeTab === "pivot" ? <CanvasserStatsTable stats={result.canvasserStats} onCopyText={onCopyText} /> : null}

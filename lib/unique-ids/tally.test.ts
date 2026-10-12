@@ -115,6 +115,22 @@ test("collect drops missing IDs, QC lists, and non-support labels", () => {
     phone.map((row) => row.personId),
     ["CA1"]
   );
+  const withQc = collectPhoneEvents(
+    [
+      call({
+        callId: "3",
+        pdiId: "CA2",
+        campaignName: "Nithya QC 001",
+        finalResultLabel: "Support Nithya",
+      }),
+    ],
+    "faizahTraci",
+    { includeQcCampaigns: true }
+  );
+  assert.deepEqual(
+    withQc.map((row) => row.personId),
+    ["CA2"]
+  );
 
   const texts = collectTextEvents(
     [
@@ -253,8 +269,22 @@ test("date filter and ID search apply after unique collapse", () => {
   assert.equal(tally.ids.total, 1);
   assert.equal(tally.ids.rows[0]?.personId, "CA1");
   assert.equal(tally.ids.rows[0]?.changed, false);
+  assert.equal(tally.ids.rows[0]?.events.length, 1);
   assert.equal(tally.minDate, "2026-09-01");
   assert.equal(tally.maxDate, "2026-09-10");
+});
+
+test("same family on two days stays two events", () => {
+  const tally = tallyUniqueIds([
+    event({ personId: "CA1", family: "strongSupport", occurredOn: "2026-09-01" }),
+    event({ personId: "CA1", family: "strongSupport", occurredOn: "2026-09-12" }),
+  ]);
+  assert.equal(tally.changes.held, 1);
+  assert.equal(tally.matchedRows[0]?.events.length, 2);
+  assert.deepEqual(
+    tally.matchedRows[0]?.events.map((row) => row.occurredOn),
+    ["2026-09-01", "2026-09-12"]
+  );
 });
 
 test("voter name is display-only and does not change ids, labels, or counts", () => {

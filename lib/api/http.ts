@@ -3,8 +3,8 @@ import { assertLiveSession, AuthRequiredError } from "@/lib/auth/current";
 import {
   assertDataAccessAllowed,
   CredentialsRequiredError,
-  resolveContextFromRequest,
   runWithCredentialContextAsync,
+  serverCredentialContext,
   type DataAccessRequirements,
 } from "@/lib/credentials";
 
@@ -49,7 +49,7 @@ export function withApiHandler<T>(
   const execute = async (): Promise<T> => {
     await assertLiveSession(options?.req);
     if (options?.req) {
-      const ctx = resolveContextFromRequest(options.req);
+      const ctx = serverCredentialContext();
       return runWithCredentialContextAsync(ctx, async () => {
         if (options.requireCredentials) {
           assertDataAccessAllowed(options.requireCredentials);

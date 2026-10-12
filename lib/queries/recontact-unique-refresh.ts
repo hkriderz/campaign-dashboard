@@ -151,6 +151,13 @@ export async function refreshTagPhoneContactFollowUp(
     ]);
     const pairs = buildQcRecontactPairsFromSources(tagId, qcRows, primaryRows, textContacts);
     saveRecontactPairsSnapshot(tagId, pairs, { touchEvenIfUnchanged: true });
+    const profile = resolveSurveyScriptProfile(tag);
+    const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, candidateTermsForTag(primary));
+    saveUniqueIdPhoneSnapshot(
+      tagId,
+      collectPhoneEvents(qcCalls, profile, { includeQcCampaigns: true }),
+      { touchEvenIfUnchanged: true }
+    );
     return;
   }
 

@@ -5,6 +5,7 @@ import {
   attachSessionCookie,
   resolveContextFromRequestWithSession,
   runWithCredentialContextAsync,
+  serverCredentialContext,
   sessionCredentialsEnabled,
   touchSessionMeta,
   pruneStaleSessionCredentials,
@@ -25,10 +26,11 @@ export async function GET(req: Request) {
   if (denied) return denied;
   ensureServerBootstrapped();
   const { ctx, newSessionId } = resolveContextFromRequestWithSession(req);
+  const accountCtx = serverCredentialContext();
 
-  const res = await runWithCredentialContextAsync(ctx, async () => {
+  const res = await runWithCredentialContextAsync(accountCtx, async () => {
     try {
-      const status = getPdiCredentialsPublicStatus(ctx);
+      const status = getPdiCredentialsPublicStatus(accountCtx);
       return NextResponse.json(status);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

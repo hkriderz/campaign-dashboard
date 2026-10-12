@@ -44,24 +44,17 @@ export function meetsDataAccessRequirements(
   return true;
 }
 
-/**
- * When session credentials are enabled, block shared snapshot / BQ reads until
- * the current browser session has uploaded the required keys.
- */
 function missingCredentialsMessage(requirements: DataAccessRequirements): string {
   const parts: string[] = [];
   if (requirements.gcp) parts.push("GCP service account");
   if (requirements.pdi) parts.push("PDI API credentials");
-  return `Upload your ${parts.join(" and ")} to access this data. Each browser session requires its own credentials.`;
+  return `This server is missing ${parts.join(" and ")}.`;
 }
 
 export function assertDataAccessAllowed(requirements: DataAccessRequirements = { gcp: true }): void {
   if (!sessionCredentialsEnabled()) return;
 
   const ctx = getActiveCredentialContext();
-  if (!ctx || ctx.scope !== "session") {
-    throw new CredentialsRequiredError(missingCredentialsMessage(requirements));
-  }
   if (!meetsDataAccessRequirements(ctx, requirements)) {
     throw new CredentialsRequiredError(missingCredentialsMessage(requirements));
   }

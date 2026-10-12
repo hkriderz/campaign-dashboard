@@ -203,6 +203,7 @@ export function tallyUniqueIds(
       actorName: latest.actorName,
       priorFamily: didChange ? first.family : null,
       changed: didChange,
+      events: oldestFirst,
     });
   }
 

@@ -5,8 +5,8 @@ import DateRangePicker from "@/components/common/DateRangePicker";
 import OutcomeTallyStrip from "@/components/common/OutcomeTallyStrip";
 import { channelDisplayLabel, familyDisplayLabel } from "@/lib/unique-ids/classify";
 import type {
-  UniqueIdChangedPerson,
   UniqueIdChannel,
+  UniqueIdContactEvent,
   UniqueIdFamily,
   UniqueIdOverviewPayload,
   UniqueIdRow,
@@ -19,6 +19,13 @@ type ApiResponse<T> = {
 };
 
 const PAGE_SIZE = 100;
+
+type PersonHistory = {
+  personId: string;
+  from: UniqueIdFamily | null;
+  to: UniqueIdFamily;
+  events: UniqueIdContactEvent[];
+};
 
 const FAMILY_FILTERS: Array<{ id: UniqueIdFamily | ""; label: string }> = [
   { id: "", label: "All labels" },
@@ -217,9 +224,9 @@ export default function CanvassingOverviewClient() {
 
   const pageCount = payload ? Math.max(1, Math.ceil(payload.ids.total / PAGE_SIZE)) : 1;
   const warnings = [payload?.meta.phoneError, payload?.meta.textError].filter(Boolean);
-  const openPerson =
+  const openPerson: PersonHistory | null =
     openPersonId && payload
-      ? payload.changes.people.find((person) => person.personId === openPersonId) ?? null
+      ? historyForPerson(payload, openPersonId)
       : null;
 
   return (
@@ -289,7 +296,7 @@ export default function CanvassingOverviewClient() {
         </div>
         <p className="text-xs text-gray-500 dark:text-gray-400">
           Knock CSV/XLSX is the same as Knock Analysis. Phone and text IDs come from BigQuery
-          snapshots (QC lists excluded).
+          snapshots. QC calls are included as their own flags.
           {files.length ? ` ${files.length} file${files.length === 1 ? "" : "s"} selected.` : ""}
         </p>
       </div>
@@ -505,7 +512,7 @@ export default function CanvassingOverviewClient() {
                       <IdRow
                         key={row.personId}
                         row={row}
-                        onOpenPerson={row.changed ? setOpenPersonId : undefined}
+                        onOpenPerson={setOpenPersonId}
                       />
                     ))}
                   </tbody>
@@ -674,6 +681,16 @@ function ChangeTable({
   );
 }
 
+function historyForPerson(payload: UniqueIdOverviewPayload, personId: string): PersonHistory | null {
+  const row = payload.ids.rows.find((item) => item.personId === personId);
+  if (row) {
+    return { personId: row.personId, from: row.priorFamily, to: row.family, events: row.events };
+  }
+  const changed = payload.changes.people.find((person) => person.personId === personId);
+  if (!changed) return null;
+  return { personId: changed.personId, from: changed.from, to: changed.to, events: changed.events };
+}
+
 function IdRow({
   row,
   onOpenPerson,
@@ -709,7 +726,7 @@ function ChangedPersonModal({
   person,
   onClose,
 }: {
-  person: UniqueIdChangedPerson;
+  person: PersonHistory;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -739,9 +756,15 @@ function ChangedPersonModal({
               {person.personId}
             </h2>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              <span className={familyTone(person.from)}>{familyDisplayLabel(person.from)}</span>
-              {" → "}
-              <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
+              {person.from && person.from !== person.to ? (
+                <>
+                  <span className={familyTone(person.from)}>{familyDisplayLabel(person.from)}</span>
+                  {" → "}
+                  <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
+                </>
+              ) : (
+                <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
+              )}
               {` · ${person.events.length} labeled contact${person.events.length === 1 ? "" : "s"} in this date range`}
             </p>
           </div>

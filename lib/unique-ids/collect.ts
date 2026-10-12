@@ -37,13 +37,14 @@ function usablePersonId(raw: string): string {
 
 export function collectPhoneEvents(
   calls: readonly RecontactCallSummary[],
-  profile: SurveyScriptProfile
+  profile: SurveyScriptProfile,
+  options?: { includeQcCampaigns?: boolean }
 ): UniqueIdContactEvent[] {
   const out: UniqueIdContactEvent[] = [];
   for (const call of calls) {
     const personId = usablePersonId(call.pdiId);
     if (!personId) continue;
-    if (skipQcCampaign(call.campaignName)) continue;
+    if (!options?.includeQcCampaigns && skipQcCampaign(call.campaignName)) continue;
     const family = familyFromResultLabel(call.finalResultLabel, profile);
     if (!family) continue;
     const occurredAt = call.callAt.trim() || call.callDate;

@@ -133,14 +133,12 @@ function identityIsComplete(record: CalleeIdentityRecord | undefined): boolean {
 
 /**
  * Read callee JSON only for this survey result's missing ids.
- * A partial write does not move the index watermark, so other campaigns keep the same created_at bound.
+ * A partial write does not move the index watermark. The id list is the bound, so an older callee is still found.
  */
 async function fillMissingCalleeIdentities(
   rows: SurveyRowWithCallee[],
-  byCalleeId: Record<string, CalleeIdentityRecord>,
-  windowStart: string | null
+  byCalleeId: Record<string, CalleeIdentityRecord>
 ): Promise<void> {
-  if (!windowStart || !/^\d{4}-\d{2}-\d{2}$/.test(windowStart)) return;
   const missing: string[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
@@ -160,8 +158,6 @@ async function fillMissingCalleeIdentities(
         COALESCE(data, '') AS callee_data
       FROM \`${P}.${D}.callees\`
       WHERE id IN (${chunk.join(",")})
-        AND DATE(created_at, 'America/Los_Angeles') >= '${windowStart}'
-        AND ${createdAtOnOrAfterSql("created_at", windowStart)}
     `;
     const queried = await runQuery<Record<string, unknown>>(sql);
     for (const row of queried) {
@@ -280,7 +276,7 @@ export async function fetchTagPdiSurveyRows(
   });
 
   if (identityIndex) {
-    await fillMissingCalleeIdentities(mapped, identityIndex.byCalleeId, identityIndex.windowStart);
+    await fillMissingCalleeIdentities(mapped, identityIndex.byCalleeId);
   }
 
   if (!omitJson && options.queryStartedAt) {

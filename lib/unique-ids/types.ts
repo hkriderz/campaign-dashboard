@@ -57,6 +57,8 @@ export type UniqueIdRow = {
   actorName: string;
   priorFamily: UniqueIdFamily | null;
   changed: boolean;
+  /** Oldest first. Includes repeat labels on different occasions. */
+  events: UniqueIdContactEvent[];
 };
 
 export type UniqueIdTallyOptions = {

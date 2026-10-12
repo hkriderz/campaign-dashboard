@@ -37,7 +37,7 @@ function readSessionIdFromRequestHeaders(hdrs: Headers): string | undefined {
   return undefined;
 }
 
-function globalContext(): CredentialContext {
+export function serverCredentialContext(): CredentialContext {
   return {
     scope: "global",
     sessionId: null,
@@ -56,7 +56,7 @@ function sessionContext(sessionId: string): CredentialContext {
 /** Resolve context from Next.js server `cookies()` (RSC / route handlers). */
 export async function resolveContextFromCookies(): Promise<CredentialContext> {
   if (!sessionCredentialsEnabled()) {
-    return globalContext();
+    return serverCredentialContext();
   }
 
   const cookieStore = await cookies();
@@ -70,7 +70,7 @@ export async function resolveContextFromCookies(): Promise<CredentialContext> {
   }
 
   if (!isValidSessionId(raw)) {
-    return globalContext();
+    return serverCredentialContext();
   }
 
   ensureSessionCredentialsDir(raw);
@@ -94,7 +94,7 @@ export type RequestCredentialResolution = {
  */
 export function resolveContextFromRequestWithSession(req: Request): RequestCredentialResolution {
   if (!sessionCredentialsEnabled()) {
-    return { ctx: globalContext(), newSessionId: null };
+    return { ctx: serverCredentialContext(), newSessionId: null };
   }
 
   const headerSession = req.headers.get(SESSION_REQUEST_HEADER);
