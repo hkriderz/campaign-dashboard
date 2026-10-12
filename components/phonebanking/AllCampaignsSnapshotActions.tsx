@@ -80,14 +80,14 @@ export default function AllCampaignsSnapshotActions({
     setMessage("");
     setProgress({
       completed: 0,
-      total: fullRebuild ? 0 : 1,
-      currentTagId: fullRebuild ? null : "all",
+      total: 0,
+      currentTagId: null,
       currentTagLabel: null,
-      phase: fullRebuild ? "loading-tags" : "refreshing",
+      phase: "loading-tags",
     });
     try {
       if (!fullRebuild) {
-        const { refreshed, errors } = await refreshAllPhonebankingTags(secret.trim());
+        const { refreshed, errors } = await refreshAllPhonebankingTags(secret.trim(), setProgress);
         reportTagResult(refreshed, errors, false);
         router.refresh();
         return;
@@ -162,13 +162,15 @@ export default function AllCampaignsSnapshotActions({
   const progressLabel =
     loading === "rebuildAll"
       ? "Rebuilding all campaigns"
-      : progress?.phase === "loading-tags"
-        ? "Loading tag list…"
-        : progress?.phase === "done"
-          ? "Update complete"
+      : progress?.phase === "done"
+        ? "Update complete"
+        : progress?.phase === "loading-tags"
+          ? loading === "rebuildTags"
+            ? "Loading tag list…"
+            : "Scanning dialer tables…"
           : loading === "rebuildTags"
             ? "Rebuilding all tags"
-            : loading === "refreshTags"
+            : loading === "refreshTags" || progress?.phase === "refreshing"
               ? "Refreshing all tags"
               : "";
 
@@ -232,14 +234,18 @@ export default function AllCampaignsSnapshotActions({
           {loading === "rebuildAll" ? "Rebuilding…" : "Rebuild all"}
         </button>
       </div>
-      {busy && progressLabel && loading !== "rebuildAll" ? (
+      {(progress || (busy && loading !== "rebuildAll")) && progressLabel ? (
         <RefreshProgressBar
-          percent={progress ? progressToPercent(progress) : undefined}
+          percent={
+            !progress || progress.phase === "loading-tags" ? undefined : progressToPercent(progress)
+          }
           label={progressLabel}
           detail={
-            progress?.currentTagLabel && progress.phase === "refreshing"
-              ? `${progress.completed + 1} of ${progress.total} — ${progress.currentTagLabel}`
-              : undefined
+            progress?.phase === "loading-tags" && progress.stage
+              ? progress.stage
+              : progress?.currentTagLabel && progress.phase === "refreshing"
+                ? `${progress.currentTagLabel}${progress.stage ? ` — ${progress.stage}` : ""}`
+                : undefined
           }
         />
       ) : null}

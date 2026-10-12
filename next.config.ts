@@ -19,10 +19,11 @@ const nextConfig: NextConfig = {
       } else if (typeof prev === "string" && prev.trim().length > 0) {
         stringIgnores.push(prev);
       }
-      stringIgnores.push("**/data/bq-snapshots/**");
-      stringIgnores.push("**/data/district-classifier/**");
-      stringIgnores.push("**/data/canvassing-reports/**");
-      stringIgnores.push("**/data/auth/**");
+      stringIgnores.push("**/node_modules/**");
+      stringIgnores.push("**/.next/**");
+      stringIgnores.push("**/.git/**");
+      stringIgnores.push("**/data/**");
+      stringIgnores.push("**/credentials/**");
       config.watchOptions = {
         ...config.watchOptions,
         ignored: stringIgnores,

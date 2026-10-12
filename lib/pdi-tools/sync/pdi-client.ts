@@ -1,6 +1,7 @@
 import { getActiveCredentialContext } from "@/lib/credentials/store";
 import { resolvePdiToolsCredentials } from "@/lib/pdi-tools/resolve-pdi-credentials";
 import type { CreatedFlagInstanceRow } from "./flag-instances";
+import type { LedgerEntry } from "./ledger";
 import type { PdiFlagPayloadItem } from "./types";
 import { PDI_BATCH_SIZE, PDI_RETRY_BATCH_SIZE } from "./constants";
 import { formatPdiFlagEntryDate } from "./format-pdi-flag-entry-date";
@@ -137,7 +138,7 @@ export async function deleteFlagInstance(instanceId: string): Promise<void> {
 export type PostFlagsResult = {
   successCount: number;
   failCount: number;
-  newLedgerEntries: Array<{ pdi_id: string; flag_code: string; flag_date: string }>;
+  newLedgerEntries: LedgerEntry[];
   newFlagInstances: CreatedFlagInstanceRow[];
 };
 
@@ -149,7 +150,7 @@ export async function postFlagsToPdi(
 ): Promise<PostFlagsResult> {
   let successCount = 0;
   let failCount = 0;
-  const newLedgerEntries: Array<{ pdi_id: string; flag_code: string; flag_date: string }> = [];
+  const newLedgerEntries: LedgerEntry[] = [];
   const newFlagInstances: CreatedFlagInstanceRow[] = [];
 
   const recordBatch = (batch: PdiFlagPayloadItem[], result: unknown) => {
@@ -162,6 +163,7 @@ export async function postFlagsToPdi(
       newLedgerEntries.push({
         pdi_id: item.pdiId,
         flag_code: code,
+        flag_id: item.flagId,
         flag_date: dateStr,
       });
       const iid = instanceIds[idx]?.trim();

@@ -555,8 +555,33 @@ html.dark .shadow-sm {
   animation: refresh-progress-slide 1.4s ease-in-out infinite;
 }
 
+.refresh-progress-active {
+  background-size: 200% 100%;
+  animation: refresh-progress-sheen 1.1s linear infinite;
+}
+
+@keyframes refresh-progress-sheen {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes refresh-progress-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .refresh-progress-indeterminate {
-    animation: none;
+  .refresh-progress-indeterminate,
+  .refresh-progress-active {
+    animation: refresh-progress-pulse 1.6s ease-in-out infinite;
   }
 }

@@ -31,7 +31,7 @@ export default function RefreshProgressBar({
       <div className="h-2 rounded-full overflow-hidden bg-gray-200 dark:bg-white/10">
         {determinate ? (
           <div
-            className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-mint-500 shadow-[0_0_12px_rgba(124,108,240,0.45)] transition-[width] duration-300 ease-out"
+            className="refresh-progress-active h-full rounded-full bg-gradient-to-r from-indigo-500 via-mint-400 to-indigo-500 shadow-[0_0_12px_rgba(124,108,240,0.45)] transition-[width] duration-300 ease-out"
             style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
           />
         ) : (

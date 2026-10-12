@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS \`${BQ_LEDGER_TABLE}\` (
   ledger_key  STRING    NOT NULL,
   pdi_id      STRING    NOT NULL,
   flag_code   STRING    NOT NULL,
+  flag_id     STRING,
   flag_date   DATE      NOT NULL,
   synced_at   TIMESTAMP NOT NULL,
   source      STRING,
@@ -28,6 +29,7 @@ const FLAGS_DDL = `
 CREATE TABLE IF NOT EXISTS \`${BQ_FLAGS_TABLE}\` (
   pdi_id               STRING    NOT NULL,
   flag_code            STRING    NOT NULL,
+  flag_id              STRING,
   flag_entry_date      TIMESTAMP NOT NULL,
   flag_name            STRING,
   question_text        STRING,
@@ -45,6 +47,7 @@ CLUSTER BY pdi_id, flag_code
 `;
 
 const FLAGS_NEW_COLUMNS: Array<[string, string]> = [
+  ["flag_id", "STRING"],
   ["canvasser_name", "STRING"],
   ["first_name", "STRING"],
   ["last_name", "STRING"],
@@ -152,4 +155,10 @@ export async function ensurePdiSyncTables(log: SyncLogger): Promise<void> {
       `BQ ALTER ${col}`
     );
   }
+
+  await safeExec(
+    `ALTER TABLE \`${BQ_LEDGER_TABLE}\` ADD COLUMN IF NOT EXISTS flag_id STRING`,
+    log,
+    "BQ ALTER ledger flag_id"
+  );
 }

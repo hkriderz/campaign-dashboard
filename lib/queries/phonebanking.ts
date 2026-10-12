@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { runQuery, PROJECT, DATASET, withBqQueryLabels } from "../bigquery";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { isValidIsoDate } from "../validation/iso-date";
@@ -15,6 +18,7 @@ import {
   snapshotsDisabled,
 } from "../bq-snapshot-store";
 import { loadRefreshWatermark, saveRefreshWatermark } from "../bq-snapshot-store";
+import { reportRefreshProgress } from "../refresh-progress";
 import { getTombstonedSliceKeys } from "../csv-slice-tombstones";
 import { buildPhoneBankSummariesFromDailyCallerStats } from "../phonebanking-candidate-stats";
 import { cachedBq } from "../bq-cache";
@@ -1594,10 +1598,50 @@ type DialerWindow = {
   queryStartedAt: string;
 };
 
+export type TagRefreshWindow = {
+  historyStart: string;
+  queryStartedAt: string;
+  incremental: boolean;
+};
+
+/** Text campaign files, then text contacts. Safe to call on its own after dialer rows are saved. */
+export async function refreshTagTextStep(tagId: string, window: TagRefreshWindow): Promise<void> {
+  reportRefreshProgress("Text campaigns", 1);
+  const tag = getTagById(tagId);
+  const mode = window.incremental ? "incremental" : "full";
+  if (tag?.includeInTexting) {
+    if (window.incremental) {
+      const { refreshTextSnapshotsIncremental } = await import("./texting");
+      await refreshTextSnapshotsIncremental(tagId, window.historyStart);
+    } else {
+      const { rebuildTextSnapshotsFromBigQuery } = await import("./texting");
+      await rebuildTextSnapshotsFromBigQuery(tagId);
+    }
+  }
+  const { refreshTagTextFollowUp } = await import("./recontact-unique-refresh");
+  await refreshTagTextFollowUp(tagId, mode, {
+    windowStart: window.incremental ? window.historyStart : undefined,
+    queryStartedAt: window.queryStartedAt,
+  });
+}
+
+/** Phone PDI / QC pairs, then the refresh watermark. Call this after the text step. */
+export async function refreshTagContactsStep(tagId: string, window: TagRefreshWindow): Promise<void> {
+  reportRefreshProgress("Phone contacts", 2);
+  const { refreshTagPhoneContactFollowUp } = await import("./recontact-unique-refresh");
+  await refreshTagPhoneContactFollowUp(tagId, window.incremental ? "incremental" : "full", {
+    windowStart: window.incremental ? window.historyStart : undefined,
+    queryStartedAt: window.queryStartedAt,
+  });
+  saveRefreshWatermark(tagId, window.queryStartedAt);
+  reportRefreshProgress("Done", 3);
+}
+
 async function persistTagDialerWindow(
   tagId: string,
   window: DialerWindow,
-  mode: TagSnapshotRefreshMode
+  mode: TagSnapshotRefreshMode,
+  options?: { followUps?: boolean }
 ): Promise<void> {
   const queryLabel = tagId.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 63) || "tag";
   await withBqQueryLabels(
@@ -1632,25 +1676,21 @@ async function persistTagDialerWindow(
   if (canIncremental) {
     const banks = buildPhoneBankSummariesFromDailyCallerStats(daily, getTombstonedSliceKeys(tagId));
     savePhoneBanksSnapshot(tagId, banks, { touchEvenIfUnchanged: true });
-    if (tag?.includeInTexting) {
-      const { refreshTextSnapshotsIncremental } = await import("./texting");
-      await refreshTextSnapshotsIncremental(tagId, window.historyStart);
-    }
   } else {
     const banks = await fetchPhoneBanksByTagUncached(tagId);
     savePhoneBanksSnapshot(tagId, banks, { touchEvenIfUnchanged: true });
-    if (tag?.includeInTexting) {
-      const { rebuildTextSnapshotsFromBigQuery } = await import("./texting");
-      await rebuildTextSnapshotsFromBigQuery(tagId);
-    }
   }
 
-  const { refreshRecontactAndUniqueSnapshots } = await import("./recontact-unique-refresh");
-  await refreshRecontactAndUniqueSnapshots(tagId, canIncremental ? "incremental" : "full", {
-    windowStart: canIncremental ? window.historyStart : undefined,
+  if (options?.followUps === false) return;
+
+  const followUp: TagRefreshWindow = {
+    historyStart: window.historyStart,
     queryStartedAt: window.queryStartedAt,
-  });
-  saveRefreshWatermark(tagId, window.queryStartedAt);
+    incremental: canIncremental,
+  };
+  await refreshTagTextStep(tagId, followUp);
+  await refreshTagContactsStep(tagId, followUp);
+  reportRefreshProgress("Done", 3);
     }
   );
 }
@@ -1664,14 +1704,28 @@ export async function rebuildTagBqSnapshotsFromBigQuery(
   tagId: string,
   options?: { mode?: TagSnapshotRefreshMode }
 ): Promise<void> {
+  const window = await beginTagSnapshotRefresh(tagId, options?.mode === "incremental" ? "incremental" : "full");
   if (snapshotsDisabled()) return;
-  const mode = options?.mode === "incremental" ? "incremental" : "full";
+  await refreshTagTextStep(tagId, window);
+  await refreshTagContactsStep(tagId, window);
+}
+
+/** Save dialer files for one tag and return the window the text and contact steps must reuse. */
+export async function beginTagSnapshotRefresh(
+  tagId: string,
+  mode: TagSnapshotRefreshMode
+): Promise<TagRefreshWindow> {
+  if (snapshotsDisabled()) {
+    return { historyStart: "", queryStartedAt: new Date().toISOString(), incremental: false };
+  }
+  const requested = mode === "incremental" ? "incremental" : "full";
   const watermark = loadRefreshWatermark(tagId);
   const canIncremental =
-    mode === "incremental" &&
+    requested === "incremental" &&
     watermark != null &&
     loadDailyCallerSnapshot(tagId) != null &&
     loadCallSurveyFillSnapshot(tagId) != null;
+  reportRefreshProgress("Dialer rows", 0);
   const queryStartedAt = new Date().toISOString();
   const historyStart = canIncremental ? refreshWindowStartDate(watermark) : PHONEBANK_WINDOW_START_DATE;
   const [daily, fill] = await Promise.all([
@@ -1681,19 +1735,38 @@ export async function rebuildTagBqSnapshotsFromBigQuery(
   await persistTagDialerWindow(
     tagId,
     { historyStart, daily, fill, queryStartedAt },
-    canIncremental ? "incremental" : "full"
+    canIncremental ? "incremental" : "full",
+    { followUps: false }
   );
+  return { historyStart, queryStartedAt, incremental: canIncremental };
 }
 
-/**
- * Refresh several tags from one dialer scan. Tags without a snapshot or watermark are returned
- * so the caller can rebuild them on their own.
- */
-export async function refreshTagsFromSharedDialerScan(tagIds: string[]): Promise<{
+const REFRESH_BATCH_DIR = path.join(process.cwd(), "data", "bq-snapshots", "_refresh-batches");
+
+type SharedDialerBatch = {
+  historyStart: string;
+  queryStartedAt: string;
+  dailyAll: TagDailyCallerStat[];
+  fillAll: CallSurveyRowForFill[];
+};
+
+function isBatchId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function refreshBatchPath(batchId: string): string {
+  if (!isBatchId(batchId)) throw new Error("Unknown refresh batch.");
+  return path.join(REFRESH_BATCH_DIR, `${batchId}.json`);
+}
+
+export type SharedDialerScan = {
+  batchId: string | null;
+  ready: string[];
   needsFull: string[];
-  refreshed: string[];
-  errors: { tagId: string; error: string }[];
-}> {
+};
+
+/** One dialer scan for every tag that already has a snapshot. The rows stay on disk until each tag is applied. */
+export async function startSharedDialerRefresh(tagIds: string[]): Promise<SharedDialerScan> {
   const needsFull: string[] = [];
   const ready: string[] = [];
   for (const tagId of tagIds) {
@@ -1704,7 +1777,8 @@ export async function refreshTagsFromSharedDialerScan(tagIds: string[]): Promise
       needsFull.push(tagId);
     }
   }
-  if (ready.length === 0) return { needsFull, refreshed: [], errors: [] };
+  reportRefreshProgress("Scanning dialer tables", 0, 1);
+  if (ready.length === 0) return { batchId: null, ready, needsFull };
 
   const earliest = ready
     .map((tagId) => loadRefreshWatermark(tagId) as string)
@@ -1717,21 +1791,79 @@ export async function refreshTagsFromSharedDialerScan(tagIds: string[]): Promise
       fetchTagCallSurveyRowsForFinalFillUncached("", historyStart, "TRUE"),
     ])
   );
+  const batchId = randomUUID();
+  const batch: SharedDialerBatch = { historyStart, queryStartedAt, dailyAll, fillAll };
+  fs.mkdirSync(REFRESH_BATCH_DIR, { recursive: true });
+  fs.writeFileSync(refreshBatchPath(batchId), JSON.stringify(batch), "utf-8");
+  return { batchId, ready, needsFull };
+}
 
+/** Merge one tag out of a shared dialer scan. Pass followUps false to stop after dialer files. */
+export async function applySharedDialerRefresh(
+  batchId: string,
+  tagId: string,
+  options?: { followUps?: boolean }
+): Promise<TagRefreshWindow> {
+  const tag = getTagById(tagId);
+  if (!tag) throw new Error(`Unknown tag: ${tagId}`);
+  const raw = fs.readFileSync(refreshBatchPath(batchId), "utf-8");
+  let batch: SharedDialerBatch;
+  try {
+    batch = JSON.parse(raw) as SharedDialerBatch;
+  } catch {
+    throw new Error("The shared dialer scan file is unreadable. Run Refresh all tags again.");
+  }
+  reportRefreshProgress("Dialer rows", 0);
+  const daily = (batch.dailyAll ?? []).filter((row) => campaignNameMatchesTag(row.campaignName, tag));
+  const fill = (batch.fillAll ?? []).filter((row) => campaignNameMatchesTag(row.campaignName, tag));
+  await persistTagDialerWindow(
+    tagId,
+    {
+      historyStart: batch.historyStart,
+      daily,
+      fill,
+      queryStartedAt: batch.queryStartedAt,
+    },
+    "incremental",
+    { followUps: options?.followUps !== false }
+  );
+  return {
+    historyStart: batch.historyStart,
+    queryStartedAt: batch.queryStartedAt,
+    incremental: true,
+  };
+}
+
+export function discardSharedDialerRefresh(batchId: string): void {
+  const fp = refreshBatchPath(batchId);
+  if (fs.existsSync(fp)) fs.unlinkSync(fp);
+}
+
+/**
+ * Refresh several tags from one dialer scan. Tags without a snapshot or watermark are returned
+ * so the caller can rebuild them on their own.
+ */
+export async function refreshTagsFromSharedDialerScan(tagIds: string[]): Promise<{
+  needsFull: string[];
+  refreshed: string[];
+  errors: { tagId: string; error: string }[];
+}> {
+  const scan = await startSharedDialerRefresh(tagIds);
   const refreshed: string[] = [];
   const errors: { tagId: string; error: string }[] = [];
-  for (const tagId of ready) {
-    const tag = getTagById(tagId);
-    if (!tag) continue;
-    try {
-      const daily = dailyAll.filter((row) => campaignNameMatchesTag(row.campaignName, tag));
-      const fill = fillAll.filter((row) => campaignNameMatchesTag(row.campaignName, tag));
-      await persistTagDialerWindow(tagId, { historyStart, daily, fill, queryStartedAt }, "incremental");
-      refreshed.push(tagId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      errors.push({ tagId, error: message });
+  if (!scan.batchId) return { needsFull: scan.needsFull, refreshed, errors };
+  try {
+    for (const tagId of scan.ready) {
+      try {
+        await applySharedDialerRefresh(scan.batchId, tagId);
+        refreshed.push(tagId);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errors.push({ tagId, error: message });
+      }
     }
+  } finally {
+    discardSharedDialerRefresh(scan.batchId);
   }
-  return { needsFull, refreshed, errors };
+  return { needsFull: scan.needsFull, refreshed, errors };
 }

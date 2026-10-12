@@ -62,6 +62,18 @@ export function lookupCalleeIdentity(calleeId: string): CalleeIdentityRecord | n
   return loadCalleeIndex().byCalleeId[calleeId] ?? null;
 }
 
+/** One read of the callee index for a survey fetch. Do not look up one id at a time. */
+export function readCalleeIdentityIndex(): {
+  byCalleeId: Record<string, CalleeIdentityRecord>;
+  windowStart: string | null;
+} {
+  const data = loadCalleeIndex();
+  return {
+    byCalleeId: data.byCalleeId,
+    windowStart: data.queryStartedAt ? refreshWindowStartDate(data.queryStartedAt) : null,
+  };
+}
+
 export function textPdiIndexWindowStart(): string | null {
   const at = loadTextIndex().queryStartedAt;
   return at ? refreshWindowStartDate(at) : null;

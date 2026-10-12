@@ -18,7 +18,6 @@ import type { CampaignTag } from "../types";
 import { collectPhoneEvents, collectTextEvents } from "../unique-ids/collect";
 import { mergeRowsByCallDate, mergeTextContactWindow, PHONE_HISTORY_START } from "../snapshot-merge";
 import {
-  appendCalleeIdentityCatchUp,
   buildQcRecontactPairsFromSources,
   fetchTagPdiSurveyRows,
   groupRowsIntoCallSummaries,
@@ -64,7 +63,6 @@ async function loadMergedPdiRows(
   const existing = loadPdiSurveySnapshot(tag.id);
   const useWindow = incremental && existing != null && Boolean(windowStart);
   const historyStart = useWindow ? windowStart! : PHONE_HISTORY_START;
-  if (useWindow) await appendCalleeIdentityCatchUp(queryStartedAt);
   let fresh = await fetchTagPdiSurveyRows(tag, {
     requirePdi,
     callDateOnOrAfter: historyStart,
@@ -113,11 +111,26 @@ function saveTextEvents(tag: CampaignTag, contacts: QcTextContactSummary[]): voi
   saveUniqueIdTextSnapshot(tag.id, collectTextEvents(contacts, profile), { touchEvenIfUnchanged: true });
 }
 
-/**
- * Merge raw PDI and text-contact snapshots, then recompute recontact pairs or unique-ID files.
- * Incremental mode requires the raw snapshot to already exist; otherwise the full history is loaded.
- */
-export async function refreshRecontactAndUniqueSnapshots(
+/** Text-contact snapshot and unique-ID text events. QC tags do this inside the phone step. */
+export async function refreshTagTextFollowUp(
+  tagId: string,
+  mode: "full" | "incremental",
+  options?: { windowStart?: string; queryStartedAt?: string }
+): Promise<void> {
+  if (snapshotsDisabled()) return;
+  const tag = getTagById(tagId);
+  if (!tag || isDerivedQcTagId(tagId) || !tagHasText(tag)) return;
+  const contacts = await loadMergedTextContacts(
+    tag,
+    mode === "incremental",
+    options?.windowStart,
+    options?.queryStartedAt ?? new Date().toISOString()
+  );
+  saveTextEvents(tag, contacts);
+}
+
+/** Phone PDI snapshot, or the QC pair file. This is the slow step. */
+export async function refreshTagPhoneContactFollowUp(
   tagId: string,
   mode: "full" | "incremental",
   options?: { windowStart?: string; queryStartedAt?: string }
@@ -142,20 +155,22 @@ export async function refreshRecontactAndUniqueSnapshots(
     return;
   }
 
-  const tasks: Promise<void>[] = [];
-  if (tagHasPhone(tag)) {
-    tasks.push(
-      loadMergedPdiRows(tag, true, incremental, windowStart, queryStartedAt).then((rows) => {
-        savePhoneEvents(tag, rows);
-      })
-    );
-  }
-  if (tagHasText(tag)) {
-    tasks.push(
-      loadMergedTextContacts(tag, incremental, windowStart, queryStartedAt).then((contacts) => {
-        saveTextEvents(tag, contacts);
-      })
-    );
-  }
-  await Promise.all(tasks);
+  if (!tagHasPhone(tag)) return;
+  const rows = await loadMergedPdiRows(tag, true, incremental, windowStart, queryStartedAt);
+  savePhoneEvents(tag, rows);
+}
+
+/**
+ * Merge raw PDI and text-contact snapshots, then recompute recontact pairs or unique-ID files.
+ * Incremental mode requires the raw snapshot to already exist; otherwise the full history is loaded.
+ */
+export async function refreshRecontactAndUniqueSnapshots(
+  tagId: string,
+  mode: "full" | "incremental",
+  options?: { windowStart?: string; queryStartedAt?: string }
+): Promise<void> {
+  await Promise.all([
+    refreshTagTextFollowUp(tagId, mode, options),
+    refreshTagPhoneContactFollowUp(tagId, mode, options),
+  ]);
 }

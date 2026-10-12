@@ -6,7 +6,7 @@ import { DEFAULT_MIN_RECORDS } from "./constants";
 import { collapseTextRowsToLatestStatus } from "./collapse-text";
 import { fillFinalResults, logFinalResultCoverage } from "./fill-final";
 import { insertFlagInstances } from "./flag-instances";
-import { appendLedgerEntries, loadLedger } from "./ledger";
+import { addStoredFlagToLedger, appendLedgerEntries, loadLedger } from "./ledger";
 import { seedLedgerFromExports } from "./ledger-seed";
 import { SyncLogger } from "./logger";
 import { loadMappingForSync, type MappingMaps } from "./mapping";
@@ -192,10 +192,10 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     }
     lockHeld = true;
 
-    const ledger = await loadLedger(log);
+    const ledger = await loadLedger(log, maps);
     log.step("ledger", progressForPhase("ledger"), `Ledger loaded: ${ledger.size} previously synced flag entries`);
 
-    await seedLedgerFromExports(ledger, runId, log);
+    await seedLedgerFromExports(ledger, runId, log, maps);
 
     const acquisitionTypeId = acquisitionTypeIdForChannel(channel);
     const fallbackSurvey = channel === "text" ? TEXT_MAPPING_SURVEY_NAME : undefined;
@@ -278,7 +278,8 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     if (postResult.newLedgerEntries.length > 0) {
       await appendLedgerEntries(postResult.newLedgerEntries, ledgerSourceForChannel(channel), runId, log);
       for (const e of postResult.newLedgerEntries) {
-        ledger.add(`${e.pdi_id}|${e.flag_code}|${e.flag_date}`);
+        addStoredFlagToLedger(ledger, e.pdi_id, e.flag_code, e.flag_date, maps);
+        if (e.flag_id) addStoredFlagToLedger(ledger, e.pdi_id, e.flag_id, e.flag_date, maps);
       }
     }
 

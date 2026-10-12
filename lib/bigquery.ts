@@ -99,17 +99,35 @@ async function logJob(job: Job, labels: BqQueryLabels): Promise<void> {
   });
 }
 
+function errorText(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  const cause = err.cause instanceof Error ? err.cause.message : "";
+  if (cause && !err.message.includes(cause)) return `${err.message}: ${cause}`;
+  return err.message;
+}
+
+function isEmptyResponse(err: unknown): boolean {
+  return errorText(err).includes("Unexpected end of JSON input");
+}
+
 async function createLabeledJob(sql: string, labels: BqQueryLabels): Promise<Job> {
   const bq = getBigQueryClient();
-  const [job] = await bq.createQueryJob({
+  const request = {
     query: sql,
     useLegacySql: false,
     labels: {
       query: sanitizeBqLabel(labels.label, "query"),
       mode: sanitizeBqLabel(labels.mode, "ad_hoc"),
     },
-  });
-  return job;
+  };
+  try {
+    const [job] = await bq.createQueryJob(request);
+    return job;
+  } catch (err) {
+    if (!isEmptyResponse(err)) throw err;
+    const [job] = await bq.createQueryJob(request);
+    return job;
+  }
 }
 
 /**
@@ -127,8 +145,11 @@ export async function runQuery<T = Record<string, unknown>>(
     await logJob(job, resolved);
     return rows as T[];
   } catch (err) {
-    await logJob(job, resolved);
-    throw err;
+    await logJob(job, resolved).catch(() => undefined);
+    if (!isEmptyResponse(err)) throw err;
+    const [rows] = await job.getQueryResults();
+    await logJob(job, resolved).catch(() => undefined);
+    return rows as T[];
   }
 }
 

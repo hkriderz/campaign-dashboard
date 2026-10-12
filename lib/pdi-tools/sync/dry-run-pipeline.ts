@@ -59,7 +59,7 @@ export async function computeDryRunCounts(options: SyncRunOptions): Promise<DryR
   const query = buildSurveyQuery(startStr, endStr);
   const rows = await runQuery<SurveyResultRow>(query);
   const { rows: filledRows, synthetic } = fillFinalResults(rows, maps, new SyncLogger());
-  const ledger = await loadLedger(new SyncLogger());
+  const ledger = await loadLedger(new SyncLogger(), maps);
   const { payload, rowsSkipped, rowsDeduped, rowsDedupedSameBatch } = buildMappingReport(
     filledRows,
     maps,

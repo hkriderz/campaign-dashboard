@@ -1,5 +1,5 @@
 import { ACQUISITION_TYPE_ID } from "./constants";
-import { ledgerKey } from "./ledger";
+import { ledgerHasPostedFlag, ledgerKey } from "./ledger";
 import { getQuestionId, type MappingMaps } from "./mapping";
 import { resolveSyncFlagId } from "./text-flag";
 import type { PdiFlagPayloadItem, SurveyResultRow } from "./types";
@@ -77,7 +77,7 @@ export function transformSurveyRows(
     const flagCode = maps.flagIdToCode.get(flagId) ?? flagId;
     const key = ledgerKey(pdiId, flagCode, flagDateStr);
 
-    if (ledger.has(key)) {
+    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId)) {
       rowsDeduped += 1;
       continue;
     }

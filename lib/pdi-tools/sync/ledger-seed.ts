@@ -5,7 +5,13 @@ import {
   ensurePdiSyncExportsDir,
   resolveStwToPdiScriptDir,
 } from "@/lib/pdi-tools/sync-working-dir";
-import { appendLedgerEntries, ledgerKey } from "./ledger";
+import {
+  addStoredFlagToLedger,
+  appendLedgerEntries,
+  ledgerKey,
+  normalizeLedgerFlagDate,
+  type LedgerFlagAliases,
+} from "./ledger";
 import type { SyncLogger } from "./logger";
 
 function shouldExcludeLedgerCsv(fileName: string): boolean {
@@ -126,7 +132,8 @@ function listExportFilesInDir(dir: string): { json: string[]; csv: string[] } {
 export async function seedLedgerFromExports(
   ledger: Set<string>,
   runId: string,
-  log: SyncLogger
+  log: SyncLogger,
+  maps?: LedgerFlagAliases
 ): Promise<number> {
   const dirs = resolveLedgerSeedDirs();
   const exportFilesSet = new Set<string>();
@@ -140,7 +147,7 @@ export async function seedLedgerFromExports(
   const exportFiles = [...exportFilesSet];
   if (exportFiles.length === 0) return 0;
 
-  const newEntries: Array<{ pdi_id: string; flag_code: string; flag_date: string }> = [];
+  const newEntries: Array<{ pdi_id: string; flag_code: string; flag_id?: string; flag_date: string }> = [];
 
   for (const exportPath of exportFiles) {
     try {
@@ -155,14 +162,22 @@ export async function seedLedgerFromExports(
       for (const flag of records) {
         const pdiId = String(flag.PDIID ?? flag.pdiid ?? "").trim();
         const code = String(flag.RESPONSECODE ?? flag.responsecode ?? "").trim().toUpperCase();
-        const rawDate = String(flag.FLAGENTRYDATE ?? flag.flagentrydate ?? "").trim();
-        const dateStr = rawDate.length >= 10 ? rawDate.slice(0, 10) : "";
-        if (!pdiId || !code || !dateStr) continue;
-        const key = ledgerKey(pdiId, code, dateStr);
-        if (!ledger.has(key)) {
+        const date = normalizeLedgerFlagDate(String(flag.FLAGENTRYDATE ?? flag.flagentrydate ?? ""));
+        if (!pdiId || !code || !date) continue;
+        const flagId = maps?.codeMap.get(code);
+        const key = ledgerKey(pdiId, code, date);
+        const idKey = flagId ? ledgerKey(pdiId, flagId, date) : "";
+        if (!key) continue;
+        if (!ledger.has(key) && !(idKey && ledger.has(idKey))) {
           ledger.add(key);
-          newEntries.push({ pdi_id: pdiId, flag_code: code, flag_date: dateStr });
+          newEntries.push({
+            pdi_id: pdiId,
+            flag_code: code,
+            flag_id: flagId,
+            flag_date: date,
+          });
         }
+        addStoredFlagToLedger(ledger, pdiId, code, date, maps);
       }
     } catch (e) {
       log.warn(

@@ -7,6 +7,7 @@ import SnapshotFreshnessLine from "@/components/phonebanking/SnapshotFreshnessLi
 import {
   progressToPercent,
   refreshAllPhonebankingTags,
+  refreshOnePhonebankingTag,
   type TagRefreshProgress,
 } from "@/lib/phonebanking-snapshot-refresh-client";
 import { dispatchTombstoneOverlapCheck } from "@/lib/tombstone-overlap-events";
@@ -40,20 +41,6 @@ export default function TagDataRefreshBar({
   const [message, setMessage] = useState("");
   const [messageTone, setMessageTone] = useState<"ok" | "warn" | "err">("ok");
 
-  async function postRefresh(body: Record<string, unknown>) {
-    const res = await fetch("/api/phonebanking/bq-snapshot-refresh", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        ...(secret.trim() ? { "x-snapshot-secret": secret } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    return { res, data };
-  }
-
   async function onRefreshThisTag() {
     if (!localDev && !secret.trim()) return;
     if (!tagId) return;
@@ -61,25 +48,14 @@ export default function TagDataRefreshBar({
     setMessage("");
     setProgress({
       completed: 0,
-      total: 1,
+      total: 3,
       currentTagId: tagId,
       currentTagLabel: tagId,
+      stage: "Dialer rows",
       phase: "refreshing",
     });
     try {
-      const { res, data } = await postRefresh({ tagId, clear: false, fullRebuild: false });
-      if (!res.ok) {
-        setMessageTone("err");
-        setMessage(data.error ?? res.statusText);
-        return;
-      }
-      setProgress({
-        completed: 1,
-        total: 1,
-        currentTagId: null,
-        currentTagLabel: null,
-        phase: "done",
-      });
+      await refreshOnePhonebankingTag(secret.trim(), tagId, false, setProgress);
       setMessageTone("ok");
       setMessage("This tag’s snapshots updated.");
       router.refresh();
@@ -106,7 +82,7 @@ export default function TagDataRefreshBar({
     });
 
     try {
-      const { refreshed, errors } = await refreshAllPhonebankingTags(secret.trim());
+      const { refreshed, errors } = await refreshAllPhonebankingTags(secret.trim(), setProgress);
 
       if (refreshed.length === 0 && errors.length > 0) {
         setMessageTone("err");
@@ -156,33 +132,33 @@ export default function TagDataRefreshBar({
 
   const busy = loading !== null;
   const progressLabel =
-    loading === "all"
-      ? progress?.phase === "loading-tags"
-        ? "Loading tag list…"
-        : progress?.phase === "done"
-          ? "Refresh complete"
-          : "Refreshing snapshots"
+    progress?.phase === "done"
+      ? "Refresh complete"
       : loading === "tag"
-        ? progress?.phase === "done"
-          ? "Refresh complete"
-          : "Refreshing this tag"
-        : "";
+        ? "Refreshing this tag"
+        : progress?.phase === "loading-tags"
+          ? "Scanning dialer tables…"
+          : loading === "all" || progress?.phase === "refreshing"
+            ? "Refreshing snapshots"
+            : "";
 
   const progressDetail =
-    progress && progress.currentTagLabel && progress.phase === "refreshing"
-      ? `${progress.completed + 1} of ${progress.total} — ${progress.currentTagLabel}`
-      : progress && progress.total > 0 && progress.phase !== "loading-tags"
-        ? `${progress.completed} of ${progress.total} tags done`
+    progress?.phase === "refreshing" && progress.stage
+      ? progress.total > 3 && progress.currentTagLabel
+        ? `${progress.currentTagLabel} — ${progress.stage}`
+        : progress.stage
+      : progress && progress.currentTagLabel && progress.phase === "refreshing"
+        ? `${progress.completed + 1} of ${progress.total} — ${progress.currentTagLabel}`
         : undefined;
 
   const progressPercent =
-    progress && loading === "all"
-      ? progressToPercent(progress)
-      : loading === "tag" && progress
-        ? progress.phase === "done"
-          ? 100
-          : 50
-        : undefined;
+    progress?.phase === "done"
+      ? 100
+      : progress?.phase === "loading-tags"
+        ? undefined
+        : progress?.phase === "refreshing"
+          ? progressToPercent(progress)
+          : undefined;
 
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 px-3 py-2 space-y-2">
@@ -248,7 +224,7 @@ export default function TagDataRefreshBar({
         </div>
       </div>
 
-      {busy && progressLabel ? (
+      {(busy || progress) && progressLabel ? (
         <RefreshProgressBar
           percent={progressPercent}
           label={progressLabel}

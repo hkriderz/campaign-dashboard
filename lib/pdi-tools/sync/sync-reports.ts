@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ACQUISITION_TYPE_ID } from "./constants";
 import { ensurePdiSyncExportsDir } from "../sync-working-dir";
-import { ledgerKey } from "./ledger";
+import { ledgerHasPostedFlag, ledgerKey } from "./ledger";
 import { getQuestionId, type MappingMaps } from "./mapping";
 import { resolveSyncFlagId } from "./text-flag";
 import type { SyncLogger } from "./logger";
@@ -126,7 +126,7 @@ export function buildMappingReport(
     reportRow.acquisitionTypeId = acquisitionTypeId;
     reportRow.flagEntryDate = flagDateStr;
 
-    if (ledger.has(key)) {
+    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId)) {
       reportRow.mapping_status = "DUPLICATE: Already synced to PDI";
       rowsDeduped += 1;
       report.push(reportRow);

@@ -91,35 +91,18 @@ export default function BqSnapshotRefreshPanel({
           setMessage("All tag snapshot files rewritten from BigQuery.");
         }
       } else {
-        setProgress({
-          completed: 0,
-          total: 1,
-          currentTagId: tagId,
-          currentTagLabel: tagId,
-          phase: "refreshing",
+        const { errors } = await refreshPhonebankingTagsSequential({
+          tagIds: [tagId],
+          secret: secret.trim(),
+          clearFirst,
+          fullRebuild: true,
+          onProgress: setProgress,
         });
-        const res = await fetch("/api/phonebanking/bq-snapshot-refresh", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: {
-            "Content-Type": "application/json",
-            "x-snapshot-secret": secret,
-          },
-          body: JSON.stringify({ tagId, clear: clearFirst, fullRebuild: true }),
-        });
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
-        if (!res.ok) {
+        if (errors.length > 0) {
           setStatus("err");
-          setMessage(data.error ?? res.statusText);
+          setMessage(errors[0]?.error ?? "Refresh failed");
           return;
         }
-        setProgress({
-          completed: 1,
-          total: 1,
-          currentTagId: null,
-          currentTagLabel: null,
-          phase: "done",
-        });
         setStatus("ok");
         setMessage("Snapshot files rewritten from BigQuery.");
         dispatchTombstoneOverlapCheck(tagId);
@@ -147,19 +130,19 @@ export default function BqSnapshotRefreshPanel({
       : "";
 
   const progressDetail =
-    progress && progress.currentTagLabel && progress.phase === "refreshing"
-      ? `${progress.completed + 1} of ${progress.total} — ${progress.currentTagLabel}`
-      : progress && progress.total > 0 && progress.phase !== "loading-tags"
-        ? `${progress.completed} of ${progress.total} tags done`
+    progress?.phase === "refreshing" && progress.stage
+      ? progress.currentTagLabel
+        ? `${progress.currentTagLabel} — ${progress.stage}`
+        : progress.stage
+      : progress && progress.currentTagLabel && progress.phase === "refreshing"
+        ? `${progress.completed + 1} of ${progress.total} — ${progress.currentTagLabel}`
         : undefined;
 
   const progressPercent =
     status === "loading" && progress
-      ? allTags
-        ? progressToPercent(progress)
-        : progress.phase === "done"
-          ? 100
-          : 50
+      ? progress.phase === "loading-tags"
+        ? undefined
+        : progressToPercent(progress)
       : undefined;
 
   return (
