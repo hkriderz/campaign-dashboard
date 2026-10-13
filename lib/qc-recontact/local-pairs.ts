@@ -58,6 +58,14 @@ function sourceStamp(qcTagId: string, primaryId: string): string {
   return parts.join("|");
 }
 
+function fillNeedsSavedIdentity(rows: readonly CallSurveyRowForFill[]): boolean {
+  return rows.some((row) => {
+    const calleeId = row.calleeId?.trim() ?? "";
+    if (!calleeId) return false;
+    return !row.pdiId?.trim() || !row.voterName?.trim() || !row.voterAddress?.trim();
+  });
+}
+
 function fillToSurvey(rows: readonly CallSurveyRowForFill[]): PdiSurveyRow[] {
   return rows.map((row) => ({
     callId: row.callId,
@@ -68,7 +76,7 @@ function fillToSurvey(rows: readonly CallSurveyRowForFill[]): PdiSurveyRow[] {
     phonebankerName: row.phonebankerName,
     pdiId: normalizeRecontactPersonId(row.pdiId ?? ""),
     voterName: row.voterName?.trim() ?? "",
-    voterAddress: "",
+    voterAddress: row.voterAddress?.trim() ?? "",
     questionName: row.questionName,
     answerValue: row.answerValue,
   }));
@@ -94,13 +102,30 @@ export function mergeSurveyRows(base: readonly PdiSurveyRow[], extra: readonly P
       byCall.set(callId, extraRows);
       continue;
     }
-    if (current.some((row) => row.pdiId.trim())) continue;
     const pdiId = extraRows.find((row) => row.pdiId.trim())?.pdiId ?? "";
     const voterName = extraRows.find((row) => row.voterName.trim())?.voterName ?? "";
+    const voterAddress = extraRows.find((row) => row.voterAddress.trim())?.voterAddress ?? "";
+    if (current.some((row) => row.pdiId.trim())) {
+      if (!voterName && !voterAddress) continue;
+      byCall.set(
+        callId,
+        current.map((row) => ({
+          ...row,
+          voterName: row.voterName.trim() || voterName,
+          voterAddress: row.voterAddress.trim() || voterAddress,
+        }))
+      );
+      continue;
+    }
     if (!pdiId) continue;
     byCall.set(
       callId,
-      current.map((row) => ({ ...row, pdiId, voterName: row.voterName || voterName }))
+      current.map((row) => ({
+        ...row,
+        pdiId,
+        voterName: row.voterName || voterName,
+        voterAddress: row.voterAddress.trim() || voterAddress,
+      }))
     );
   }
   return [...byCall.values()].flat();
@@ -271,10 +296,8 @@ async function loadLocalQcSources(qcTagId: string): Promise<LocalQcSources | nul
     qcFill.length + primaryFill.length + qcPdi.length + primaryPdi.length + qcUid.length + primaryUid.length > 0;
   if (!hasSource) return null;
 
-  const stampedQcFill = qcFill.some((row) => row.calleeId && !row.pdiId)
-    ? await stampFillIdentities(qcFill, false)
-    : qcFill;
-  const stampedPrimaryFill = primaryFill.some((row) => row.calleeId && !row.pdiId)
+  const stampedQcFill = fillNeedsSavedIdentity(qcFill) ? await stampFillIdentities(qcFill, false) : qcFill;
+  const stampedPrimaryFill = fillNeedsSavedIdentity(primaryFill)
     ? await stampFillIdentities(primaryFill, false)
     : primaryFill;
 

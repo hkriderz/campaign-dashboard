@@ -95,9 +95,9 @@ export function groupRowsIntoCallSummaries(
       callDate: first.callDate,
       callAt: first.callAt,
       phonebankerName: first.phonebankerName,
-      pdiId: first.pdiId,
-      voterName: first.voterName,
-      voterAddress: first.voterAddress,
+      pdiId: list.find((row) => row.pdiId.trim())?.pdiId ?? first.pdiId,
+      voterName: list.find((row) => row.voterName.trim())?.voterName ?? first.voterName,
+      voterAddress: list.find((row) => row.voterAddress.trim())?.voterAddress ?? first.voterAddress,
       ...labels,
     });
   }
@@ -124,12 +124,47 @@ function hydrateRecontactPairsFromSurveyFill(
 }
 
 const CALLEE_ID_CHUNK = 400;
+const CALLEE_ID_PATTERN = /^(?:\d+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** Numeric ids and Scale to Win callee UUIDs. Anything else is not put into SQL. */
+export function isLookupCalleeId(id: string): boolean {
+  return CALLEE_ID_PATTERN.test(id.trim());
+}
+
+export function calleeIdSqlLiteral(id: string): string {
+  const value = id.trim();
+  if (!isLookupCalleeId(value)) throw new Error("Unsafe callee id");
+  if (/^\d+$/.test(value)) return value;
+  return `'${value.toLowerCase()}'`;
+}
 
 type SurveyRowWithCallee = PdiSurveyRow & { calleeId: string };
 
+/** Saved callee identity is finished when a lookup has already stored the PDI id, name, and address. */
+export function calleeIdentityIsComplete(record: CalleeIdentityRecord | undefined): boolean {
+  if (!record?.pdiId || !record.voterName) return false;
+  return Boolean(record.voterAddress) || record.addressChecked === true;
+}
+
+/** Fill blank PDI id, name, and address on a dialer row from a saved callee record. */
+export function applySavedCalleeIdentity<T extends CallSurveyRowForFill>(
+  row: T,
+  record: CalleeIdentityRecord | undefined
+): T {
+  const calleeId = row.calleeId?.trim() ?? "";
+  if (!calleeId || !record) return row;
+  const pdiId = row.pdiId?.trim() || normalizeRecontactPersonId(record.pdiId);
+  const voterName = row.voterName?.trim() || record.voterName || "";
+  const voterAddress = row.voterAddress?.trim() || record.voterAddress || "";
+  if (pdiId === (row.pdiId ?? "") && voterName === (row.voterName ?? "") && voterAddress === (row.voterAddress ?? "")) {
+    return row;
+  }
+  return { ...row, pdiId, voterName, voterAddress };
+}
+
 /**
- * Copy PDI ids from the local callee index onto dialer survey rows.
- * When `fetchMissing` is set, ids that are not in the index are looked up by callee id.
+ * Copy PDI id, name, and address from the local callee index onto dialer survey rows.
+ * When `fetchMissing` is set, a callee the index has not finished is looked up once.
  * Page loads pass false so a QC table never starts its own warehouse scan.
  */
 export async function stampFillIdentities(
@@ -137,22 +172,16 @@ export async function stampFillIdentities(
   fetchMissing: boolean
 ): Promise<CallSurveyRowForFill[]> {
   const index = readCalleeIdentityIndex().byCalleeId;
-  const stamped = rows.map((row) => {
-    const calleeId = row.calleeId?.trim() ?? "";
-    if (!calleeId || row.pdiId?.trim()) return row;
-    const record = index[calleeId];
-    const pdiId = normalizeRecontactPersonId(record?.pdiId ?? "");
-    if (!pdiId) return row;
-    return { ...row, pdiId, voterName: row.voterName?.trim() || record?.voterName || "" };
-  });
+  const stamped = rows.map((row) => applySavedCalleeIdentity(row, index[row.calleeId?.trim() ?? ""]));
   if (!fetchMissing) return stamped;
 
   const pending: SurveyRowWithCallee[] = [];
   const seen = new Set<string>();
   for (const row of stamped) {
     const calleeId = row.calleeId?.trim() ?? "";
-    if (!calleeId || row.pdiId?.trim() || seen.has(calleeId)) continue;
-    if (identityIsComplete(index[calleeId])) continue;
+    if (!calleeId || seen.has(calleeId) || !isLookupCalleeId(calleeId)) continue;
+    if (calleeIdentityIsComplete(index[calleeId])) continue;
+    if (row.pdiId?.trim() && row.voterName?.trim() && row.voterAddress?.trim()) continue;
     seen.add(calleeId);
     pending.push({
       callId: row.callId,
@@ -161,9 +190,9 @@ export async function stampFillIdentities(
       callDate: row.callDate,
       callAt: "",
       phonebankerName: row.phonebankerName,
-      pdiId: "",
-      voterName: "",
-      voterAddress: "",
+      pdiId: row.pdiId?.trim() ?? "",
+      voterName: row.voterName?.trim() ?? "",
+      voterAddress: row.voterAddress?.trim() ?? "",
       questionName: row.questionName,
       answerValue: row.answerValue,
       calleeId,
@@ -173,15 +202,15 @@ export async function stampFillIdentities(
   await fillMissingCalleeIdentities(pending, index);
   const found = new Map(pending.map((row) => [row.calleeId, row]));
   return stamped.map((row) => {
-    const calleeId = row.calleeId?.trim() ?? "";
-    const match = calleeId ? found.get(calleeId) : undefined;
-    if (!match?.pdiId || row.pdiId?.trim()) return row;
-    return { ...row, pdiId: match.pdiId, voterName: row.voterName?.trim() || match.voterName };
+    const match = found.get(row.calleeId?.trim() ?? "");
+    if (!match) return row;
+    return applySavedCalleeIdentity(row, {
+      pdiId: match.pdiId,
+      voterName: match.voterName,
+      voterAddress: match.voterAddress,
+      addressChecked: true,
+    });
   });
-}
-
-function identityIsComplete(record: CalleeIdentityRecord | undefined): boolean {
-  return Boolean(record?.pdiId && record.voterName);
 }
 
 /**
@@ -196,7 +225,7 @@ async function fillMissingCalleeIdentities(
   const seen = new Set<string>();
   for (const row of rows) {
     const id = row.calleeId;
-    if (!/^\d+$/.test(id) || seen.has(id) || identityIsComplete(byCalleeId[id])) continue;
+    if (!isLookupCalleeId(id) || seen.has(id) || calleeIdentityIsComplete(byCalleeId[id])) continue;
     seen.add(id);
     missing.push(id);
   }
@@ -210,7 +239,7 @@ async function fillMissingCalleeIdentities(
         CAST(id AS STRING) AS callee_id,
         COALESCE(data, '') AS callee_data
       FROM \`${P}.${D}.callees\`
-      WHERE id IN (${chunk.join(",")})
+      WHERE CAST(id AS STRING) IN (${chunk.map(calleeIdSqlLiteral).join(",")})
     `;
     const queried = await runQuery<Record<string, unknown>>(sql);
     for (const row of queried) {
@@ -228,19 +257,19 @@ async function fillMissingCalleeIdentities(
   mergeCalleeIdentityIndex(entries, null);
   for (const entry of entries) {
     const prev = byCalleeId[entry.calleeId];
-    if (identityIsComplete(prev)) continue;
     byCalleeId[entry.calleeId] = {
-      pdiId: entry.pdiId || prev?.pdiId || "",
-      voterName: entry.voterName || prev?.voterName || "",
-      voterAddress: entry.voterAddress || prev?.voterAddress || "",
+      pdiId: prev?.pdiId || entry.pdiId || "",
+      voterName: prev?.voterName || entry.voterName || "",
+      voterAddress: prev?.voterAddress || entry.voterAddress || "",
+      addressChecked: true,
     };
   }
   for (const row of rows) {
     const record = byCalleeId[row.calleeId];
-    if (!record || (row.pdiId && row.voterName)) continue;
-    row.pdiId = row.pdiId || normalizeRecontactPersonId(record.pdiId);
-    row.voterName = row.voterName || record.voterName;
-    row.voterAddress = row.voterAddress || record.voterAddress;
+    if (!record) continue;
+    if (!row.pdiId) row.pdiId = normalizeRecontactPersonId(record.pdiId);
+    if (!row.voterName) row.voterName = record.voterName;
+    if (!row.voterAddress) row.voterAddress = record.voterAddress;
   }
 }
 
@@ -475,9 +504,11 @@ export async function loadQcRecontactDetail(
   if (!loaded?.hasSnapshot) return null;
 
   const wantPdi = normalizeRecontactPersonId(pdiId);
-  const pair = loaded.pairs.find(
-    (row) => row.qc.callId === qcCallId && normalizeRecontactPersonId(row.qc.pdiId) === wantPdi
-  );
+  const pair = loaded.pairs.find((row) => {
+    if (row.qc.callId !== qcCallId) return false;
+    if (!wantPdi || wantPdi === "NONE") return true;
+    return normalizeRecontactPersonId(row.qc.pdiId) === wantPdi;
+  });
   if (!pair) return null;
 
   const primaryId = primaryTagIdFromQc(qcTagId);

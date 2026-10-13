@@ -8,6 +8,8 @@ export type CalleeIdentityRecord = {
   pdiId: string;
   voterName: string;
   voterAddress: string;
+  /** True after a callee JSON lookup, including when BigQuery had no address. */
+  addressChecked?: boolean;
 };
 
 type TextPdiIndexFile = {
@@ -118,11 +120,11 @@ export function mergeCalleeIdentityIndex(
   for (const entry of entries) {
     if (!entry.calleeId) continue;
     const prev = index.byCalleeId[entry.calleeId];
-    if (prev?.pdiId && prev.voterName) continue;
     index.byCalleeId[entry.calleeId] = {
-      pdiId: entry.pdiId || prev?.pdiId || "",
-      voterName: entry.voterName || prev?.voterName || "",
-      voterAddress: entry.voterAddress || prev?.voterAddress || "",
+      pdiId: prev?.pdiId || entry.pdiId || "",
+      voterName: prev?.voterName || entry.voterName || "",
+      voterAddress: prev?.voterAddress || entry.voterAddress || "",
+      addressChecked: true,
     };
   }
   if (queryStartedAt) index.queryStartedAt = queryStartedAt;

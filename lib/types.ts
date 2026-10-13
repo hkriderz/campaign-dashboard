@@ -166,6 +166,7 @@ export type CallSurveyRowForFill = {
   /** Stamped from the local callee index. Older files omit it. */
   pdiId?: string;
   voterName?: string;
+  voterAddress?: string;
 };
 
 export type PhoneBankDetail = {

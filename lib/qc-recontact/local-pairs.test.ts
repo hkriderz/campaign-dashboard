@@ -7,8 +7,10 @@ import { familyFromResultLabel } from "../unique-ids/classify";
 import { candidateTermsForTag } from "../strong-support-from-survey";
 import { getTagById } from "../campaign-tags";
 import { resolvePhonebankPriors } from "./pair";
-import { mergeUniqueIdPhoneEvents, rowsFromUniqueIdEvents, stampPdiFromUniqueIdEvents } from "./local-pairs";
+import { mergeSurveyRows, mergeUniqueIdPhoneEvents, rowsFromUniqueIdEvents, stampPdiFromUniqueIdEvents } from "./local-pairs";
+import { applySavedCalleeIdentity, calleeIdSqlLiteral, calleeIdentityIsComplete, isLookupCalleeId } from "../queries/qc-recontact";
 import type { PdiSurveyRow } from "../queries/qc-recontact";
+import type { CallSurveyRowForFill } from "../types";
 
 const profile = resolveSurveyScriptProfile(getTagById("qc-nithya")!);
 const terms = candidateTermsForTag(getTagById("nithya")!);
@@ -72,6 +74,63 @@ test("a Unique ID flag becomes a QC call matched to the earlier phonebank flag",
   assert.equal(pairs[0]?.matchStatus, "matched");
   assert.equal(familyFromResultLabel(pairs[0]?.priors[0]?.resultLabel ?? "", profile), "undecided");
   assert.equal(pairs[0]?.changeKind, "strengthened");
+});
+
+test("callee lookup accepts the UUID stored on a QC call", () => {
+  const id = "01a12de7-b2ce-7688-8447-894c140189ed";
+  assert.equal(isLookupCalleeId(id), true);
+  assert.equal(calleeIdSqlLiteral(id), `'${id}'`);
+  assert.equal(isLookupCalleeId("12345"), true);
+  assert.equal(calleeIdSqlLiteral("12345"), "12345");
+  assert.equal(isLookupCalleeId("'); drop table callees; --"), false);
+});
+
+test("a saved callee record fills a blank PDI id, name, and address", () => {
+  const row: CallSurveyRowForFill = {
+    callId: "call-1",
+    campaignId: "camp",
+    campaignName: "Nithya QC 010",
+    callDate: "2026-10-12",
+    phonebankerName: "Vikas B",
+    questionName: "Final Result",
+    answerValue: "Strong support",
+    surveyResultId: 1,
+    calleeId: "42",
+  };
+  const stamped = applySavedCalleeIdentity(row, {
+    pdiId: "ca 9",
+    voterName: "Ada Lovelace",
+    voterAddress: "1 Main St",
+  });
+  assert.equal(stamped.pdiId, "CA9");
+  assert.equal(stamped.voterName, "Ada Lovelace");
+  assert.equal(stamped.voterAddress, "1 Main St");
+  assert.equal(calleeIdentityIsComplete({ pdiId: "CA9", voterName: "Ada", voterAddress: "" }), false);
+  assert.equal(
+    calleeIdentityIsComplete({ pdiId: "CA9", voterName: "Ada", voterAddress: "", addressChecked: true }),
+    true
+  );
+});
+
+test("dialer rows supply the PDI id and address the survey file left blank", () => {
+  const survey = {
+    callId: "call-1",
+    campaignId: "camp",
+    campaignName: "Nithya QC 010",
+    callDate: "2026-10-12",
+    callAt: "",
+    phonebankerName: "Vikas B",
+    pdiId: "",
+    voterName: "",
+    voterAddress: "",
+    questionName: "Final Result",
+    answerValue: "Strong support",
+  };
+  const dialer = { ...survey, pdiId: "CA9", voterName: "Ada Lovelace", voterAddress: "1 Main St" };
+  const merged = mergeSurveyRows([survey], [dialer]);
+  assert.equal(merged[0]?.pdiId, "CA9");
+  assert.equal(merged[0]?.voterName, "Ada Lovelace");
+  assert.equal(merged[0]?.voterAddress, "1 Main St");
 });
 
 test("a saved Unique ID flag stays when the survey rows do not cover it", () => {
