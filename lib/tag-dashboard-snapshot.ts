@@ -1,18 +1,5 @@
 import { DateTime } from "luxon";
-import {
-  loadAllCampaignsSnapshot,
-  loadCallSurveyFillSnapshot,
-  loadDailyCallerSnapshot,
-  loadPdiSurveySnapshot,
-  loadPhoneBanksSnapshot,
-  loadQuestionStatsSnapshot,
-  loadRecontactPairsSnapshot,
-  loadTextCampaignsSnapshot,
-  loadTextContactsSnapshot,
-  loadTextTagStatsSnapshot,
-  loadUniqueIdPhoneSnapshot,
-  loadUniqueIdTextSnapshot,
-} from "./bq-snapshot-store";
+import { readSnapshotFreshness, type SnapshotFreshnessProbe } from "./bq-snapshot-store";
 
 const LA = "America/Los_Angeles";
 
@@ -48,30 +35,37 @@ function isSnapshotTimestampStale(dataUpdatedAt: string | null): boolean {
   );
 }
 
+const TAG_FRESHNESS_FILES = [
+  "daily-caller.json",
+  "phone-banks.json",
+  "question-stats.json",
+  "call-survey-fill.json",
+  "text-campaigns.json",
+  "text-tag-stats.json",
+  "text-contacts.json",
+  "recontact-pairs.json",
+  "unique-id-phone.json",
+  "unique-id-text.json",
+  "pdi-survey-rows.json",
+] as const;
+
+function newestSavedAt(probes: Array<SnapshotFreshnessProbe | null>): string | null {
+  const times = probes.map((probe) => probe?.savedAt).filter((stamp): stamp is string => Boolean(stamp));
+  if (!times.length) return null;
+  return times.reduce((a, b) => (a > b ? a : b));
+}
+
 /**
  * Latest `savedAt` across dashboard snapshot files for a tag, plus display labels.
+ * Reads the header of each file, not the row arrays.
  */
 export function getTagDashboardSnapshotMeta(tagId: string): SnapshotFreshnessMeta {
-  const files = [
-    loadDailyCallerSnapshot(tagId),
-    loadPhoneBanksSnapshot(tagId),
-    loadQuestionStatsSnapshot(tagId),
-    loadCallSurveyFillSnapshot(tagId),
-    loadTextCampaignsSnapshot(tagId),
-    loadTextTagStatsSnapshot(tagId),
-    loadTextContactsSnapshot(tagId),
-    loadRecontactPairsSnapshot(tagId),
-    loadUniqueIdPhoneSnapshot(tagId),
-    loadUniqueIdTextSnapshot(tagId),
-    loadPdiSurveySnapshot(tagId),
-  ];
-  const times = files.map((file) => file?.savedAt).filter(Boolean) as string[];
-  const dataUpdatedAt = times.length ? times.reduce((a, b) => (new Date(a) > new Date(b) ? a : b)) : null;
-  const daily = files[0];
+  const files = TAG_FRESHNESS_FILES.map((fileName) => readSnapshotFreshness(tagId, fileName));
+  const dataUpdatedAt = newestSavedAt(files);
   return {
     dataUpdatedAt,
     dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
-    hasDailyCaller: Boolean(daily && "rows" in daily && Array.isArray(daily.rows) && daily.rows.length > 0),
+    hasDailyCaller: Boolean(files[0]?.hasRows),
     isStale: isSnapshotTimestampStale(dataUpdatedAt),
   };
 }
@@ -106,12 +100,12 @@ export function getPhonebankingSnapshotsMeta(tagIds: string[]): SnapshotFreshnes
 
 /** Freshness of the unfiltered all-campaigns snapshot written by Rebuild all. */
 export function getAllCampaignsSnapshotMeta(): SnapshotFreshnessMeta {
-  const snap = loadAllCampaignsSnapshot();
+  const snap = readSnapshotFreshness("all-campaigns", "phone-banks.json");
   const dataUpdatedAt = snap?.savedAt ?? null;
   return {
     dataUpdatedAt,
     dataUpdatedAtLabel: formatSnapshotUpdatedLabel(dataUpdatedAt),
-    hasDailyCaller: Boolean(snap?.rows?.length),
+    hasDailyCaller: Boolean(snap?.hasRows),
     isStale: isSnapshotTimestampStale(dataUpdatedAt),
   };
 }
@@ -119,11 +113,10 @@ export function getAllCampaignsSnapshotMeta(): SnapshotFreshnessMeta {
 /** Same savedAt as the phone tag bar: the newest snapshot file for this tag. */
 export function getTextSnapshotMeta(tagId: string): SnapshotFreshnessMeta {
   const meta = getTagDashboardSnapshotMeta(tagId);
-  const campaigns = loadTextCampaignsSnapshot(tagId);
-  const stats = loadTextTagStatsSnapshot(tagId);
+  const campaigns = readSnapshotFreshness(tagId, "text-campaigns.json");
+  const stats = readSnapshotFreshness(tagId, "text-tag-stats.json");
   return {
     ...meta,
-    hasDailyCaller:
-      meta.hasDailyCaller || Boolean(campaigns?.rows?.length || stats?.rows?.length),
+    hasDailyCaller: meta.hasDailyCaller || Boolean(campaigns?.hasRows || stats?.hasRows),
   };
 }

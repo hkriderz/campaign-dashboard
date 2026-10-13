@@ -161,6 +161,11 @@ export type CallSurveyRowForFill = {
   questionName: string;
   answerValue: string;
   surveyResultId: number;
+  /** Present on rows saved after the dialer query started selecting it. */
+  calleeId?: string;
+  /** Stamped from the local callee index. Older files omit it. */
+  pdiId?: string;
+  voterName?: string;
 };
 
 export type PhoneBankDetail = {

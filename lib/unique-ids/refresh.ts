@@ -2,6 +2,7 @@ import "server-only";
 
 import { getCoreCampaignTags, getTagById } from "../campaign-tags";
 import { snapshotsDisabled } from "../bq-snapshot-store";
+import { syncQcAnalysisFromLocalFiles } from "../qc-recontact/local-pairs";
 import {
   rebuildPhoneUniqueIdSnapshot,
   rebuildTextUniqueIdSnapshot,
@@ -36,6 +37,7 @@ async function rebuildTagUniqueIdSnapshots(tagId: string): Promise<void> {
   if (errors.length) {
     throw new Error(errors.join(" "));
   }
+  await syncQcAnalysisFromLocalFiles(`qc-${tag.id}`);
 }
 
 export async function runUniqueIdSnapshotRefresh(args: {

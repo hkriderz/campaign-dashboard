@@ -8,12 +8,13 @@ import {
   resolveUniqueIdTag,
 } from "../queries/unique-id-contacts";
 import type { CampaignTag } from "../types";
-import { collectKnockEvents } from "./collect";
+import { collectKnockEvents, collectKnockEventsByTag } from "./collect";
 import {
   emptyChangeSummary,
   emptyChannelCounts,
   emptyFamilyCounts,
   emptyTally,
+  tallyUniqueIdCounts,
   tallyUniqueIds,
   uniqueIdRowsToCsv,
 } from "./tally";
@@ -53,7 +54,8 @@ function laterDay(a: string, b: string): string {
 
 async function loadTagEvents(
   tag: CampaignTag,
-  options: { buildIfMissing: boolean }
+  options: { buildIfMissing: boolean },
+  knocks?: readonly UniqueIdContactEvent[]
 ): Promise<{
   events: UniqueIdContactEvent[];
   phoneUpdatedAt: string;
@@ -66,9 +68,9 @@ async function loadTagEvents(
     loadPhoneUniqueIdEvents(tag, options),
     loadTextUniqueIdEvents(tag, options),
   ]);
-  const knocks = collectKnockEvents(loadKnockIndex().rows, { tag, profile });
+  const knockEvents = knocks ?? collectKnockEvents(loadKnockIndex().rows, { tag, profile });
   return {
-    events: [...phone.events, ...text.events, ...knocks],
+    events: [...phone.events, ...text.events, ...knockEvents],
     phoneUpdatedAt: phone.savedAt,
     textUpdatedAt: text.savedAt,
     phoneError: phone.error,
@@ -78,7 +80,7 @@ async function loadTagEvents(
 
 function summaryFromTally(
   tag: CampaignTag,
-  tally: ReturnType<typeof tallyUniqueIds>
+  tally: Pick<ReturnType<typeof tallyUniqueIds>, "combined" | "byChannel" | "changes">
 ): UniqueIdCandidateSummary {
   return {
     id: tag.id,
@@ -154,6 +156,7 @@ export async function buildUniqueIdOverviewPayload(
   }
 
   const tags = getCoreCampaignTags();
+  const knocksByTag = collectKnockEventsByTag(knockIndex.rows, tags);
   const summaries: UniqueIdCandidateSummary[] = [];
   let phoneUpdatedAt = "";
   let textUpdatedAt = "";
@@ -167,17 +170,12 @@ export async function buildUniqueIdOverviewPayload(
   let uniqueIdCount = 0;
 
   for (const tag of tags) {
-    const loaded = await loadTagEvents(tag, { buildIfMissing: false });
-    const tally = tallyUniqueIds(loaded.events, {
+    const loaded = await loadTagEvents(tag, { buildIfMissing: false }, knocksByTag.get(tag.id) ?? []);
+    const tally = tallyUniqueIdCounts(loaded.events, {
       startDate: query.startDate,
       endDate: query.endDate,
-      page: 1,
-      pageSize: 1,
     });
-    summaries.push({
-      ...summaryFromTally(tag, tally),
-      changes: { ...tally.changes, people: [] },
-    });
+    summaries.push(summaryFromTally(tag, tally));
     phoneUpdatedAt = laterStamp(phoneUpdatedAt, loaded.phoneUpdatedAt);
     textUpdatedAt = laterStamp(textUpdatedAt, loaded.textUpdatedAt);
     if (loaded.phoneError) {

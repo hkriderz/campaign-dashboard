@@ -243,6 +243,65 @@ export function tallyUniqueIds(
   };
 }
 
+type PersonExtremes = {
+  oldest: UniqueIdContactEvent;
+  newest: UniqueIdContactEvent;
+  newestByChannel: Map<UniqueIdChannel, UniqueIdContactEvent>;
+};
+
+function isNewerEvent(candidate: UniqueIdContactEvent, current: UniqueIdContactEvent): boolean {
+  return compareEventsNewestFirst(candidate, current) < 0;
+}
+
+/**
+ * Family counts, change count, and date bounds. Skips person rows and the change list.
+ * Combined and per-channel counts match `tallyUniqueIds` for the same events and dates.
+ */
+export function tallyUniqueIdCounts(
+  events: readonly UniqueIdContactEvent[],
+  options: Pick<UniqueIdTallyOptions, "startDate" | "endDate"> = {}
+): Pick<UniqueIdTally, "eventCount" | "uniqueIdCount" | "minDate" | "maxDate" | "combined" | "byChannel" | "changes"> {
+  const bounds = eventDateBounds(events);
+  const filtered = filterEventsByDate(events, options.startDate, options.endDate);
+  const combined = emptyFamilyCounts();
+  const byChannel = emptyChannelCounts();
+  const people = new Map<string, PersonExtremes>();
+  for (const event of filtered) {
+    const personId = event.personId.trim();
+    if (!personId || !/[A-Z0-9]/i.test(personId)) continue;
+    const current = people.get(personId);
+    if (!current) {
+      people.set(personId, {
+        oldest: event,
+        newest: event,
+        newestByChannel: new Map([[event.channel, event]]),
+      });
+      continue;
+    }
+    if (isNewerEvent(event, current.newest)) current.newest = event;
+    if (compareEventsOldestFirst(event, current.oldest) < 0) current.oldest = event;
+    const channelLatest = current.newestByChannel.get(event.channel);
+    if (!channelLatest || isNewerEvent(event, channelLatest)) current.newestByChannel.set(event.channel, event);
+  }
+  let held = 0;
+  let changed = 0;
+  for (const extremes of people.values()) {
+    if (extremes.oldest.family !== extremes.newest.family) changed += 1;
+    else held += 1;
+    addFamily(combined, extremes.newest.family);
+    for (const event of extremes.newestByChannel.values()) addFamily(byChannel[event.channel], event.family);
+  }
+  return {
+    eventCount: filtered.length,
+    uniqueIdCount: people.size,
+    minDate: bounds.minDate,
+    maxDate: bounds.maxDate,
+    combined,
+    byChannel,
+    changes: { held, changed, transitions: [], people: [] },
+  };
+}
+
 export function uniqueIdRowsToCsv(rows: readonly UniqueIdRow[]): string {
   const headers = [
     "PDI / PRIMARYID",

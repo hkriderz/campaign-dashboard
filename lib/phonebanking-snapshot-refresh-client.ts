@@ -1,3 +1,5 @@
+import { qcSyncWaitsForLaterTag } from "@/lib/qc-recontact/refresh-sync";
+
 export type TagRefreshProgress = {
   completed: number;
   total: number;
@@ -57,6 +59,7 @@ async function postTagSnapshotRefresh(
     historyStart?: string;
     queryStartedAt?: string;
     incremental?: boolean;
+    skipQcSync?: boolean;
     progressId?: string;
   }
 ): Promise<{
@@ -252,6 +255,7 @@ export async function refreshAllPhonebankingTags(
           phase: "refreshing",
         });
       });
+      const skipQcSync = qcSyncWaitsForLaterTag(tagId, order.slice(i + 1));
       const result = ready.has(tagId)
         ? await postTagSnapshotRefresh(secret, {
             refreshAll: true,
@@ -259,8 +263,9 @@ export async function refreshAllPhonebankingTags(
             batchId: scan.batchId ?? undefined,
             tagId,
             progressId,
+            skipQcSync,
           })
-        : await postTagSnapshotRefresh(secret, { tagId, fullRebuild: true, progressId });
+        : await postTagSnapshotRefresh(secret, { tagId, fullRebuild: true, progressId, skipQcSync });
       stop();
       if (result.ok) refreshed.push(tagId);
       else errors.push({ tagId, error: result.error ?? "Refresh failed" });

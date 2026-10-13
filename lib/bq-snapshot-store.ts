@@ -76,12 +76,75 @@ export type UniqueIdEventsSnapshotFile = {
   rows: UniqueIdContactEvent[];
 };
 
+const RENDERED_SNAPSHOT_FILES = new Set([
+  "daily-caller.json",
+  "question-stats.json",
+  "call-survey-fill.json",
+]);
+
+type ParsedSnapshotCacheEntry = { mtimeMs: number; size: number; data: unknown };
+const parsedSnapshotCache = new Map<string, ParsedSnapshotCacheEntry>();
+
 function readJson<T>(fp: string): T | null {
-  if (!fs.existsSync(fp)) return null;
+  let stat: fs.Stats;
   try {
-    return JSON.parse(fs.readFileSync(fp, "utf-8")) as T;
+    stat = fs.statSync(fp);
   } catch {
     return null;
+  }
+  const cacheable = RENDERED_SNAPSHOT_FILES.has(path.basename(fp));
+  if (cacheable) {
+    const hit = parsedSnapshotCache.get(fp);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
+      return hit.data as T;
+    }
+  }
+  try {
+    const data = JSON.parse(fs.readFileSync(fp, "utf-8")) as T;
+    if (cacheable) {
+      parsedSnapshotCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, data });
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+const SNAPSHOT_PREFIX_BYTES = 512;
+
+export type SnapshotFreshnessProbe = {
+  savedAt: string;
+  hasRows: boolean;
+};
+
+/** `savedAt` and whether `rows` or `pairs` is empty, from the header only. */
+export function snapshotFreshnessFromPrefix(head: string, tagId: string): SnapshotFreshnessProbe | null {
+  const version = head.match(/"version"\s*:\s*(\d+)/);
+  const tag = head.match(/"tagId"\s*:\s*"([^"]*)"/);
+  const saved = head.match(/"savedAt"\s*:\s*"([^"]*)"/);
+  if (!version || Number(version[1]) !== SNAPSHOT_VERSION) return null;
+  if (!tag || tag[1] !== tagId) return null;
+  if (!saved?.[1]) return null;
+  const arrayKey = head.match(/"(rows|pairs)"\s*:\s*\[/);
+  if (!arrayKey) return null;
+  const empty = new RegExp(`"${arrayKey[1]}"\\s*:\\s*\\[\\s*\\]`).test(head);
+  return { savedAt: saved[1], hasRows: !empty };
+}
+
+export function readSnapshotFreshness(tagId: string, fileName: string): SnapshotFreshnessProbe | null {
+  const fp = path.join(DATA_DIR, safeTag(tagId), fileName);
+  let fd: number;
+  try {
+    fd = fs.openSync(fp, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const buf = Buffer.alloc(SNAPSHOT_PREFIX_BYTES);
+    const n = fs.readSync(fd, buf, 0, SNAPSHOT_PREFIX_BYTES, 0);
+    return snapshotFreshnessFromPrefix(buf.toString("utf8", 0, n), tagId);
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

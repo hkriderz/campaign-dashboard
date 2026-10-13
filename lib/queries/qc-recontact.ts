@@ -127,6 +127,59 @@ const CALLEE_ID_CHUNK = 400;
 
 type SurveyRowWithCallee = PdiSurveyRow & { calleeId: string };
 
+/**
+ * Copy PDI ids from the local callee index onto dialer survey rows.
+ * When `fetchMissing` is set, ids that are not in the index are looked up by callee id.
+ * Page loads pass false so a QC table never starts its own warehouse scan.
+ */
+export async function stampFillIdentities(
+  rows: readonly CallSurveyRowForFill[],
+  fetchMissing: boolean
+): Promise<CallSurveyRowForFill[]> {
+  const index = readCalleeIdentityIndex().byCalleeId;
+  const stamped = rows.map((row) => {
+    const calleeId = row.calleeId?.trim() ?? "";
+    if (!calleeId || row.pdiId?.trim()) return row;
+    const record = index[calleeId];
+    const pdiId = normalizeRecontactPersonId(record?.pdiId ?? "");
+    if (!pdiId) return row;
+    return { ...row, pdiId, voterName: row.voterName?.trim() || record?.voterName || "" };
+  });
+  if (!fetchMissing) return stamped;
+
+  const pending: SurveyRowWithCallee[] = [];
+  const seen = new Set<string>();
+  for (const row of stamped) {
+    const calleeId = row.calleeId?.trim() ?? "";
+    if (!calleeId || row.pdiId?.trim() || seen.has(calleeId)) continue;
+    if (identityIsComplete(index[calleeId])) continue;
+    seen.add(calleeId);
+    pending.push({
+      callId: row.callId,
+      campaignId: row.campaignId,
+      campaignName: row.campaignName,
+      callDate: row.callDate,
+      callAt: "",
+      phonebankerName: row.phonebankerName,
+      pdiId: "",
+      voterName: "",
+      voterAddress: "",
+      questionName: row.questionName,
+      answerValue: row.answerValue,
+      calleeId,
+    });
+  }
+  if (!pending.length) return stamped;
+  await fillMissingCalleeIdentities(pending, index);
+  const found = new Map(pending.map((row) => [row.calleeId, row]));
+  return stamped.map((row) => {
+    const calleeId = row.calleeId?.trim() ?? "";
+    const match = calleeId ? found.get(calleeId) : undefined;
+    if (!match?.pdiId || row.pdiId?.trim()) return row;
+    return { ...row, pdiId: match.pdiId, voterName: row.voterName?.trim() || match.voterName };
+  });
+}
+
 function identityIsComplete(record: CalleeIdentityRecord | undefined): boolean {
   return Boolean(record?.pdiId && record.voterName);
 }
@@ -319,8 +372,10 @@ export function buildQcRecontactPairsFromSources(
     groupRowsIntoCallSummaries(primaryRows, profile, terms),
     profile
   );
-  const withCanvass = mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, loadKnockIndexRows(), profile);
-  return mergeTextPriorsIntoPairs(withCanvass, primaryTag, textContacts, profile);
+  const knocks = loadKnockIndexRows();
+  const withCanvass = mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, knocks, profile);
+  const withText = mergeTextPriorsIntoPairs(withCanvass, primaryTag, textContacts, profile);
+  return replaceCanvassPriorsFromKnockIndex(withText, primaryTag, knocks, profile);
 }
 
 export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promise<QcRecontactPair[]> {
@@ -364,6 +419,12 @@ export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcReco
   if (snapshotsDisabled()) {
     const pairs = await buildQcRecontactPairsFromBigQuery(tagId);
     return { pairs, hasSnapshot: true };
+  }
+
+  const { buildQcRecontactPairsFromLocalFiles } = await import("../qc-recontact/local-pairs");
+  const localPairs = await buildQcRecontactPairsFromLocalFiles(tagId);
+  if (localPairs) {
+    return { pairs: localPairs, hasSnapshot: true };
   }
 
   const snap = loadRecontactPairsSnapshot(tagId);

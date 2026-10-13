@@ -18,6 +18,7 @@ import {
   snapshotsDisabled,
 } from "../bq-snapshot-store";
 import { loadRefreshWatermark, saveRefreshWatermark } from "../bq-snapshot-store";
+import { qcSyncWaitsForLaterTag } from "../qc-recontact/refresh-sync";
 import { reportRefreshProgress } from "../refresh-progress";
 import { getTombstonedSliceKeys } from "../csv-slice-tombstones";
 import { buildPhoneBankSummariesFromDailyCallerStats } from "../phonebanking-candidate-stats";
@@ -1518,7 +1519,7 @@ export async function fetchTagCallSurveyRowsForFinalFill(
 
   const snap = loadCallSurveyFillSnapshot(tagId);
   if (snap) {
-    return snap.rows.sort(sortCallSurveyFill);
+    return snap.rows;
   }
   return loadFillSnapshotCold(tagId);
 }
@@ -1558,6 +1559,7 @@ async function fetchTagCallSurveyRowsForFinalFillUncached(
       campaigns.name AS campaign_name,
       CAST(DATETIME(callers.created_at, 'America/Los_Angeles') AS DATE) AS call_date,
       callers.name AS phonebanker_name,
+      CAST(calls.callee_id AS STRING) AS callee_id,
       COALESCE(survey.question_name, '') AS question_name,
       TRIM(COALESCE(survey.answer_value, '')) AS answer_value,
       survey.id AS survey_result_id
@@ -1583,6 +1585,7 @@ async function fetchTagCallSurveyRowsForFinalFillUncached(
     campaignName: toStr(r.campaign_name),
     callDate: toDateString(r.call_date) ?? "",
     phonebankerName: canonicalizePhonebankerName(toStr(r.phonebanker_name)),
+    calleeId: toStr(r.callee_id),
     questionName: toStr(r.question_name),
     answerValue: toStr(r.answer_value),
     surveyResultId: toNum(r.survey_result_id),
@@ -1602,6 +1605,8 @@ export type TagRefreshWindow = {
   historyStart: string;
   queryStartedAt: string;
   incremental: boolean;
+  /** Refresh all syncs QC pairs on the later of the primary tag and its qc- tag. */
+  skipQcSync?: boolean;
 };
 
 /** Text campaign files, then text contacts. Safe to call on its own after dialer rows are saved. */
@@ -1632,6 +1637,7 @@ export async function refreshTagContactsStep(tagId: string, window: TagRefreshWi
   await refreshTagPhoneContactFollowUp(tagId, window.incremental ? "incremental" : "full", {
     windowStart: window.incremental ? window.historyStart : undefined,
     queryStartedAt: window.queryStartedAt,
+    skipQcSync: window.skipQcSync === true,
   });
   saveRefreshWatermark(tagId, window.queryStartedAt);
   reportRefreshProgress("Done", 3);
@@ -1641,7 +1647,7 @@ async function persistTagDialerWindow(
   tagId: string,
   window: DialerWindow,
   mode: TagSnapshotRefreshMode,
-  options?: { followUps?: boolean }
+  options?: { followUps?: boolean; skipQcSync?: boolean }
 ): Promise<void> {
   const queryLabel = tagId.toLowerCase().replace(/[^a-z0-9_-]/g, "_").slice(0, 63) || "tag";
   await withBqQueryLabels(
@@ -1669,6 +1675,10 @@ async function persistTagDialerWindow(
       candidateTermsForTag(tag)
     );
   }
+  if (fill.length > 0) {
+    const { stampFillIdentities } = await import("./qc-recontact");
+    fill = await stampFillIdentities(fill, true);
+  }
   saveDailyCallerSnapshot(tagId, daily, { touchEvenIfUnchanged: true });
   saveCallSurveyFillSnapshot(tagId, fill, { touchEvenIfUnchanged: true });
   saveQuestionStatsSnapshot(tagId, questionStatsFromFillRows(fill), { touchEvenIfUnchanged: true });
@@ -1687,6 +1697,7 @@ async function persistTagDialerWindow(
     historyStart: window.historyStart,
     queryStartedAt: window.queryStartedAt,
     incremental: canIncremental,
+    skipQcSync: options?.skipQcSync === true,
   };
   await refreshTagTextStep(tagId, followUp);
   await refreshTagContactsStep(tagId, followUp);
@@ -1702,9 +1713,10 @@ async function persistTagDialerWindow(
  */
 export async function rebuildTagBqSnapshotsFromBigQuery(
   tagId: string,
-  options?: { mode?: TagSnapshotRefreshMode }
+  options?: { mode?: TagSnapshotRefreshMode; skipQcSync?: boolean }
 ): Promise<void> {
   const window = await beginTagSnapshotRefresh(tagId, options?.mode === "incremental" ? "incremental" : "full");
+  window.skipQcSync = options?.skipQcSync === true;
   if (snapshotsDisabled()) return;
   await refreshTagTextStep(tagId, window);
   await refreshTagContactsStep(tagId, window);
@@ -1802,7 +1814,7 @@ export async function startSharedDialerRefresh(tagIds: string[]): Promise<Shared
 export async function applySharedDialerRefresh(
   batchId: string,
   tagId: string,
-  options?: { followUps?: boolean }
+  options?: { followUps?: boolean; skipQcSync?: boolean }
 ): Promise<TagRefreshWindow> {
   const tag = getTagById(tagId);
   if (!tag) throw new Error(`Unknown tag: ${tagId}`);
@@ -1825,7 +1837,7 @@ export async function applySharedDialerRefresh(
       queryStartedAt: batch.queryStartedAt,
     },
     "incremental",
-    { followUps: options?.followUps !== false }
+    { followUps: options?.followUps !== false, skipQcSync: options?.skipQcSync === true }
   );
   return {
     historyStart: batch.historyStart,
@@ -1853,9 +1865,13 @@ export async function refreshTagsFromSharedDialerScan(tagIds: string[]): Promise
   const errors: { tagId: string; error: string }[] = [];
   if (!scan.batchId) return { needsFull: scan.needsFull, refreshed, errors };
   try {
-    for (const tagId of scan.ready) {
+    for (let i = 0; i < scan.ready.length; i++) {
+      const tagId = scan.ready[i]!;
+      const later = [...scan.ready.slice(i + 1), ...scan.needsFull];
       try {
-        await applySharedDialerRefresh(scan.batchId, tagId);
+        await applySharedDialerRefresh(scan.batchId, tagId, {
+          skipQcSync: qcSyncWaitsForLaterTag(tagId, later),
+        });
         refreshed.push(tagId);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

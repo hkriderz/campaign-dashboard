@@ -44,6 +44,7 @@ type RefreshPostBody = {
   historyStart?: string;
   queryStartedAt?: string;
   incremental?: boolean;
+  skipQcSync?: boolean;
   progressId?: string;
 };
 
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
         historyStart: typeof body?.historyStart === "string" ? body.historyStart : "",
         queryStartedAt: typeof body?.queryStartedAt === "string" ? body.queryStartedAt : "",
         incremental: body?.incremental === true,
+        skipQcSync: body?.skipQcSync === true,
       })
       )
     );

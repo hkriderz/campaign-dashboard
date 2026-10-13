@@ -2,7 +2,6 @@ import {
   loadPdiSurveySnapshot,
   loadTextContactsSnapshot,
   savePdiSurveySnapshot,
-  saveRecontactPairsSnapshot,
   saveTextContactsSnapshot,
   saveUniqueIdPhoneSnapshot,
   saveUniqueIdTextSnapshot,
@@ -17,11 +16,10 @@ import { candidateTermsForTag } from "../strong-support-from-survey";
 import type { CampaignTag } from "../types";
 import { collectPhoneEvents, collectTextEvents } from "../unique-ids/collect";
 import { mergeRowsByCallDate, mergeTextContactWindow, PHONE_HISTORY_START } from "../snapshot-merge";
+import { syncQcAnalysisFromLocalFiles } from "../qc-recontact/local-pairs";
 import {
-  buildQcRecontactPairsFromSources,
   fetchTagPdiSurveyRows,
   groupRowsIntoCallSummaries,
-  primaryTagIdFromQc,
   type PdiSurveyRow,
 } from "./qc-recontact";
 import { fetchTagTextContacts } from "./text-recontact";
@@ -128,11 +126,14 @@ export async function refreshTagTextFollowUp(
   saveTextEvents(tag, contacts);
 }
 
-/** Phone PDI snapshot, or the QC pair file. This is the slow step. */
+/**
+ * Phone PDI snapshot, then QC pairs from the files just saved.
+ * A QC tag does not scan survey history again; its dialer file is already on disk.
+ */
 export async function refreshTagPhoneContactFollowUp(
   tagId: string,
   mode: "full" | "incremental",
-  options?: { windowStart?: string; queryStartedAt?: string }
+  options?: { windowStart?: string; queryStartedAt?: string; skipQcSync?: boolean }
 ): Promise<void> {
   if (snapshotsDisabled()) return;
   const tag = getTagById(tagId);
@@ -140,30 +141,24 @@ export async function refreshTagPhoneContactFollowUp(
   const incremental = mode === "incremental";
   const windowStart = options?.windowStart;
   const queryStartedAt = options?.queryStartedAt ?? new Date().toISOString();
+  const syncQc = async () => {
+    if (options?.skipQcSync) return;
+    const qcTagId = isDerivedQcTagId(tagId) ? tagId : `qc-${tagId}`;
+    await syncQcAnalysisFromLocalFiles(qcTagId);
+  };
 
   if (isDerivedQcTagId(tagId)) {
-    const primary = getTagById(primaryTagIdFromQc(tagId));
-    if (!primary) return;
-    const [qcRows, primaryRows, textContacts] = await Promise.all([
-      loadMergedPdiRows(tag, false, incremental, windowStart, queryStartedAt),
-      loadMergedPdiRows(primary, true, incremental, windowStart, queryStartedAt),
-      loadMergedTextContacts(primary, incremental, windowStart, queryStartedAt),
-    ]);
-    const pairs = buildQcRecontactPairsFromSources(tagId, qcRows, primaryRows, textContacts);
-    saveRecontactPairsSnapshot(tagId, pairs, { touchEvenIfUnchanged: true });
-    const profile = resolveSurveyScriptProfile(tag);
-    const qcCalls = groupRowsIntoCallSummaries(qcRows, profile, candidateTermsForTag(primary));
-    saveUniqueIdPhoneSnapshot(
-      tagId,
-      collectPhoneEvents(qcCalls, profile, { includeQcCampaigns: true }),
-      { touchEvenIfUnchanged: true }
-    );
+    await syncQc();
     return;
   }
 
-  if (!tagHasPhone(tag)) return;
+  if (!tagHasPhone(tag)) {
+    await syncQc();
+    return;
+  }
   const rows = await loadMergedPdiRows(tag, true, incremental, windowStart, queryStartedAt);
   savePhoneEvents(tag, rows);
+  await syncQc();
 }
 
 /**
@@ -175,8 +170,6 @@ export async function refreshRecontactAndUniqueSnapshots(
   mode: "full" | "incremental",
   options?: { windowStart?: string; queryStartedAt?: string }
 ): Promise<void> {
-  await Promise.all([
-    refreshTagTextFollowUp(tagId, mode, options),
-    refreshTagPhoneContactFollowUp(tagId, mode, options),
-  ]);
+  await refreshTagTextFollowUp(tagId, mode, options);
+  await refreshTagPhoneContactFollowUp(tagId, mode, options);
 }

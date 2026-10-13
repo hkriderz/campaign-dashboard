@@ -5,7 +5,7 @@ import type { KnockIndexTallyRow } from "../canvassing/overview-tally";
 import type { QcTextContactSummary, RecontactCallSummary } from "../qc-recontact/types";
 import { familyFromKnockOutcome, familyFromResultLabel } from "./classify";
 import { collectKnockEvents, collectPhoneEvents, collectTextEvents } from "./collect";
-import { tallyUniqueIds, uniqueIdRowsToCsv } from "./tally";
+import { tallyUniqueIdCounts, tallyUniqueIds, uniqueIdRowsToCsv } from "./tally";
 import type { UniqueIdContactEvent } from "./types";
 
 const nithyaTag: CampaignTag = {
@@ -387,4 +387,23 @@ test("a saved event without voterName stays blank and keeps the same person", ()
   assert.equal(tally.matchedRows[0]?.personId, "CA1");
   assert.equal(tally.matchedRows[0]?.family, "strongSupport");
   assert.equal(tally.matchedRows[0]?.voterName, "");
+});
+
+test("counts-only tally matches family and change counts", () => {
+  const events = [
+    event({ personId: "CA1", family: "undecided", occurredOn: "2026-09-01", channel: "phone" }),
+    event({ personId: "CA1", family: "strongSupport", occurredOn: "2026-09-20", channel: "canvass" }),
+    event({ personId: "CA2", family: "strongOppose", occurredOn: "2026-09-05", channel: "text" }),
+  ];
+  const full = tallyUniqueIds(events, { startDate: "2026-09-01", endDate: "2026-09-30" });
+  const counts = tallyUniqueIdCounts(events, { startDate: "2026-09-01", endDate: "2026-09-30" });
+  assert.equal(counts.eventCount, full.eventCount);
+  assert.equal(counts.uniqueIdCount, full.uniqueIdCount);
+  assert.equal(counts.minDate, full.minDate);
+  assert.equal(counts.maxDate, full.maxDate);
+  assert.deepEqual(counts.combined, full.combined);
+  assert.deepEqual(counts.byChannel, full.byChannel);
+  assert.equal(counts.changes.changed, full.changes.changed);
+  assert.equal(counts.changes.held, full.changes.held);
+  assert.deepEqual(counts.changes.people, []);
 });

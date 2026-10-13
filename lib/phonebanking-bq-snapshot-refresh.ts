@@ -13,6 +13,7 @@ import {
   startSharedDialerRefresh,
   type TagSnapshotRefreshMode,
 } from "@/lib/queries/phonebanking";
+import { qcSyncWaitsForLaterTag } from "@/lib/qc-recontact/refresh-sync";
 import { isValidIsoDate } from "@/lib/validation/iso-date";
 
 export type SnapshotRefreshResult =
@@ -49,6 +50,8 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   historyStart?: string;
   queryStartedAt?: string;
   incremental?: boolean;
+  /** Skip this tag's QC pair rebuild because its counterpart is refreshed later in the batch. */
+  skipQcSync?: boolean;
 }): Promise<SnapshotRefreshResult> {
   if (snapshotsDisabled()) {
     return {
@@ -90,7 +93,10 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
       return { ok: false, status: 400, error: "Refresh apply needs a tagId and batchId." };
     }
     try {
-      const window = await applySharedDialerRefresh(batchId, tagId, { followUps: args.step !== "dialer" });
+      const window = await applySharedDialerRefresh(batchId, tagId, {
+        followUps: args.step !== "dialer",
+        skipQcSync: args.skipQcSync === true,
+      });
       if (args.step === "dialer") {
         return { ok: true, stage: "apply", tagId, ...window };
       }
@@ -160,9 +166,13 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
         refreshed.push(tagId);
       }
       errors.push(...shared.errors);
-      for (const tagId of shared.needsFull) {
+      for (let i = 0; i < shared.needsFull.length; i++) {
+        const tagId = shared.needsFull[i]!;
         try {
-          await rebuildTagBqSnapshotsFromBigQuery(tagId, { mode: "full" });
+          await rebuildTagBqSnapshotsFromBigQuery(tagId, {
+            mode: "full",
+            skipQcSync: qcSyncWaitsForLaterTag(tagId, shared.needsFull.slice(i + 1)),
+          });
           revalidatePhonebankingTagDataCaches(tagId);
           refreshed.push(tagId);
         } catch (err) {
@@ -171,12 +181,16 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
         }
       }
     } else {
-      for (const t of tags) {
+      for (let i = 0; i < tags.length; i++) {
+        const t = tags[i]!;
         if (clearFirst) {
           clearTagSnapshots(t.id);
         }
         try {
-          await rebuildTagBqSnapshotsFromBigQuery(t.id, { mode });
+          await rebuildTagBqSnapshotsFromBigQuery(t.id, {
+            mode,
+            skipQcSync: qcSyncWaitsForLaterTag(t.id, tags.slice(i + 1).map((tag) => tag.id)),
+          });
           revalidatePhonebankingTagDataCaches(t.id);
           refreshed.push(t.id);
         } catch (err) {
@@ -213,7 +227,7 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
   }
 
   try {
-    await rebuildTagBqSnapshotsFromBigQuery(tagId, { mode });
+    await rebuildTagBqSnapshotsFromBigQuery(tagId, { mode, skipQcSync: args.skipQcSync === true });
     revalidatePhonebankingTagDataCaches(tagId);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

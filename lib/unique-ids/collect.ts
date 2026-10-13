@@ -5,7 +5,7 @@ import {
   type KnockIndexTallyRow,
 } from "../canvassing/overview-tally";
 import { isFinalResultQuestionName } from "../daily-aggregate-survey-rollup";
-import { campaignNameLooksLikeQc } from "../campaign-tags";
+import { campaignNameLooksLikeQc, resolveSurveyScriptProfile } from "../campaign-tags";
 import { knockIsQcSupportChecker } from "../qc-recontact/canvass";
 import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 import type { QcTextContactSummary, RecontactCallSummary } from "../qc-recontact/types";
@@ -154,6 +154,44 @@ export function collectKnockEvents(
   for (const group of grouped.values()) {
     const event = pickKnockEvent(group, profile);
     if (event) out.push(event);
+  }
+  return out;
+}
+
+/**
+ * One pass over the knock index. Each candidate gets the same events
+ * `collectKnockEvents` would build for that tag alone.
+ */
+export function collectKnockEventsByTag(
+  rows: readonly KnockIndexTallyRow[],
+  tags: readonly CampaignTag[]
+): Map<string, UniqueIdContactEvent[]> {
+  const profiles = new Map(tags.map((tag) => [tag.id, resolveSurveyScriptProfile(tag)]));
+  const grouped = new Map<string, Map<string, ClassifiedKnock[]>>();
+  for (const tag of tags) grouped.set(tag.id, new Map());
+  for (const row of rows) {
+    for (const tag of tags) {
+      const profile = profiles.get(tag.id) ?? "faizahTraci";
+      if (!knockIsQcSupportChecker(row, tag, profile)) continue;
+      const classified = classifyKnockRow(row, profile);
+      if (!classified) continue;
+      const buckets = grouped.get(tag.id);
+      if (!buckets) continue;
+      const key = `${classified.personId}|${classified.day}`;
+      const list = buckets.get(key) ?? [];
+      list.push(classified);
+      buckets.set(key, list);
+    }
+  }
+  const out = new Map<string, UniqueIdContactEvent[]>();
+  for (const tag of tags) {
+    const profile = profiles.get(tag.id) ?? "faizahTraci";
+    const events: UniqueIdContactEvent[] = [];
+    for (const group of grouped.get(tag.id)?.values() ?? []) {
+      const event = pickKnockEvent(group, profile);
+      if (event) events.push(event);
+    }
+    out.set(tag.id, events);
   }
   return out;
 }
