@@ -4,6 +4,7 @@ import type { CampaignTag } from "../types";
 import { resolveSurveyScriptProfile } from "../campaign-tags";
 import { classifyRecontactChange } from "./change";
 import { callOccurredBefore, matchesPdiOrNameQuery, normalizeRecontactPersonId } from "./ids";
+import { displayLabelIsSupportBucket } from "../survey-answer-consolidation";
 import { extractCallSurveyLabels, fillMissingCanvassLabel, isWereYouContactedQuestion, surveyRowIsTalkingToCorrectPerson } from "./labels";
 import { recontactNamesMatch } from "./names";
 import {
@@ -333,6 +334,41 @@ test("extractCallSurveyLabels ignores donation and uses candidate ID when Final 
     "faizahTraci",
     ["faizah", "malik"]
   );
+  assert.equal(labels.finalResultLabel, "Support Faizah");
+  assert.equal(labels.pollingLabel, "Support Faizah");
+});
+
+test("extractCallSurveyLabels treats a candidate ask before Final Result as polling", () => {
+  const labels = extractCallSurveyLabels(
+    [
+      {
+        questionName: "1. Can we count on your vote for Nithya Raman for Mayor?",
+        answerValue: "A. Strong Support for Nithya",
+      },
+      { questionName: "Final Result", answerValue: "B. Undecided" },
+    ],
+    "faizahTraci",
+    ["nithya", "raman"]
+  );
+  assert.ok(displayLabelIsSupportBucket(labels.pollingLabel));
+  assert.notEqual(labels.pollingLabel, "");
+  assert.equal(labels.finalResultLabel, "Undecided");
+});
+
+test("extractCallSurveyLabels prefers a Polling question over a candidate ask", () => {
+  const labels = extractCallSurveyLabels(
+    [
+      { questionName: "01 Polling", answerValue: "Undecided" },
+      {
+        questionName: "Can we count on you to support Faizah Malik?",
+        answerValue: "Strong Support",
+      },
+      { questionName: "Final Result", answerValue: "Support Faizah" },
+    ],
+    "faizahTraci",
+    ["faizah", "malik"]
+  );
+  assert.equal(labels.pollingLabel, "Undecided");
   assert.equal(labels.finalResultLabel, "Support Faizah");
 });
 

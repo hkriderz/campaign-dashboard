@@ -67,6 +67,8 @@ export type RecontactPairsSnapshotFile = {
   tagId: string;
   savedAt: string;
   pairs: QcRecontactPair[];
+  /** mtime:size fingerprint of knock index + source dumps; when it matches, page load skips rebuild. */
+  sourceStamp?: string;
 };
 
 export type UniqueIdEventsSnapshotFile = {
@@ -82,8 +84,32 @@ const RENDERED_SNAPSHOT_FILES = new Set([
   "call-survey-fill.json",
 ]);
 
+/** Large dumps reused by QC pair rebuild; kept in a small LRU so Dokploy RAM stays bounded. */
+const LARGE_SNAPSHOT_FILES = new Set([
+  "recontact-pairs.json",
+  "unique-id-phone.json",
+  "unique-id-text.json",
+  "pdi-survey-rows.json",
+  "text-contacts.json",
+]);
+
+const LARGE_SNAPSHOT_CACHE_MAX = 8;
+
 type ParsedSnapshotCacheEntry = { mtimeMs: number; size: number; data: unknown };
 const parsedSnapshotCache = new Map<string, ParsedSnapshotCacheEntry>();
+const largeSnapshotCacheOrder: string[] = [];
+
+function rememberParsedSnapshot(fp: string, entry: ParsedSnapshotCacheEntry, large: boolean): void {
+  parsedSnapshotCache.set(fp, entry);
+  if (!large) return;
+  const prior = largeSnapshotCacheOrder.indexOf(fp);
+  if (prior >= 0) largeSnapshotCacheOrder.splice(prior, 1);
+  largeSnapshotCacheOrder.push(fp);
+  while (largeSnapshotCacheOrder.length > LARGE_SNAPSHOT_CACHE_MAX) {
+    const evict = largeSnapshotCacheOrder.shift();
+    if (evict) parsedSnapshotCache.delete(evict);
+  }
+}
 
 function readJson<T>(fp: string): T | null {
   let stat: fs.Stats;
@@ -92,17 +118,20 @@ function readJson<T>(fp: string): T | null {
   } catch {
     return null;
   }
-  const cacheable = RENDERED_SNAPSHOT_FILES.has(path.basename(fp));
-  if (cacheable) {
+  const base = path.basename(fp);
+  const rendered = RENDERED_SNAPSHOT_FILES.has(base);
+  const large = LARGE_SNAPSHOT_FILES.has(base);
+  if (rendered || large) {
     const hit = parsedSnapshotCache.get(fp);
     if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
+      if (large) rememberParsedSnapshot(fp, hit, true);
       return hit.data as T;
     }
   }
   try {
     const data = JSON.parse(fs.readFileSync(fp, "utf-8")) as T;
-    if (cacheable) {
-      parsedSnapshotCache.set(fp, { mtimeMs: stat.mtimeMs, size: stat.size, data });
+    if (rendered || large) {
+      rememberParsedSnapshot(fp, { mtimeMs: stat.mtimeMs, size: stat.size, data }, large);
     }
     return data;
   } catch {
@@ -176,6 +205,8 @@ export type SnapshotSaveOptions = {
    * row JSON is unchanged — otherwise the UI timestamp never moves and looks broken.
    */
   touchEvenIfUnchanged?: boolean;
+  /** Stored on recontact-pairs.json so page load can skip dump rebuild when sources are unchanged. */
+  sourceStamp?: string;
 };
 
 export function saveDailyCallerSnapshot(
@@ -288,6 +319,7 @@ export function saveRecontactPairsSnapshot(
     tagId,
     savedAt: new Date().toISOString(),
     pairs,
+    ...(options?.sourceStamp ? { sourceStamp: options.sourceStamp } : {}),
   };
   fs.writeFileSync(fp, JSON.stringify(payload), "utf-8");
 }

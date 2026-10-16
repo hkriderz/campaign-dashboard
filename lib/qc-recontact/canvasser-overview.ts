@@ -149,6 +149,30 @@ function rate(part: number, whole: number): number | null {
   return part / whole;
 }
 
+/** Null when the script never recorded a Were-you-contacted answer (show N/A, not 0%). */
+export function recallContactRateFromCounts(
+  contactedYes: number,
+  contactedUnsure: number,
+  contactedNo: number,
+  surveyed: number
+): number | null {
+  if (contactedYes + contactedUnsure + contactedNo === 0) return null;
+  return rate(contactedYes, surveyed);
+}
+
+/**
+ * Strong-support share on polling among originally-SS people.
+ * Null when none of those people have a classifiable polling answer (show N/A, not 0%).
+ */
+export function strongSupportOnPollingRateFromCounts(
+  polling: Pick<CanvasserFamilyBlock, "strongSupport" | "undecided" | "strongOppose">,
+  originallyStrongSupport: number
+): number | null {
+  if (!originallyStrongSupport) return null;
+  if (polling.strongSupport + polling.undecided + polling.strongOppose === 0) return null;
+  return rate(polling.strongSupport, originallyStrongSupport);
+}
+
 export function formatOverviewPercent(rateValue: number | null): string {
   if (rateValue === null || !Number.isFinite(rateValue)) return "N/A";
   return `${(rateValue * 100).toFixed(2)}%`;
@@ -221,8 +245,11 @@ export function summarizeCanvasserOverview(rows: readonly CanvasserOverviewRow[]
     canvasserName: "Total",
     surveyed,
     originallyStrongSupport,
-    recallContactRate: rate(contactedYes, surveyed),
-    strongSupportOnPollingRate: rate(originalStrongSupportPolling.strongSupport, originallyStrongSupport),
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+    strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+      originalStrongSupportPolling,
+      originallyStrongSupport
+    ),
     strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
     contactedYes,
     contactedUnsure,
@@ -395,9 +422,9 @@ export function tallyCanvasserOverview(
       canvasserName,
       surveyed,
       originallyStrongSupport,
-      recallContactRate: rate(contactedYes, surveyed),
-      strongSupportOnPollingRate: rate(
-        originalStrongSupportPolling.strongSupport,
+      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+      strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+        originalStrongSupportPolling,
         originallyStrongSupport
       ),
       strongSupportAfterPersuasionRate: rate(

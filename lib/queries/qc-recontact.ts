@@ -424,7 +424,9 @@ export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promis
 export async function rebuildQcRecontactSnapshot(qcTagId: string): Promise<QcRecontactPair[]> {
   requireDashboardDataAccess();
   const pairs = await buildQcRecontactPairsFromBigQuery(qcTagId);
-  saveRecontactPairsSnapshot(qcTagId, pairs, { touchEvenIfUnchanged: true });
+  const { qcPairSourceStamp } = await import("../qc-recontact/local-pairs");
+  const stamp = qcPairSourceStamp(qcTagId, primaryTagIdFromQc(qcTagId));
+  saveRecontactPairsSnapshot(qcTagId, pairs, { touchEvenIfUnchanged: true, sourceStamp: stamp });
   return pairs;
 }
 

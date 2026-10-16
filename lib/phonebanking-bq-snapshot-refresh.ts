@@ -210,6 +210,9 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
       };
     }
 
+    const { warmQcPairCachesFromDisk } = await import("./qc-recontact/local-pairs");
+    warmQcPairCachesFromDisk();
+
     return { ok: true, refreshAll: true, refreshed, errors };
   }
 

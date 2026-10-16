@@ -245,6 +245,29 @@ test("Dilan Davila summary matches the Detailed Canvasser View sheet", () => {
   assert.match(csv, /Maria,Botello/);
 });
 
+test("missing contacted and polling answers show N/A instead of 0%", () => {
+  const voter = DILAN[0];
+  assert.ok(voter);
+  const pair = pairFrom(voter);
+  pair.qc = {
+    ...pair.qc,
+    contactedQuestion: "",
+    contactedAnswer: "",
+    pollingLabel: "",
+  };
+  const tally = tallyCanvasserOverview([pair]);
+  const row = tally.canvassers[0];
+  assert.ok(row);
+  assert.equal(row.surveyed, 1);
+  assert.equal(row.originallyStrongSupport, 1);
+  assert.equal(row.recallContactRate, null);
+  assert.equal(formatOverviewPercent(row.recallContactRate), "N/A");
+  assert.equal(row.strongSupportOnPollingRate, null);
+  assert.equal(formatOverviewPercent(row.strongSupportOnPollingRate), "N/A");
+  assert.equal(overviewPercentBand(row.recallContactRate), null);
+  assert.equal(overviewPercentBand(row.strongSupportOnPollingRate), null);
+});
+
 test("zero originally strong support leaves the strong-support rates blank", () => {
   const voter = DILAN[4];
   assert.ok(voter);

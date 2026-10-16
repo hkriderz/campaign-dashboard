@@ -3,13 +3,19 @@ import path from "path";
 import {
   loadCallSurveyFillSnapshot,
   loadPdiSurveySnapshot,
+  loadRecontactPairsSnapshot,
   loadTextContactsSnapshot,
   loadUniqueIdPhoneSnapshot,
   loadUniqueIdTextSnapshot,
   saveRecontactPairsSnapshot,
   saveUniqueIdPhoneSnapshot,
 } from "../bq-snapshot-store";
-import { getTagById, isDerivedQcTagId, resolveSurveyScriptProfile } from "../campaign-tags";
+import {
+  getPhonebankingTags,
+  getTagById,
+  isDerivedQcTagId,
+  resolveSurveyScriptProfile,
+} from "../campaign-tags";
 import { campaignNameLooksLikeQc } from "../qc-campaign-name";
 import {
   buildQcRecontactPairsFromSources,
@@ -49,13 +55,36 @@ function fileStamp(filePath: string): string {
   }
 }
 
-function sourceStamp(qcTagId: string, primaryId: string): string {
-  const names = ["pdi-survey-rows.json", "call-survey-fill.json", "unique-id-phone.json", "unique-id-text.json", "text-contacts.json"];
+/** Knock index + primary/qc dump mtimes. Exported for tests. */
+export function qcPairSourceStamp(qcTagId: string, primaryId: string): string {
+  const names = [
+    "pdi-survey-rows.json",
+    "call-survey-fill.json",
+    "unique-id-phone.json",
+    "unique-id-text.json",
+    "text-contacts.json",
+  ];
   const parts = [fileStamp(KNOCK_INDEX)];
   for (const tagId of [qcTagId, primaryId]) {
     for (const name of names) parts.push(fileStamp(snapshotPath(tagId, name)));
   }
   return parts.join("|");
+}
+
+function sourceStamp(qcTagId: string, primaryId: string): string {
+  return qcPairSourceStamp(qcTagId, primaryId);
+}
+
+function seedLocalPairCache(qcTagId: string, stamp: string, pairs: QcRecontactPair[]): void {
+  localPairCache.set(qcTagId, { stamp, pairs });
+}
+
+/** True when the on-disk pair file was built from the same source dump mtimes. */
+export function recontactPairsStampIsCurrent(
+  snap: { sourceStamp?: string } | null | undefined,
+  stamp: string
+): boolean {
+  return Boolean(snap?.sourceStamp && snap.sourceStamp === stamp);
 }
 
 function fillNeedsSavedIdentity(rows: readonly CallSurveyRowForFill[]): boolean {
@@ -340,9 +369,21 @@ export async function buildQcRecontactPairsFromLocalFiles(qcTagId: string): Prom
   const stamp = sourceStamp(qcTagId, primaryId);
   const cached = localPairCache.get(qcTagId);
   if (cached && cached.stamp === stamp) return cached.pairs;
+
+  const snap = loadRecontactPairsSnapshot(qcTagId);
+  if (recontactPairsStampIsCurrent(snap, stamp) && snap) {
+    seedLocalPairCache(qcTagId, stamp, snap.pairs);
+    return snap.pairs;
+  }
+
   const loaded = await loadLocalQcSources(qcTagId);
   if (!loaded) return null;
-  localPairCache.set(qcTagId, { stamp, pairs: loaded.pairs });
+  const nextStamp = sourceStamp(qcTagId, primaryId);
+  saveRecontactPairsSnapshot(qcTagId, loaded.pairs, {
+    touchEvenIfUnchanged: true,
+    sourceStamp: nextStamp,
+  });
+  seedLocalPairCache(qcTagId, nextStamp, loaded.pairs);
   return loaded.pairs;
 }
 
@@ -360,6 +401,40 @@ export async function syncQcAnalysisFromLocalFiles(qcTagId: string): Promise<voi
   saveUniqueIdPhoneSnapshot(qcTagId, mergeUniqueIdPhoneEvents(fresh, existing), {
     touchEvenIfUnchanged: true,
   });
-  saveRecontactPairsSnapshot(qcTagId, loaded.pairs, { touchEvenIfUnchanged: true });
-  localPairCache.delete(qcTagId);
+  const primaryId = primaryTagIdFromQc(qcTagId);
+  const stamp = sourceStamp(qcTagId, primaryId);
+  saveRecontactPairsSnapshot(qcTagId, loaded.pairs, {
+    touchEvenIfUnchanged: true,
+    sourceStamp: stamp,
+  });
+  seedLocalPairCache(qcTagId, stamp, loaded.pairs);
+}
+
+/**
+ * Read stamped recontact-pairs.json into memory for every QC phone tag.
+ * No dump rebuild. Used after Refresh all so the next page open is warm.
+ */
+export function warmQcPairCachesFromDisk(): void {
+  for (const tag of getPhonebankingTags()) {
+    if (!isDerivedQcTagId(tag.id)) continue;
+    const primaryId = primaryTagIdFromQc(tag.id);
+    const stamp = sourceStamp(tag.id, primaryId);
+    const snap = loadRecontactPairsSnapshot(tag.id);
+    if (!snap?.sourceStamp || snap.sourceStamp !== stamp) continue;
+    seedLocalPairCache(tag.id, stamp, snap.pairs);
+  }
+}
+
+/** Test helper: clear in-memory pair cache. */
+export function clearLocalPairCacheForTests(): void {
+  localPairCache.clear();
+}
+
+/** Test helper: inspect in-memory pair cache. */
+export function localPairCachePeekForTests(
+  qcTagId: string
+): { stamp: string; pairCount: number } | null {
+  const hit = localPairCache.get(qcTagId);
+  if (!hit) return null;
+  return { stamp: hit.stamp, pairCount: hit.pairs.length };
 }

@@ -328,19 +328,26 @@ export default async function TagPage({ params, searchParams }: Props) {
 
   const snapshotMode = !snapshotsDisabled();
 
-  // Load BigQuery data
+  // Load BigQuery data. Overview / CSV tabs use daily-caller + question-stats only;
+  // call-survey fill (~28MB) is loaded for aggregate and phonebankers tabs.
+  const needsCallSurveyFill = tab === "aggregate" || tab === "phonebankers";
   let phoneBanks: PhoneBankSummary[] = [];
   let bqDailyCaller: TagDailyCallerStat[] = [];
   let bqQuestionStats: PhonebankerQuestionResponseStat[] = [];
   let bqCallSurveyForFill: CallSurveyRowForFill[] = [];
   let bqError: string | null = null;
   try {
-    [phoneBanks, bqDailyCaller, bqQuestionStats, bqCallSurveyForFill] = await Promise.all([
+    const core = await Promise.all([
       fetchPhoneBanksByTag(tagId),
       fetchTagDailyCallerStats(tagId),
       fetchTagPhonebankerQuestionStats(tagId),
-      fetchTagCallSurveyRowsForFinalFill(tagId),
     ]);
+    phoneBanks = core[0];
+    bqDailyCaller = core[1];
+    bqQuestionStats = core[2];
+    if (needsCallSurveyFill) {
+      bqCallSurveyForFill = await fetchTagCallSurveyRowsForFinalFill(tagId);
+    }
     phoneBanks = phoneBanks.filter((p) =>
       campaignBelongsInDailyAggregate(p.campaignName, pageMembership)
     );

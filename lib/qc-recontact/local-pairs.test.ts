@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
+import { saveRecontactPairsSnapshot } from "../bq-snapshot-store";
 import { resolveSurveyScriptProfile } from "../campaign-tags";
 import { groupRowsIntoCallSummaries } from "../queries/qc-recontact";
 import type { UniqueIdContactEvent } from "../unique-ids/types";
@@ -7,10 +10,23 @@ import { familyFromResultLabel } from "../unique-ids/classify";
 import { candidateTermsForTag } from "../strong-support-from-survey";
 import { getTagById } from "../campaign-tags";
 import { resolvePhonebankPriors } from "./pair";
-import { mergeSurveyRows, mergeUniqueIdPhoneEvents, rowsFromUniqueIdEvents, stampPdiFromUniqueIdEvents } from "./local-pairs";
+import {
+  buildQcRecontactPairsFromLocalFiles,
+  clearLocalPairCacheForTests,
+  localPairCachePeekForTests,
+  mergeSurveyRows,
+  mergeUniqueIdPhoneEvents,
+  qcPairSourceStamp,
+  recontactPairsStampIsCurrent,
+  rowsFromUniqueIdEvents,
+  stampPdiFromUniqueIdEvents,
+  syncQcAnalysisFromLocalFiles,
+  warmQcPairCachesFromDisk,
+} from "./local-pairs";
 import { applySavedCalleeIdentity, calleeIdSqlLiteral, calleeIdentityIsComplete, isLookupCalleeId } from "../queries/qc-recontact";
 import type { PdiSurveyRow } from "../queries/qc-recontact";
 import type { CallSurveyRowForFill } from "../types";
+import type { QcRecontactPair } from "./types";
 
 const profile = resolveSurveyScriptProfile(getTagById("qc-nithya")!);
 const terms = candidateTermsForTag(getTagById("nithya")!);
@@ -141,4 +157,125 @@ test("a saved Unique ID flag stays when the survey rows do not cover it", () => 
   assert.equal(merged.length, 2);
   assert.equal(merged.find((event) => event.personId === "CA1")?.family, "strongSupport");
   assert.equal(merged.find((event) => event.personId === "CA9")?.campaignName, "Nithya QC 009");
+});
+
+test("recontactPairsStampIsCurrent requires an exact stored stamp", () => {
+  assert.equal(recontactPairsStampIsCurrent({ sourceStamp: "a|b" }, "a|b"), true);
+  assert.equal(recontactPairsStampIsCurrent({ sourceStamp: "a|b" }, "a|c"), false);
+  assert.equal(recontactPairsStampIsCurrent({}, "a|b"), false);
+  assert.equal(recontactPairsStampIsCurrent(null, "a|b"), false);
+  assert.equal(recontactPairsStampIsCurrent(undefined, "a|b"), false);
+});
+
+function sentinelPair(pairId: string): QcRecontactPair {
+  return {
+    pairId,
+    qc: {
+      callId: pairId,
+      campaignId: "camp",
+      campaignName: "Nithya QC stamp-test",
+      callDate: "2026-10-11",
+      callAt: "",
+      phonebankerName: "Ava",
+      pdiId: "CA1",
+      voterName: "Pat",
+      voterAddress: "1 Main",
+      finalResultLabel: "Strong support",
+      pollingLabel: "",
+      canvassLabel: "",
+      contactedQuestion: "",
+      contactedAnswer: "",
+    },
+    priors: [],
+    matchStatus: "unmatched",
+    changeKind: "unknown",
+  };
+}
+
+test("matching sourceStamp serves pairs, seeds memory, and warm restores after clear", async () => {
+  const qcTagId = "qc-nithya";
+  const primaryId = "nithya";
+  const fp = path.join(process.cwd(), "data", "bq-snapshots", qcTagId, "recontact-pairs.json");
+  if (!fs.existsSync(fp)) return;
+
+  const original = fs.readFileSync(fp, "utf8");
+  try {
+    clearLocalPairCacheForTests();
+    const stamp = qcPairSourceStamp(qcTagId, primaryId);
+    const sentinel = [sentinelPair("stamp-serve-test")];
+    saveRecontactPairsSnapshot(qcTagId, sentinel, {
+      touchEvenIfUnchanged: true,
+      sourceStamp: stamp,
+    });
+    clearLocalPairCacheForTests();
+
+    const pairs = await buildQcRecontactPairsFromLocalFiles(qcTagId);
+    assert.equal(pairs?.length, 1);
+    assert.equal(pairs?.[0]?.pairId, "stamp-serve-test");
+    assert.equal(localPairCachePeekForTests(qcTagId)?.stamp, stamp);
+    assert.equal(localPairCachePeekForTests(qcTagId)?.pairCount, 1);
+
+    const again = await buildQcRecontactPairsFromLocalFiles(qcTagId);
+    assert.equal(again?.[0]?.pairId, "stamp-serve-test");
+
+    clearLocalPairCacheForTests();
+    assert.equal(localPairCachePeekForTests(qcTagId), null);
+    warmQcPairCachesFromDisk();
+    assert.equal(localPairCachePeekForTests(qcTagId)?.stamp, stamp);
+    assert.equal(localPairCachePeekForTests(qcTagId)?.pairCount, 1);
+  } finally {
+    fs.writeFileSync(fp, original, "utf8");
+    clearLocalPairCacheForTests();
+  }
+});
+
+test("stale sourceStamp is not served from disk and warm skips it", async () => {
+  const qcTagId = "qc-nithya";
+  const primaryId = "nithya";
+  const fp = path.join(process.cwd(), "data", "bq-snapshots", qcTagId, "recontact-pairs.json");
+  if (!fs.existsSync(fp)) return;
+
+  const original = fs.readFileSync(fp, "utf8");
+  try {
+    clearLocalPairCacheForTests();
+    saveRecontactPairsSnapshot(qcTagId, [sentinelPair("stale-stamp-test")], {
+      touchEvenIfUnchanged: true,
+      sourceStamp: "stale-not-current",
+    });
+    clearLocalPairCacheForTests();
+
+    assert.equal(
+      recontactPairsStampIsCurrent({ sourceStamp: "stale-not-current" }, qcPairSourceStamp(qcTagId, primaryId)),
+      false
+    );
+
+    warmQcPairCachesFromDisk();
+    assert.equal(localPairCachePeekForTests(qcTagId), null);
+
+    // Rebuild from dumps (or null if dumps are missing). Must not return the stale sentinel.
+    const pairs = await buildQcRecontactPairsFromLocalFiles(qcTagId);
+    if (pairs) {
+      assert.notEqual(pairs[0]?.pairId, "stale-stamp-test");
+      const peek = localPairCachePeekForTests(qcTagId);
+      assert.ok(peek);
+      assert.equal(peek.stamp, qcPairSourceStamp(qcTagId, primaryId));
+    }
+  } finally {
+    fs.writeFileSync(fp, original, "utf8");
+    clearLocalPairCacheForTests();
+  }
+});
+
+test("syncQcAnalysisFromLocalFiles leaves the pair cache warm", async () => {
+  const qcTagId = "qc-nithya";
+  const fillPath = path.join(process.cwd(), "data", "bq-snapshots", qcTagId, "call-survey-fill.json");
+  if (!fs.existsSync(fillPath)) return;
+
+  clearLocalPairCacheForTests();
+  await syncQcAnalysisFromLocalFiles(qcTagId);
+  const peek = localPairCachePeekForTests(qcTagId);
+  assert.ok(peek);
+  assert.equal(peek.stamp, qcPairSourceStamp(qcTagId, "nithya"));
+  assert.ok(peek.pairCount > 0);
+  clearLocalPairCacheForTests();
 });

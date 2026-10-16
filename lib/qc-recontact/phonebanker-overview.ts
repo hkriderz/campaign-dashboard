@@ -19,7 +19,9 @@ import type { PriorContactSummary, QcRecontactPair } from "./types";
 import {
   classifyContactedAnswer,
   formatOverviewPercent,
+  recallContactRateFromCounts,
   splitVoterName,
+  strongSupportOnPollingRateFromCounts,
   type CanvasserFamilyBlock,
   type ContactedBucket,
 } from "./canvasser-overview";
@@ -182,8 +184,11 @@ export function summarizePhonebankerOverview(
     phonebankerName: "Total",
     surveyed,
     originallyStrongSupport,
-    recallContactRate: rate(contactedYes, surveyed),
-    strongSupportOnPollingRate: rate(originalStrongSupportPolling.strongSupport, originallyStrongSupport),
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+    strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+      originalStrongSupportPolling,
+      originallyStrongSupport
+    ),
     strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
     contactedYes,
     contactedUnsure,
@@ -317,8 +322,11 @@ export function tallyPhonebankerOverview(
       phonebankerName: sorted[0]?.phonebankerName ?? "",
       surveyed,
       originallyStrongSupport,
-      recallContactRate: rate(contactedYes, surveyed),
-      strongSupportOnPollingRate: rate(originalStrongSupportPolling.strongSupport, originallyStrongSupport),
+      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+      strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+        originalStrongSupportPolling,
+        originallyStrongSupport
+      ),
       strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
       contactedYes,
       contactedUnsure,

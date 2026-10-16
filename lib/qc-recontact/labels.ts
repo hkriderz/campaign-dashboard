@@ -1,8 +1,12 @@
 import {
   effectiveFinalResultAnswerLabelForRollup,
+  isFinalResultQuestionName,
   isPollingQuestionName,
 } from "../daily-aggregate-survey-rollup";
-import { qcSupportFillFromRows } from "../strong-support-from-survey";
+import {
+  isCandidateIdSupportQuestion,
+  qcSupportFillFromRows,
+} from "../strong-support-from-survey";
 import {
   classifySurveyAnswerDisplayLabel,
   displayLabelIsSupportBucket,
@@ -137,6 +141,7 @@ export function extractCallSurveyLabels(
 } {
   let finalResultLabel = "";
   let pollingLabel = "";
+  let candidatePollingLabel = "";
   let canvassLabel = "";
   let contactedQuestion = "";
   let contactedAnswer = "";
@@ -148,14 +153,23 @@ export function extractCallSurveyLabels(
     if (fr) {
       finalResultLabel = classifySurveyAnswerDisplayLabel(fr, profile);
     }
+    const av = usableSurveyAnswer(row.answerValue);
     if (isPollingQuestionName(row.questionName, profile)) {
-      const av = usableSurveyAnswer(row.answerValue);
       if (av) {
         pollingLabel = classifySurveyAnswerDisplayLabel(av, profile);
       }
+    } else if (
+      av &&
+      terms.length > 0 &&
+      !isFinalResultQuestionName(row.questionName) &&
+      isCandidateIdSupportQuestion(row.questionName, terms, profile, [av])
+    ) {
+      const classified = classifySurveyAnswerDisplayLabel(av, profile);
+      if (displayLabelIsSupportBucket(classified)) {
+        candidatePollingLabel = classified;
+      }
     }
     if (isWereYouContactedQuestion(row.questionName)) {
-      const av = usableSurveyAnswer(row.answerValue);
       if (av) {
         contactedQuestion = row.questionName.trim();
         contactedAnswer = av;
@@ -171,6 +185,10 @@ export function extractCallSurveyLabels(
     if (disposition) {
       canvassLabel = disposition;
     }
+  }
+
+  if (!displayLabelIsSupportBucket(pollingLabel) && displayLabelIsSupportBucket(candidatePollingLabel)) {
+    pollingLabel = candidatePollingLabel;
   }
 
   if (!displayLabelIsSupportBucket(finalResultLabel)) {
