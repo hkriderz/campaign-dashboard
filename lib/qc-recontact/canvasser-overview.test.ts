@@ -268,6 +268,28 @@ test("missing contacted and polling answers show N/A instead of 0%", () => {
   assert.equal(overviewPercentBand(row.strongSupportOnPollingRate), null);
 });
 
+test("calls with no contacted answer do not dilute recall contact %", () => {
+  const withAnswer = DILAN[0];
+  const withoutAnswer = DILAN[1];
+  assert.ok(withAnswer);
+  assert.ok(withoutAnswer);
+  const answered = pairFrom(withAnswer);
+  const unanswered = pairFrom(withoutAnswer);
+  unanswered.qc = {
+    ...unanswered.qc,
+    contactedQuestion: "",
+    contactedAnswer: "",
+  };
+  const tally = tallyCanvasserOverview([answered, unanswered]);
+  const row = tally.canvassers[0];
+  assert.ok(row);
+  assert.equal(row.surveyed, 2);
+  assert.equal(row.contactedYes, 1);
+  assert.equal(row.contactedUnsure + row.contactedNo, 0);
+  assert.equal(row.recallContactRate, 1);
+  assert.equal(formatOverviewPercent(row.recallContactRate), "100.00%");
+});
+
 test("zero originally strong support leaves the strong-support rates blank", () => {
   const voter = DILAN[4];
   assert.ok(voter);
@@ -321,7 +343,10 @@ function overviewRow(
     canvasserName: partial.canvasserName,
     surveyed: partial.surveyed,
     originallyStrongSupport: partial.originallyStrongSupport,
-    recallContactRate: partial.surveyed ? partial.contactedYes / partial.surveyed : null,
+    recallContactRate: (() => {
+      const answered = partial.contactedYes + (partial.surveyed - partial.contactedYes);
+      return answered ? partial.contactedYes / answered : null;
+    })(),
     strongSupportOnPollingRate: partial.originallyStrongSupport
       ? partial.pollingStrongSupport / partial.originallyStrongSupport
       : null,

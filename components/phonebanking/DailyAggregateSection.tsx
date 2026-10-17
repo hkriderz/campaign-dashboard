@@ -38,6 +38,8 @@ import {
 import OutcomeTallyStrip from "@/components/common/OutcomeTallyStrip";
 import SynthesizedCountLabel from "./SynthesizedCountLabel";
 import SynthesizedCallsModal, { type SynthesizedCallsScope } from "./SynthesizedCallsModal";
+import type { AggregateDatasetMode } from "@/lib/daily-aggregate-dataset";
+import { laCalendarYmd } from "@/lib/la-dates";
 
 function secToTime(totalSec: number): string {
   const h = Math.floor(totalSec / 3600);
@@ -132,6 +134,9 @@ type Props = {
   activeDate: string;
   activeEndDate: string;
   dateLabel: string;
+  /** Bold card title, e.g. "Nithya Raman | Today (10/17/26)". */
+  datasetTitle: string;
+  datasetMode: AggregateDatasetMode;
   slices: PbDashboardSlice[];
   uniquePhonebankers: number;
   showPollingAggregate?: boolean;
@@ -146,6 +151,11 @@ type Props = {
   outcomeTally?: FinalResultFamilyCounts;
   /** When true, the parent owns date filtering — do not render an inner date picker. */
   hideDatePicker?: boolean;
+  /**
+   * Parent-owned Today / Total navigation (All Campaigns). When set, the card toggle
+   * calls this instead of writing tag-page `date` / `view` query params.
+   */
+  onDatasetModeChange?: (mode: "today" | "total") => void;
   /**
    * Raw STW `calls` total for the current window. Required — do not sum slice.totalCalls
    * (those banker leftovers undercount until the daily-caller snapshot is rebuilt).
@@ -170,6 +180,8 @@ export default function DailyAggregateSection({
   activeDate,
   activeEndDate,
   dateLabel,
+  datasetTitle,
+  datasetMode,
   slices,
   uniquePhonebankers,
   showPollingAggregate = true,
@@ -182,9 +194,25 @@ export default function DailyAggregateSection({
   surveyScriptProfile,
   outcomeTally,
   hideDatePicker = false,
+  onDatasetModeChange,
   totalCalls,
 }: Props) {
   const router = useRouter();
+
+  function pushTagDatasetMode(mode: "today" | "total") {
+    if (onDatasetModeChange) {
+      onDatasetModeChange(mode);
+      return;
+    }
+    const params = new URLSearchParams();
+    params.set("tab", activeTab);
+    if (mode === "total") {
+      params.set("view", "total");
+    } else {
+      params.set("date", laCalendarYmd());
+    }
+    router.push(`${basePath}?${params.toString()}`);
+  }
   const [layout, setLayout] = useState<DailyAggregateLayoutV1>(DEFAULT_DAILY_AGGREGATE_LAYOUT);
   const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -252,8 +280,6 @@ export default function DailyAggregateSection({
     },
     [synthesizedTagIds, activeDate, activeEndDate, surveyScriptProfile]
   );
-
-  if (!slices.length) return null;
 
   const totals = slices.reduce(
     (acc, s) => {
@@ -471,35 +497,68 @@ export default function DailyAggregateSection({
     return { kind: "none" };
   }
 
+  const todayActive = datasetMode === "today";
+  const totalActive = datasetMode === "total";
+
   return (
     <>
-      <div
-        className={`flex items-center gap-2 flex-wrap mb-3 ${
-          hideDatePicker || availableDates.length === 0 ? "justify-end" : "justify-between"
-        }`}
-      >
-        {!hideDatePicker && availableDates.length > 0 ? (
-          <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-950/30">
-            <DateRangePicker
-              startDate={activeDate}
-              endDate={activeEndDate}
-              minDate={minAvailableDate}
-              maxDate={maxAvailableDate}
-              allowEmpty
-              label="Filter"
-              helpText="Choose one day or a range. Clear to show all available dates."
-              onChange={(range) => {
-                if (!range.startDate || !range.endDate) {
-                  router.push(`${basePath}?tab=${activeTab}`);
-                  return;
-                }
-                const params = new URLSearchParams({ tab: activeTab, date: range.startDate });
-                if (range.endDate !== range.startDate) params.set("endDate", range.endDate);
-                router.push(`${basePath}?${params.toString()}`);
-              }}
-            />
+      <div className="flex items-center gap-2 flex-wrap mb-3 justify-between">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div
+            className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-950/40"
+            role="group"
+            aria-label="Daily aggregate dataset"
+          >
+            <button
+              type="button"
+              onClick={() => pushTagDatasetMode("today")}
+              aria-pressed={todayActive}
+              className={[
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                todayActive
+                  ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200",
+              ].join(" ")}
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => pushTagDatasetMode("total")}
+              aria-pressed={totalActive}
+              className={[
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-colors",
+                totalActive
+                  ? "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 shadow-sm"
+                  : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200",
+              ].join(" ")}
+            >
+              Total
+            </button>
           </div>
-        ) : null}
+          {!hideDatePicker && availableDates.length > 0 ? (
+            <div className="w-full max-w-xl rounded-xl border border-gray-200 bg-gray-50/60 p-3 dark:border-gray-700 dark:bg-gray-950/30 sm:w-auto">
+              <DateRangePicker
+                startDate={activeDate}
+                endDate={activeEndDate}
+                minDate={minAvailableDate}
+                maxDate={maxAvailableDate}
+                allowEmpty
+                label="Custom range"
+                helpText="Pick a day or range. Clear switches to Total (all dates)."
+                onChange={(range) => {
+                  if (!range.startDate || !range.endDate) {
+                    router.push(`${basePath}?tab=${activeTab}&view=total`);
+                    return;
+                  }
+                  const params = new URLSearchParams({ tab: activeTab, date: range.startDate });
+                  if (range.endDate !== range.startDate) params.set("endDate", range.endDate);
+                  router.push(`${basePath}?${params.toString()}`);
+                }}
+              />
+            </div>
+          ) : null}
+        </div>
         <button
           type="button"
           onClick={openModal}
@@ -510,11 +569,16 @@ export default function DailyAggregateSection({
       </div>
 
       <div className="daily-aggregate-card w-full max-w-none rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-900 shadow-sm">
-        <div className="daily-aggregate-card__bar flex items-center justify-between border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-          <div className="daily-aggregate-card__title font-semibold text-gray-700 dark:text-gray-100">
-            Daily Aggregate
+        <div className="daily-aggregate-card__bar flex items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+          <div className="daily-aggregate-card__title min-w-0 text-gray-900 dark:text-gray-50">
+            <span className="text-[0.6875rem] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400 block mb-0.5">
+              Daily Aggregate
+            </span>
+            <span className="font-bold text-base sm:text-lg leading-snug break-words">{datasetTitle}</span>
           </div>
-          <div className="text-[0.6875rem] text-gray-500 dark:text-gray-400">{dateLabel}</div>
+          {datasetMode === "custom" ? (
+            <div className="shrink-0 text-[0.6875rem] text-gray-500 dark:text-gray-400">{dateLabel}</div>
+          ) : null}
         </div>
         <div className="px-3 sm:px-4 py-1.5 border-b border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-900">
           <OutcomeTallyStrip
@@ -608,7 +672,7 @@ export default function DailyAggregateSection({
                         className="w-full mt-1 px-2 py-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 text-sm"
                       >
                         <option value="__none__">Empty</option>
-                        <option value="__preset:polling">Polling / Intro (preset)</option>
+                        <option value="__preset:polling">Polling / Intro / candidate ask (preset)</option>
                         <option value="__preset:final">Final Result (preset)</option>
                         <optgroup label="Questions in this scope">
                           {questionPickerGroups.map((g) => {

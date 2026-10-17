@@ -149,15 +149,19 @@ function rate(part: number, whole: number): number | null {
   return part / whole;
 }
 
-/** Null when the script never recorded a Were-you-contacted answer (show N/A, not 0%). */
+/**
+ * Share of Yes among people who answered “Were you contacted?”.
+ * Null when nobody answered (show N/A). Banks with no contacted question do not
+ * dilute the rate — they are omitted from the denominator.
+ */
 export function recallContactRateFromCounts(
   contactedYes: number,
   contactedUnsure: number,
-  contactedNo: number,
-  surveyed: number
+  contactedNo: number
 ): number | null {
-  if (contactedYes + contactedUnsure + contactedNo === 0) return null;
-  return rate(contactedYes, surveyed);
+  const answered = contactedYes + contactedUnsure + contactedNo;
+  if (answered === 0) return null;
+  return rate(contactedYes, answered);
 }
 
 /**
@@ -245,7 +249,7 @@ export function summarizeCanvasserOverview(rows: readonly CanvasserOverviewRow[]
     canvasserName: "Total",
     surveyed,
     originallyStrongSupport,
-    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
     strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
       originalStrongSupportPolling,
       originallyStrongSupport
@@ -422,7 +426,7 @@ export function tallyCanvasserOverview(
       canvasserName,
       surveyed,
       originallyStrongSupport,
-      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
       strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
         originalStrongSupportPolling,
         originallyStrongSupport

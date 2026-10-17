@@ -184,7 +184,7 @@ export function summarizePhonebankerOverview(
     phonebankerName: "Total",
     surveyed,
     originallyStrongSupport,
-    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
     strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
       originalStrongSupportPolling,
       originallyStrongSupport
@@ -322,7 +322,7 @@ export function tallyPhonebankerOverview(
       phonebankerName: sorted[0]?.phonebankerName ?? "",
       surveyed,
       originallyStrongSupport,
-      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo, surveyed),
+      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
       strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
         originalStrongSupportPolling,
         originallyStrongSupport

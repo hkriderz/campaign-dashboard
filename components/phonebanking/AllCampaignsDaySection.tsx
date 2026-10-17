@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
@@ -11,6 +11,14 @@ import type { AllCampaignsDayDashboardPayload } from "@/lib/all-campaigns-day-da
 import type { PhoneBankSummary } from "@/lib/types";
 import { sumPhoneBankRawCalls } from "@/lib/raw-stw-calls";
 import { normalizeIsoDateRange } from "@/lib/validation/iso-date";
+import {
+  formatAggregateDatasetTitle,
+  parseAggregateViewParam,
+  resolveAggregateDateRange,
+} from "@/lib/daily-aggregate-dataset";
+import { getDashboardAggregateLexicon } from "@/lib/dashboard-aggregate-lexicon";
+import { laCalendarYmd } from "@/lib/la-dates";
+import type { CampaignTag } from "@/lib/types";
 
 const PbDashboardStack = dynamic(() => import("@/components/phonebanking/PbDashboardStack"), {
   ssr: false,
@@ -44,6 +52,7 @@ const ALL_DATE_PARAM = "allDate";
 const ALL_START_PARAM = "allStart";
 const ALL_END_PARAM = "allEnd";
 const ALL_TAB_PARAM = "allTab";
+const ALL_VIEW_PARAM = "allView";
 const TAB_OVERVIEW = DAY_TABS[0].id;
 const TAB_AGGREGATE = DAY_TABS[1].id;
 const TAB_PHONEBANKERS = DAY_TABS[2].id;
@@ -51,6 +60,17 @@ const TAB_PHONEBANKERS = DAY_TABS[2].id;
 const LEGACY_TAB_ALIASES: Record<string, string> = {
   phonebanks: TAB_OVERVIEW,
 };
+
+const ALL_CAMPAIGNS_LEXICON_TAG: CampaignTag = {
+  id: "_all_campaigns",
+  label: "All campaigns",
+  searchTerms: [],
+  color: "#6366f1",
+  textColor: "#ffffff",
+  mode: "phonebanking",
+};
+
+const FALLBACK_ALL_LEXICON = getDashboardAggregateLexicon(ALL_CAMPAIGNS_LEXICON_TAG, "genericChallenger");
 
 function normalizeAllTab(raw: string): string {
   const head = raw.trim();
@@ -78,16 +98,34 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  const viewTotal = parseAggregateViewParam(searchParams.get(ALL_VIEW_PARAM)) === "total";
   const rawStart = searchParams.get(ALL_START_PARAM)?.trim() || searchParams.get(ALL_DATE_PARAM)?.trim() || "";
   const rawEnd = searchParams.get(ALL_END_PARAM)?.trim() || rawStart;
   const normalizedRange = rawStart ? normalizeIsoDateRange(rawStart, rawEnd) : null;
-  const allStartDate = normalizedRange?.ok ? normalizedRange.startDate : "";
-  const allEndDate = normalizedRange?.ok ? normalizedRange.endDate : "";
+  const requestedStart = normalizedRange?.ok ? normalizedRange.startDate : "";
+  const requestedEnd = normalizedRange?.ok ? normalizedRange.endDate : "";
+  const resolved = useMemo(
+    () =>
+      resolveAggregateDateRange({
+        viewTotal,
+        requestedStart,
+        requestedEnd,
+      }),
+    [viewTotal, requestedStart, requestedEnd]
+  );
+  const allStartDate = resolved.startDate;
+  const allEndDate = resolved.endDate;
+  const datasetMode = resolved.mode;
   const allDateLabel = allStartDate
     ? allStartDate === allEndDate
       ? allStartDate
       : `${allStartDate} to ${allEndDate}`
     : "";
+  const datasetTitle = formatAggregateDatasetTitle("All Campaigns", {
+    startDate: allStartDate,
+    endDate: allEndDate,
+    mode: datasetMode,
+  });
 
   const rawTab = searchParams.get(ALL_TAB_PARAM)?.trim() ?? "";
   const activeTab = normalizeAllTab(rawTab);
@@ -113,7 +151,8 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           p.delete(ALL_DATE_PARAM);
           p.delete(ALL_START_PARAM);
           p.delete(ALL_END_PARAM);
-          p.delete(ALL_TAB_PARAM);
+          p.set(ALL_VIEW_PARAM, "total");
+          if (!p.get(ALL_TAB_PARAM)) p.set(ALL_TAB_PARAM, TAB_OVERVIEW);
         });
         return;
       }
@@ -121,6 +160,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
       if (!normalized.ok) return;
       replaceQuery((p) => {
         p.delete(ALL_DATE_PARAM);
+        p.delete(ALL_VIEW_PARAM);
         p.set(ALL_START_PARAM, normalized.startDate);
         if (normalized.startDate === normalized.endDate) {
           p.delete(ALL_END_PARAM);
@@ -132,6 +172,43 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
     },
     [replaceQuery]
   );
+
+  const onDatasetModeChange = useCallback(
+    (mode: "today" | "total") => {
+      if (mode === "total") {
+        replaceQuery((p) => {
+          p.delete(ALL_DATE_PARAM);
+          p.delete(ALL_START_PARAM);
+          p.delete(ALL_END_PARAM);
+          p.set(ALL_VIEW_PARAM, "total");
+          if (!p.get(ALL_TAB_PARAM)) p.set(ALL_TAB_PARAM, TAB_OVERVIEW);
+        });
+        return;
+      }
+      const today = laCalendarYmd();
+      replaceQuery((p) => {
+        p.delete(ALL_DATE_PARAM);
+        p.delete(ALL_VIEW_PARAM);
+        p.set(ALL_START_PARAM, today);
+        p.delete(ALL_END_PARAM);
+        if (!p.get(ALL_TAB_PARAM)) p.set(ALL_TAB_PARAM, TAB_OVERVIEW);
+      });
+    },
+    [replaceQuery]
+  );
+
+  /** Sync default Today into the URL when neither range nor Total is set. */
+  useEffect(() => {
+    if (viewTotal || requestedStart) return;
+    const today = laCalendarYmd();
+    replaceQuery((p) => {
+      p.delete(ALL_DATE_PARAM);
+      p.delete(ALL_VIEW_PARAM);
+      p.set(ALL_START_PARAM, today);
+      p.delete(ALL_END_PARAM);
+      if (!p.get(ALL_TAB_PARAM)) p.set(ALL_TAB_PARAM, TAB_OVERVIEW);
+    });
+  }, [viewTotal, requestedStart, replaceQuery]);
 
   useEffect(() => {
     if (!allStartDate) {
@@ -175,10 +252,10 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
 
   const showDayUi = Boolean(allStartDate);
   const showTabs = showDayUi && !dayLoading && !dayError && dayDashboard !== null;
-
-  const showDefaultFullWindowTable = !allStartDate;
+  const showTotalTable = datasetMode === "total";
 
   const d = dayDashboard;
+  const emptyOutcome = { strongSupport: 0, undecided: 0, strongOppose: 0 };
 
   return (
     <div className="space-y-4">
@@ -187,15 +264,16 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           startDate={allStartDate}
           endDate={allEndDate}
           onChange={onDateRangeChange}
-          label="Filter"
-          helpText="Choose one Pacific day or a multi-day range across all campaign tags. Clear to show the full window."
+          label="Custom range"
+          helpText="Pick a Pacific day or multi-day range across all tags. Clear switches to Total."
           allowEmpty
         />
       </div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-        Leave the range empty for the usual all-time window list (since Dec 1, 2025). Choosing a range loads merged
-        BigQuery + CSV from <strong className="font-medium text-gray-600 dark:text-gray-300">all candidate tags</strong>{" "}
-        — same calculations as each candidate&rsquo;s dashboard for that Pacific window.
+        Defaults to <strong className="font-medium text-gray-600 dark:text-gray-300">Today</strong> (Pacific).{" "}
+        <strong className="font-medium text-gray-600 dark:text-gray-300">Total</strong> shows the full window list
+        (since Dec 1, 2025). Day/range views merge BigQuery + CSV from{" "}
+        <strong className="font-medium text-gray-600 dark:text-gray-300">all candidate tags</strong>.
       </p>
 
       {dayError ? (
@@ -204,7 +282,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
         </div>
       ) : null}
 
-      {showTabs && d && d.filteredSlices.length > 0 ? (
+      {!showTotalTable && (d || !dayLoading) ? (
         <DailyAggregateSection
           tagId="_all_campaigns"
           basePath="/phonebanking"
@@ -213,21 +291,53 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           activeDate={allStartDate}
           activeEndDate={allEndDate}
           dateLabel={allDateLabel}
-          slices={d.filteredSlices}
-          uniquePhonebankers={d.uniquePhonebankers}
+          datasetTitle={datasetTitle}
+          datasetMode={datasetMode}
+          slices={d?.filteredSlices ?? []}
+          uniquePhonebankers={d?.uniquePhonebankers ?? 0}
           showPollingAggregate
-          bqPollingBreakdown={d.bqPollingBreakdown}
-          bqFinalResultBreakdown={d.bqFinalResultBreakdown}
-          finalResultFromCallFill={d.finalResultFromCallFill}
-          aggregateLexicon={d.aggregateLexicon}
+          bqPollingBreakdown={d?.bqPollingBreakdown ?? []}
+          bqFinalResultBreakdown={d?.bqFinalResultBreakdown ?? []}
+          finalResultFromCallFill={d?.finalResultFromCallFill ?? false}
+          aggregateLexicon={d?.aggregateLexicon ?? FALLBACK_ALL_LEXICON}
           finalResultUsesScriptOptionLabels={false}
-          aggregateScopeRows={d.aggregateScopeRows}
-          surveyScriptProfile={d.surveyScriptProfile}
-          outcomeTally={d.outcomeTally}
+          aggregateScopeRows={d?.aggregateScopeRows ?? []}
+          surveyScriptProfile={d?.surveyScriptProfile ?? "genericChallenger"}
+          outcomeTally={d?.outcomeTally ?? emptyOutcome}
           hideDatePicker
-          totalCalls={sumPhoneBankRawCalls(d.overviewPhoneBanks)}
+          onDatasetModeChange={onDatasetModeChange}
+          totalCalls={d ? sumPhoneBankRawCalls(d.overviewPhoneBanks) : 0}
         />
-      ) : null}
+      ) : !showTotalTable ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-50">{datasetTitle}</p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <div
+            className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 p-0.5 bg-gray-50 dark:bg-gray-950/40"
+            role="group"
+            aria-label="All campaigns dataset"
+          >
+            <button
+              type="button"
+              onClick={() => onDatasetModeChange("today")}
+              className="px-3 py-1.5 text-sm font-medium rounded-md text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              aria-pressed
+              onClick={() => onDatasetModeChange("total")}
+              className="px-3 py-1.5 text-sm font-medium rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-50 shadow-sm"
+            >
+              Total
+            </button>
+          </div>
+          <p className="text-sm font-bold text-gray-900 dark:text-gray-50">{datasetTitle}</p>
+        </div>
+      )}
 
       {showTabs ? (
         <Suspense fallback={null}>
@@ -239,7 +349,7 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
         <p className="text-sm text-gray-500 dark:text-gray-400 py-4">Loading data for {allDateLabel}…</p>
       ) : null}
 
-      {showDefaultFullWindowTable ? (
+      {showTotalTable ? (
         <PhoneBankTable
           phoneBanks={defaultPhoneBanks}
           emptyMessage="No campaigns with calls in the last two months matched the active lifecycle filter."

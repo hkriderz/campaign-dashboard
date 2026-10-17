@@ -184,7 +184,8 @@ export default function PhonebankerOverviewClient() {
         <hr className="section-hero__rule bg-teal-700 dark:bg-teal-300" />
         <p className="section-hero__lede">
           QC calls that reached the voter, grouped by the phonebanker who originally ID’d them. Recall
-          contact is Yes on “Were you contacted?”. Strong support rates use only the voters that
+          contact is Yes ÷ (Yes+Unsure+No) on “Were you contacted?” — calls with no answer
+          (e.g. GOTV scripts) do not dilute the rate. Strong support rates use only the voters that
           phonebanker originally marked strong support.
         </p>
       </div>

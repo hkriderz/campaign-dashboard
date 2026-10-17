@@ -94,12 +94,22 @@ import {
   mergePhoneBankRowWithBqOutcomes,
 } from "@/lib/phonebanker-bq-outcomes";
 import { compareIsoDates, normalizeIsoDateRange } from "@/lib/validation/iso-date";
+import {
+  formatAggregateDatasetTitle,
+  parseAggregateViewParam,
+  resolveAggregateDateRange,
+} from "@/lib/daily-aggregate-dataset";
 
 export const dynamic = "force-dynamic";
 
 type Props = {
   params: Promise<{ tag: string }>;
-  searchParams: Promise<{ tab?: string; date?: string | string[]; endDate?: string | string[] }>;
+  searchParams: Promise<{
+    tab?: string;
+    date?: string | string[];
+    endDate?: string | string[];
+    view?: string | string[];
+  }>;
 };
 
 function firstSearchParam(v: string | string[] | undefined): string {
@@ -313,9 +323,10 @@ export default async function TagPage({ params, searchParams }: Props) {
   return runServerWithCredentialContext(async () => {
   const { tag: tagId } = await params;
   const sp = await searchParams;
-  const { tab = "overview", date: dateRaw, endDate: endDateRaw } = sp;
+  const { tab = "overview", date: dateRaw, endDate: endDateRaw, view: viewRaw } = sp;
   const selectedDate = normalizeSelectedDateParam(firstSearchParam(dateRaw));
   const selectedEndDate = normalizeSelectedDateParam(firstSearchParam(endDateRaw)) || selectedDate;
+  const viewTotal = parseAggregateViewParam(firstSearchParam(viewRaw)) === "total";
 
   const tag = getTagById(tagId);
   if (!tag) notFound();
@@ -737,12 +748,14 @@ export default async function TagPage({ params, searchParams }: Props) {
   const normalizedRange = selectedDate ? normalizeIsoDateRange(selectedDate, selectedEndDate) : null;
   const requestedStartDate = normalizedRange?.ok ? normalizedRange.startDate : "";
   const requestedEndDate = normalizedRange?.ok ? normalizedRange.endDate : "";
-  const hasAvailableDateInRange =
-    requestedStartDate && requestedEndDate
-      ? availableDates.some((date) => isoDateInRange(date, requestedStartDate, requestedEndDate))
-      : false;
-  const activeStartDate = hasAvailableDateInRange ? requestedStartDate : "";
-  const activeEndDate = hasAvailableDateInRange ? requestedEndDate : "";
+  const resolvedRange = resolveAggregateDateRange({
+    viewTotal,
+    requestedStart: requestedStartDate,
+    requestedEnd: requestedEndDate,
+  });
+  const activeStartDate = resolvedRange.startDate;
+  const activeEndDate = resolvedRange.endDate;
+  const aggregateDatasetMode = resolvedRange.mode;
   const filteredSlices = activeStartDate
     ? dashboardSlices.filter((s) => isoDateInRange(s.callDate, activeStartDate, activeEndDate))
     : dashboardSlices;
@@ -775,6 +788,7 @@ export default async function TagPage({ params, searchParams }: Props) {
     sliceKeys: aggregateSliceKeys,
     dateFilter: null,
     surveyScriptProfile,
+    candidateTerms: candidateTermsForTag(tag),
   });
   let bqPollingBreakdown = rollupPf.polling;
   let bqFinalResultBreakdown = rollupPf.finalResult;
@@ -863,6 +877,11 @@ export default async function TagPage({ params, searchParams }: Props) {
     : Math.round(overviewPhoneBanks.reduce((s, p) => s + p.totalHours, 0) * 100) / 100;
   const uniqueCallers = uniquePbersForAggregate;
   const activeDateLabel = formatDateRangeLabel(activeStartDate, activeEndDate);
+  const aggregateDatasetTitle = formatAggregateDatasetTitle(tag.label, {
+    startDate: activeStartDate,
+    endDate: activeEndDate,
+    mode: aggregateDatasetMode,
+  });
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -956,29 +975,29 @@ export default async function TagPage({ params, searchParams }: Props) {
       </div>
 
       <div className="space-y-3 mb-5">
-        {aggregateSlices.length > 0 && (
-          <DailyAggregateSection
-            tagId={tagId}
-            basePath={`/phonebanking/${tagId}`}
-            activeTab={tab}
-            availableDates={availableDates}
-            activeDate={activeStartDate}
-            activeEndDate={activeEndDate}
-            dateLabel={activeDateLabel}
-            slices={aggregateSlices}
-            uniquePhonebankers={uniquePbersForAggregate}
-            showPollingAggregate={tag.showPollingAggregate !== false}
-            bqPollingBreakdown={bqPollingBreakdown}
-            bqFinalResultBreakdown={bqFinalResultBreakdown}
-            finalResultFromCallFill={finalResultFromCallFill}
-            aggregateLexicon={aggregateLexicon}
-            finalResultUsesScriptOptionLabels={verbatimFinalResult}
-            aggregateScopeRows={aggregateScopeRows}
-            surveyScriptProfile={surveyScriptProfile}
-            outcomeTally={outcomeTally}
-            totalCalls={aggregateSlices.reduce((s, x) => s + x.totalCalls, 0)}
-          />
-        )}
+        <DailyAggregateSection
+          tagId={tagId}
+          basePath={`/phonebanking/${tagId}`}
+          activeTab={tab}
+          availableDates={availableDates}
+          activeDate={activeStartDate}
+          activeEndDate={activeEndDate}
+          dateLabel={activeDateLabel}
+          datasetTitle={aggregateDatasetTitle}
+          datasetMode={aggregateDatasetMode}
+          slices={aggregateSlices}
+          uniquePhonebankers={uniquePbersForAggregate}
+          showPollingAggregate={tag.showPollingAggregate !== false}
+          bqPollingBreakdown={bqPollingBreakdown}
+          bqFinalResultBreakdown={bqFinalResultBreakdown}
+          finalResultFromCallFill={finalResultFromCallFill}
+          aggregateLexicon={aggregateLexicon}
+          finalResultUsesScriptOptionLabels={verbatimFinalResult}
+          aggregateScopeRows={aggregateScopeRows}
+          surveyScriptProfile={surveyScriptProfile}
+          outcomeTally={outcomeTally}
+          totalCalls={aggregateSlices.reduce((s, x) => s + x.totalCalls, 0)}
+        />
         {process.env.CAMPAIGN_DASHBOARD_SNAPSHOT_SECRET || process.env.NODE_ENV === "development" ? (
           <BqSnapshotRefreshPanel
             tagId={tagId}

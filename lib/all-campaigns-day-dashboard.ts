@@ -656,6 +656,7 @@ export async function buildAllCampaignsDayDashboard(
       sliceKeys: aggregateSliceKeys,
       dateFilter: null,
       surveyScriptProfile: profile,
+      candidateTerms: candidateTermsForTag(tr.tag),
     });
     let polling = rollup.polling;
     let finalResult = rollup.finalResult;

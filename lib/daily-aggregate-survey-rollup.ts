@@ -1,5 +1,6 @@
 import { sortAggregateAnswerLines } from "./aggregate-answer-sort";
 import { dailyCallerSliceKey } from "./slice-key";
+import { isCandidateIdSupportQuestion } from "./strong-support-from-survey";
 import {
   isCanvassResultColumnQuestion,
   isTraciViolationQuestionName,
@@ -110,9 +111,34 @@ export function rollupFinalResultRawAnswerLines(
   return sortAnswerLineMap(finalMap);
 }
 
+function campaignGroupKey(row: Pick<PhonebankerQuestionResponseStat, "campaignId" | "campaignName">): string {
+  const id = row.campaignId?.trim() ?? "";
+  return id ? `id:${id}` : `name:${row.campaignName.trim().toLowerCase()}`;
+}
+
+function isRecordedAnswer(answerValue: string): boolean {
+  const t = answerValue.trim();
+  return Boolean(t) && t.toLowerCase() !== "[no answer recorded]";
+}
+
+function answersByQuestion(
+  rows: readonly Pick<PhonebankerQuestionResponseStat, "questionName" | "answerValue">[]
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const row of rows) {
+    const list = map.get(row.questionName) ?? [];
+    list.push(row.answerValue);
+    map.set(row.questionName, list);
+  }
+  return map;
+}
+
 /**
  * Sum distinct-answer counts from BQ question stats for Polling and Final Result blocks,
  * scoped to the same slices / date as the daily aggregate card.
+ *
+ * Polling preset: named Polling / Intro questions when present for a campaign; otherwise
+ * candidate support/ID asks (same fallback as the outcome tally strip).
  */
 export function rollupPollingAndFinalAnswers(
   rows: PhonebankerQuestionResponseStat[],
@@ -120,32 +146,56 @@ export function rollupPollingAndFinalAnswers(
     sliceKeys: ReadonlySet<string>;
     dateFilter: string | null;
     surveyScriptProfile?: SurveyScriptProfile;
+    /** Candidate name terms for ID-ask fallback when a bank has no Polling block. */
+    candidateTerms?: readonly string[];
   }
 ): {
   polling: AggregateAnswerLine[];
   finalResult: AggregateAnswerLine[];
 } {
   const profile = opts.surveyScriptProfile ?? "faizahTraci";
-  const pollMap = new Map<string, AnswerLineAcc>();
+  const terms = opts.candidateTerms ?? [];
   const finalMap = new Map<string, AnswerLineAcc>();
+  const byCampaign = new Map<string, PhonebankerQuestionResponseStat[]>();
 
   for (const r of rows) {
     const sk = dailyCallerSliceKey(r);
     if (!opts.sliceKeys.has(sk)) continue;
     if (opts.dateFilter && r.callDate !== opts.dateFilter) continue;
 
-    const av = r.answerValue.trim();
-    if (!av || av.toLowerCase() === "[no answer recorded]") {
-      if (effectiveFinalResultAnswerLabelForRollup(r.questionName, r.answerValue)) {
-        addRowToFinalResultMap(finalMap, r);
-      }
-      continue;
+    if (effectiveFinalResultAnswerLabelForRollup(r.questionName, r.answerValue)) {
+      addRowToFinalResultMap(finalMap, r);
     }
 
-    if (isPollingQuestionName(r.questionName, profile)) {
-      addToLineAcc(pollMap, av, r.responseCount);
-    } else if (isFinalResultQuestionName(r.questionName)) {
-      addRowToFinalResultMap(finalMap, r);
+    const key = campaignGroupKey(r);
+    const list = byCampaign.get(key) ?? [];
+    list.push(r);
+    byCampaign.set(key, list);
+  }
+
+  const pollMap = new Map<string, AnswerLineAcc>();
+  for (const campaignRows of byCampaign.values()) {
+    const byQuestion = answersByQuestion(campaignRows);
+    const pollingRows = campaignRows.filter(
+      (row) => isPollingQuestionName(row.questionName, profile) && isRecordedAnswer(row.answerValue)
+    );
+    const idRows =
+      terms.length === 0
+        ? []
+        : campaignRows.filter(
+            (row) =>
+              isRecordedAnswer(row.answerValue) &&
+              !isFinalResultQuestionName(row.questionName) &&
+              isCandidateIdSupportQuestion(
+                row.questionName,
+                terms,
+                profile,
+                byQuestion.get(row.questionName)
+              )
+          );
+    const source = pollingRows.length > 0 ? pollingRows : idRows;
+    for (const row of source) {
+      addToLineAcc(pollMap, row.answerValue.trim(), row.responseCount);
     }
   }
 
