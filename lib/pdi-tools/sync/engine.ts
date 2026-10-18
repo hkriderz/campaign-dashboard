@@ -278,8 +278,8 @@ export async function runPdiSyncEngine(runId: string, options: SyncRunOptions): 
     if (postResult.newLedgerEntries.length > 0) {
       await appendLedgerEntries(postResult.newLedgerEntries, ledgerSourceForChannel(channel), runId, log);
       for (const e of postResult.newLedgerEntries) {
-        addStoredFlagToLedger(ledger, e.pdi_id, e.flag_code, e.flag_date, maps);
-        if (e.flag_id) addStoredFlagToLedger(ledger, e.pdi_id, e.flag_id, e.flag_date, maps);
+        addStoredFlagToLedger(ledger, e.pdi_id, e.flag_code, e.flag_date, maps, e.question_id);
+        if (e.flag_id) addStoredFlagToLedger(ledger, e.pdi_id, e.flag_id, e.flag_date, maps, e.question_id);
       }
     }
 

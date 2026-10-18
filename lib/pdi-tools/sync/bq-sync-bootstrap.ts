@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS \`${BQ_LEDGER_TABLE}\` (
   pdi_id      STRING    NOT NULL,
   flag_code   STRING    NOT NULL,
   flag_id     STRING,
+  question_id STRING,
   flag_date   DATE      NOT NULL,
   synced_at   TIMESTAMP NOT NULL,
   source      STRING,
@@ -106,6 +107,7 @@ CREATE TABLE IF NOT EXISTS \`${BQ_FLAG_INSTANCES_TABLE}\` (
   pdi_id        STRING    NOT NULL,
   flag_id       STRING    NOT NULL,
   flag_code     STRING    NOT NULL,
+  question_id   STRING,
   flag_date     DATE      NOT NULL,
   created_at    TIMESTAMP NOT NULL
 )
@@ -160,5 +162,15 @@ export async function ensurePdiSyncTables(log: SyncLogger): Promise<void> {
     `ALTER TABLE \`${BQ_LEDGER_TABLE}\` ADD COLUMN IF NOT EXISTS flag_id STRING`,
     log,
     "BQ ALTER ledger flag_id"
+  );
+  await safeExec(
+    `ALTER TABLE \`${BQ_LEDGER_TABLE}\` ADD COLUMN IF NOT EXISTS question_id STRING`,
+    log,
+    "BQ ALTER ledger question_id"
+  );
+  await safeExec(
+    `ALTER TABLE \`${BQ_FLAG_INSTANCES_TABLE}\` ADD COLUMN IF NOT EXISTS question_id STRING`,
+    log,
+    "BQ ALTER flag instances question_id"
   );
 }

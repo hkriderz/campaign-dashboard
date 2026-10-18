@@ -75,9 +75,9 @@ export function transformSurveyRows(
 
     const flagDateStr = extractFlagDate(r.call_time);
     const flagCode = maps.flagIdToCode.get(flagId) ?? flagId;
-    const key = ledgerKey(pdiId, flagCode, flagDateStr);
+    const key = ledgerKey(pdiId, flagId, flagDateStr, qid);
 
-    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId)) {
+    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId, qid)) {
       rowsDeduped += 1;
       continue;
     }

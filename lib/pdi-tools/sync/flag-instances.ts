@@ -8,6 +8,7 @@ export type CreatedFlagInstanceRow = {
   pdi_id: string;
   flag_id: string;
   flag_code: string;
+  question_id?: string;
   flag_date: string;
   created_at: string;
 };

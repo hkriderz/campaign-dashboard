@@ -12,6 +12,12 @@ export type MappingMaps = {
   answerMap: Map<string, string>;
   codeMap: Map<string, string>;
   flagIdToCode: Map<string, string>;
+  /** Uppercased flag code or flag id → PDI question ids that post that flag. */
+  flagQuestionIds: Map<string, string[]>;
+  /** Uppercased flag code or flag id → PDI catalog question count. */
+  flagCatalogCounts: Map<string, number>;
+  /** PDI question id → STW question labels. */
+  questionLabels: Map<string, string[]>;
 };
 
 function mapKey(parts: string[]): string {
@@ -42,7 +48,52 @@ export function buildMappingMaps(mapping: MappingOutput, mappingFilePath: string
     flagIdToCode.set(a.pdiFlagId, a.pdiFlagCode.trim().toUpperCase());
   }
 
-  return { mapping, mappingFilePath, questionMap, answerMap, codeMap, flagIdToCode };
+  const flagQuestionSets = new Map<string, Set<string>>();
+  const flagCatalogCounts = new Map<string, number>();
+  const questionLabelSets = new Map<string, Set<string>>();
+  for (const flag of mapping.flagRegistry) {
+    const count = flag.usedInNQuestions ?? 0;
+    const code = flag.code.trim().toUpperCase();
+    const flagId = flag.flagId.trim().toUpperCase();
+    if (code) flagCatalogCounts.set(code, Math.max(flagCatalogCounts.get(code) ?? 0, count));
+    if (flagId) flagCatalogCounts.set(flagId, Math.max(flagCatalogCounts.get(flagId) ?? 0, count));
+  }
+  const addFlagQuestion = (flagKey: string, questionId: string) => {
+    const key = flagKey.trim().toUpperCase();
+    const qid = questionId.trim();
+    if (!key || !qid) return;
+    const set = flagQuestionSets.get(key) ?? new Set<string>();
+    set.add(qid);
+    flagQuestionSets.set(key, set);
+  };
+  const addLabel = (questionId: string, label: string) => {
+    const qid = questionId.trim();
+    const text = label.trim();
+    if (!qid || !text) return;
+    const set = questionLabelSets.get(qid) ?? new Set<string>();
+    set.add(text);
+    questionLabelSets.set(qid, set);
+  };
+  for (const q of mapping.questionMappings) addLabel(q.pdiQuestionId, q.stwQuestionName);
+  for (const a of mapping.answerMappings) {
+    addFlagQuestion(a.pdiFlagId, a.pdiQuestionId);
+    addFlagQuestion(a.pdiFlagCode, a.pdiQuestionId);
+    addLabel(a.pdiQuestionId, a.stwQuestionName);
+  }
+  const flagQuestionIds = new Map([...flagQuestionSets].map(([key, ids]) => [key, [...ids]]));
+  const questionLabels = new Map([...questionLabelSets].map(([key, labels]) => [key, [...labels]]));
+
+  return {
+    mapping,
+    mappingFilePath,
+    questionMap,
+    answerMap,
+    codeMap,
+    flagIdToCode,
+    flagQuestionIds,
+    flagCatalogCounts,
+    questionLabels,
+  };
 }
 
 export function resolveAutoMappingPath(channel: PdiSyncChannel = "dialer"): string {

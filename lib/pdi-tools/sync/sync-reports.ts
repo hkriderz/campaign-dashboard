@@ -119,14 +119,14 @@ export function buildMappingReport(
 
     const flagDateStr = extractFlagDate(r.call_time);
     const flagCode = maps.flagIdToCode.get(flagId) ?? flagId;
-    const key = ledgerKey(pdiId, flagCode, flagDateStr);
+    const key = ledgerKey(pdiId, flagId, flagDateStr, qid);
 
     reportRow.questionId = qid;
     reportRow.flagId = flagId;
     reportRow.acquisitionTypeId = acquisitionTypeId;
     reportRow.flagEntryDate = flagDateStr;
 
-    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId)) {
+    if (ledgerHasPostedFlag(ledger, pdiId, flagCode, flagDateStr, flagId, qid)) {
       reportRow.mapping_status = "DUPLICATE: Already synced to PDI";
       rowsDeduped += 1;
       report.push(reportRow);

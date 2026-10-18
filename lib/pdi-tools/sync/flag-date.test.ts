@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSurveyQuery } from "./query";
 import { buildTextTagQuery } from "./text-query";
+import { formatPdiFlagEntryDate } from "./format-pdi-flag-entry-date";
 import { extractFlagDate } from "./transform";
 
 test("dialer sync dates each call in Pacific time on that call's campaign", () => {
@@ -25,4 +26,11 @@ test("extractFlagDate keeps the Pacific calendar day of an evening call", () => 
   assert.equal(extractFlagDate("2026-09-26 23:30:00"), "2026-09-26");
   assert.equal(extractFlagDate({ value: "2026-09-26T23:30:00" }), "2026-09-26");
   assert.equal(extractFlagDate("2026-09-09 16:12:00"), "2026-09-09");
+});
+
+test("the date sent to PDI is noon on the same calendar day", () => {
+  const day = extractFlagDate("2026-09-27 18:04:00");
+  assert.equal(day, "2026-09-27");
+  assert.equal(formatPdiFlagEntryDate(day), "2026-09-27T12:00:00");
+  assert.equal(formatPdiFlagEntryDate("2026-09-27T00:00:00"), "2026-09-27T12:00:00");
 });

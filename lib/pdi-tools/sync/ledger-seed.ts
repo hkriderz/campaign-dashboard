@@ -10,6 +10,7 @@ import {
   appendLedgerEntries,
   ledgerKey,
   normalizeLedgerFlagDate,
+  resolveStoredQuestionId,
   type LedgerFlagAliases,
 } from "./ledger";
 import type { SyncLogger } from "./logger";
@@ -147,7 +148,13 @@ export async function seedLedgerFromExports(
   const exportFiles = [...exportFilesSet];
   if (exportFiles.length === 0) return 0;
 
-  const newEntries: Array<{ pdi_id: string; flag_code: string; flag_id?: string; flag_date: string }> = [];
+  const newEntries: Array<{
+    pdi_id: string;
+    flag_code: string;
+    flag_id?: string;
+    question_id?: string;
+    flag_date: string;
+  }> = [];
 
   for (const exportPath of exportFiles) {
     try {
@@ -165,19 +172,28 @@ export async function seedLedgerFromExports(
         const date = normalizeLedgerFlagDate(String(flag.FLAGENTRYDATE ?? flag.flagentrydate ?? ""));
         if (!pdiId || !code || !date) continue;
         const flagId = maps?.codeMap.get(code);
-        const key = ledgerKey(pdiId, code, date);
-        const idKey = flagId ? ledgerKey(pdiId, flagId, date) : "";
+        const questionText = String(
+          flag.SURVEYQUESTIONSHORTTEXT ??
+            flag.surveyquestionshorttext ??
+            flag.question_text ??
+            flag.questionText ??
+            ""
+        );
+        const questionId = resolveStoredQuestionId(code, maps, undefined, questionText);
+        const key = ledgerKey(pdiId, code, date, questionId || undefined);
+        const idKey = flagId ? ledgerKey(pdiId, flagId, date, questionId || undefined) : "";
+        const shouldStore = Boolean(questionId) || !maps;
         if (!key) continue;
-        if (!ledger.has(key) && !(idKey && ledger.has(idKey))) {
-          ledger.add(key);
+        if (shouldStore && !ledger.has(key) && !(idKey && ledger.has(idKey))) {
           newEntries.push({
             pdi_id: pdiId,
             flag_code: code,
             flag_id: flagId,
+            question_id: questionId || undefined,
             flag_date: date,
           });
         }
-        addStoredFlagToLedger(ledger, pdiId, code, date, maps);
+        addStoredFlagToLedger(ledger, pdiId, code, date, maps, questionId || undefined, questionText);
       }
     } catch (e) {
       log.warn(

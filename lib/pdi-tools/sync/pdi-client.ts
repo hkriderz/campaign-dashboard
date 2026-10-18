@@ -164,6 +164,7 @@ export async function postFlagsToPdi(
         pdi_id: item.pdiId,
         flag_code: code,
         flag_id: item.flagId,
+        question_id: item.questionId,
         flag_date: dateStr,
       });
       const iid = instanceIds[idx]?.trim();
@@ -174,6 +175,7 @@ export async function postFlagsToPdi(
           pdi_id: item.pdiId,
           flag_id: item.flagId,
           flag_code: code,
+          question_id: item.questionId,
           flag_date: dateStr,
           created_at: nowTs,
         });
