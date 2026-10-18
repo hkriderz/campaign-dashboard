@@ -10,6 +10,7 @@ import {
   THEME_STORAGE_KEY,
   parseThemeMode,
 } from "@/lib/theme";
+import BusyIndicator from "@/components/shared/BusyIndicator";
 import "./globals.css";
 
 const plexSans = IBM_Plex_Sans({
@@ -76,6 +77,7 @@ export default async function RootLayout({
         className="font-sans bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 antialiased min-h-screen overflow-x-hidden"
       >
         {children}
+        <BusyIndicator />
       </body>
     </html>
   );

@@ -57,6 +57,12 @@ html {
   font-size: 14px;
 }
 
+/* App-wide busy cursor while background fetches run (see BusyIndicator) */
+html[data-app-busy="true"],
+html[data-app-busy="true"] * {
+  cursor: progress !important;
+}
+
 @layer base {
   html,
   body {
