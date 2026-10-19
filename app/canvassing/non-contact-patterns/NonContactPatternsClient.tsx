@@ -2,8 +2,14 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import ExcludeCanvassersControl from "@/components/canvassing/ExcludeCanvassersControl";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
+import {
+  DEFAULT_NON_CONTACT_EXCLUDE_SECTIONS,
+  resolveExcludeSections,
+  type NonContactExcludeSections,
+} from "@/lib/canvassing/exclude-sections";
 import { emptyGapHistogram, histogramToPct } from "@/lib/canvassing/non-contact-patterns/histogram";
 import {
   DEFAULT_NON_CONTACT_PATTERN_SETTINGS,
@@ -106,29 +112,23 @@ function isExcludedCanvasser(name: string, excluded: Set<string>): boolean {
 
 function filterResult(
   result: NonContactPatternResult | null,
-  excluded: Set<string>
+  excluded: Set<string>,
+  sections: NonContactExcludeSections
 ): NonContactPatternResult | null {
   if (!result || excluded.size === 0) return result;
   const keep = (name: string) => !isExcludedCanvasser(name, excluded);
-  const enrichedRows = result.enrichedRows.filter((r) => keep(r.canvasserName));
-  const canvasserSummaries = result.canvasserSummaries.filter((s) => keep(s.canvasserName));
-  const flaggedNonContactRows = result.flaggedNonContactRows.filter((r) => keep(r.canvasserName));
-  const flaggedContactRows = result.flaggedContactRows.filter((r) => keep(r.canvasserName));
   return {
     ...result,
-    enrichedRows,
-    canvasserSummaries,
-    flaggedNonContactRows,
-    flaggedContactRows,
-    summary: {
-      ...result.summary,
-      totalRows: enrichedRows.length,
-      totalCanvassers: canvasserSummaries.length,
-      rapidNonContactFlagCount: enrichedRows.filter((r) => r.rapidNonContactFlag).length,
-      rapidContactFlagCount: flaggedContactRows.length,
-      streakAlertCanvasserCount: canvasserSummaries.filter((s) => s.streakAlert).length,
-      burstAlertCanvasserCount: canvasserSummaries.filter((s) => s.burstAlert).length,
-    },
+    enrichedRows: sections.details ? result.enrichedRows.filter((r) => keep(r.canvasserName)) : result.enrichedRows,
+    canvasserSummaries: sections.summary
+      ? result.canvasserSummaries.filter((s) => keep(s.canvasserName))
+      : result.canvasserSummaries,
+    flaggedNonContactRows: sections["flagged-nc"]
+      ? result.flaggedNonContactRows.filter((r) => keep(r.canvasserName))
+      : result.flaggedNonContactRows,
+    flaggedContactRows: sections["flagged-c"]
+      ? result.flaggedContactRows.filter((r) => keep(r.canvasserName))
+      : result.flaggedContactRows,
   };
 }
 
@@ -144,6 +144,8 @@ export default function NonContactPatternsClient() {
   const [savedReports, setSavedReports] = useState<SavedNonContactPatternListItem[]>([]);
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState("");
+  const [excludeSections, setExcludeSections] = useState<NonContactExcludeSections>(DEFAULT_NON_CONTACT_EXCLUDE_SECTIONS);
+  const [hasHydratedSession, setHasHydratedSession] = useState(false);
   const [loadingReports, setLoadingReports] = useState(true);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -163,15 +165,18 @@ export default function NonContactPatternsClient() {
 
   const excluded = useMemo(() => parseExcludedCanvassers(excludedCanvassersRaw), [excludedCanvassersRaw]);
   const rawCurrent = activeReport ?? result;
-  const currentReport = useMemo(() => filterResult(rawCurrent, excluded), [rawCurrent, excluded]);
+  const currentReport = useMemo(
+    () => filterResult(rawCurrent, excluded, excludeSections),
+    [excludeSections, excluded, rawCurrent]
+  );
   const displayNames = useMemo(
     () =>
       buildDisplayNameMap([
-        ...(currentReport?.canvasserSummaries.map((s) => s.canvasserName) ?? []),
-        ...(currentReport?.flaggedNonContactRows.map((r) => r.canvasserName) ?? []),
-        ...(currentReport?.flaggedContactRows.map((r) => r.canvasserName) ?? []),
+        ...(rawCurrent?.canvasserSummaries.map((s) => s.canvasserName) ?? []),
+        ...(rawCurrent?.flaggedNonContactRows.map((r) => r.canvasserName) ?? []),
+        ...(rawCurrent?.flaggedContactRows.map((r) => r.canvasserName) ?? []),
       ]),
-    [currentReport]
+    [rawCurrent]
   );
   const scoreByName = useMemo(
     () => new Map(canvasserScores.map((s) => [s.canvasserName, s])),
@@ -250,14 +255,36 @@ export default function NonContactPatternsClient() {
 
   useEffect(() => {
     try {
+      const raw = window.sessionStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          reportName?: string;
+          excludedCanvassersRaw?: string;
+          activeTab?: TabId;
+          excludeSections?: Partial<NonContactExcludeSections>;
+        };
+        if (typeof parsed.reportName === "string") setReportName(parsed.reportName);
+        if (typeof parsed.excludedCanvassersRaw === "string") setExcludedCanvassersRaw(parsed.excludedCanvassersRaw);
+        if (parsed.activeTab) setActiveTab(parsed.activeTab);
+        setExcludeSections(resolveExcludeSections(parsed.excludeSections, DEFAULT_NON_CONTACT_EXCLUDE_SECTIONS));
+      }
+    } catch {
+      // ignore bad session data
+    }
+    setHasHydratedSession(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedSession) return;
+    try {
       window.sessionStorage.setItem(
         SESSION_KEY,
-        JSON.stringify({ reportName, settings, excludedCanvassersRaw, activeTab })
+        JSON.stringify({ reportName, settings, excludedCanvassersRaw, activeTab, excludeSections })
       );
     } catch {
       // ignore quota
     }
-  }, [reportName, settings, excludedCanvassersRaw, activeTab]);
+  }, [reportName, settings, excludedCanvassersRaw, activeTab, excludeSections, hasHydratedSession]);
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -573,10 +600,13 @@ export default function NonContactPatternsClient() {
   const currentHistPct = currentReport?.metricsSnapshot
     ? histogramToPct(currentReport.metricsSnapshot.teamGapHistogram)
     : emptyGapHistogram();
-  const selectedSummary = currentReport?.canvasserSummaries.find((s) => s.canvasserName === selectedCanvasser);
+  const baselineSummaries = (rawCurrent?.canvasserSummaries ?? []).filter(
+    (summary) => !excludeSections.baselines || !isExcludedCanvasser(summary.canvasserName, excluded)
+  );
+  const selectedSummary = baselineSummaries.find((s) => s.canvasserName === selectedCanvasser);
   const canvasserHistPct = selectedSummary ? histogramToPct(selectedSummary.gapHistogram) : null;
 
-  const topRates = (currentReport?.canvasserSummaries ?? [])
+  const topRates = baselineSummaries
     .filter((s) => s.rapidNonContactRate !== null)
     .sort((a, b) => (b.rapidNonContactRate ?? 0) - (a.rapidNonContactRate ?? 0))
     .slice(0, 10)
@@ -634,8 +664,8 @@ export default function NonContactPatternsClient() {
             history; anomaly tiers are review prioritization aids only.
           </li>
           <li>
-            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude leads</span> — hide irregular
-            schedules from pattern tables while keeping the saved report intact.
+            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude canvassers</span> — check which
+            tabs hide those names. The saved report stays intact.
           </li>
         </ul>
       </section>
@@ -754,19 +784,23 @@ export default function NonContactPatternsClient() {
             </label>
           </div>
 
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Exclude canvasser exceptions</span>
-            <textarea
-              value={excludedCanvassersRaw}
-              onChange={(e) => setExcludedCanvassersRaw(e.target.value)}
-              rows={2}
-              placeholder={"One name per line, e.g.\nJane Smith\nSmith, Jane"}
-              className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
-            />
-            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-              Accepts First Last or Last, First. Hides matching canvassers from pattern tables; saved reports keep full data.
-            </span>
-          </label>
+          <ExcludeCanvassersControl
+            names={excludedCanvassersRaw}
+            onNamesChange={setExcludedCanvassersRaw}
+            sections={[
+              { id: "summary", label: "Canvasser summary" },
+              { id: "flagged-nc", label: "Flagged non-contact" },
+              { id: "flagged-c", label: "Flagged contact" },
+              { id: "details", label: "Canvasser details" },
+              { id: "baselines", label: "Baselines and charts" },
+            ]}
+            selected={excludeSections}
+            onSelectedChange={(next) =>
+              setExcludeSections(resolveExcludeSections(next, DEFAULT_NON_CONTACT_EXCLUDE_SECTIONS))
+            }
+            rows={2}
+            help="Leads, outreach teams, volunteers, and anyone else. Accepts First Last or Last, First. Checked tabs hide those names. Saved reports keep full data."
+          />
 
           {error ? (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">

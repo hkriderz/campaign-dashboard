@@ -3,12 +3,19 @@
  * Pure module — no `server-only`.
  */
 import { DateTime } from "luxon";
+import {
+  DEFAULT_KNOCK_EXCLUDE_SECTIONS,
+  type KnockExcludeSections,
+} from "./exclude-sections";
 import type {
   CanvasserGapStats,
   CanvassingGapDetail,
   CanvassingReportResult,
   KnockAnalysisReportMode,
 } from "./types";
+
+export type { KnockExcludeSections };
+export { DEFAULT_KNOCK_EXCLUDE_SECTIONS };
 
 const LA_TIME_ZONE = "America/Los_Angeles";
 
@@ -192,28 +199,41 @@ export function buildShiftFlagRows(
 }
 
 /**
- * Filter gap / shift-flag report surfaces for excluded leads.
- * Knock Analysis pivot (`canvasserStats`) and campaign workbooks stay full-roster.
+ * Drop excluded canvassers from the sections that are checked.
+ * Campaign workbooks stay full-roster. Gap summary counts follow the gap checkbox.
+ * Shift flags are applied by the caller via filterCanvasserStatsForFlags.
  */
 export function filterKnockResultForReports(
   result: CanvassingReportResult | null,
-  excludedCanvassers: Set<string>
+  excludedCanvassers: Set<string>,
+  sections: KnockExcludeSections = DEFAULT_KNOCK_EXCLUDE_SECTIONS
 ): CanvassingReportResult | null {
   if (!result || excludedCanvassers.size === 0) return result;
+  if (!sections.pivot && !sections.gaps) return result;
 
   const keepName = (name: string) => !isExcludedCanvasser(name, excludedCanvassers);
-  const gapDetails = result.gapDetails.filter((row) => keepName(row.canvasserName));
-  const bigGapDetails = result.bigGapDetails.filter((row) => keepName(row.canvasserName));
-  const hourGapDetails = (result.hourGapDetails ?? []).filter((row) => keepName(row.canvasserName));
-  const outlierGapDetails = (result.outlierGapDetails ?? []).filter((row) => keepName(row.canvasserName));
-  const includedStats = result.canvasserStats.filter((row) => keepName(row.canvasserName));
+  const canvasserStats = sections.pivot
+    ? result.canvasserStats.filter((row) => keepName(row.canvasserName))
+    : result.canvasserStats;
+  const gapDetails = sections.gaps ? result.gapDetails.filter((row) => keepName(row.canvasserName)) : result.gapDetails;
+  const bigGapDetails = sections.gaps
+    ? result.bigGapDetails.filter((row) => keepName(row.canvasserName))
+    : result.bigGapDetails;
+  const hourGapDetails = sections.gaps
+    ? (result.hourGapDetails ?? []).filter((row) => keepName(row.canvasserName))
+    : result.hourGapDetails;
+  const outlierGapDetails = sections.gaps
+    ? (result.outlierGapDetails ?? []).filter((row) => keepName(row.canvasserName))
+    : result.outlierGapDetails;
+  const includedStats = sections.gaps
+    ? result.canvasserStats.filter((row) => keepName(row.canvasserName))
+    : result.canvasserStats;
   const totalGapMinutesOver10 = includedStats.reduce((sum, row) => sum + row.totalGapMinutesOver10, 0);
   const largestGapMinutes = includedStats.reduce((max, row) => Math.max(max, row.largestGapMinutes), 0);
 
   return {
     ...result,
-    // Full roster for pivot / productivity views.
-    canvasserStats: result.canvasserStats,
+    canvasserStats,
     gapDetails,
     bigGapDetails,
     hourGapDetails,
@@ -221,15 +241,18 @@ export function filterKnockResultForReports(
     campaignResults: result.campaignResults,
     summary: {
       ...result.summary,
-      // Roster counts stay full; gap tiles reflect filtered gaps only.
       totalCanvassers: result.canvasserStats.length,
       validKnockEvents: result.canvasserStats.reduce((sum, row) => sum + row.knockCount, 0),
-      gapsOver10: gapDetails.length,
-      bigGapsOver30: bigGapDetails.length,
-      gapsOver60: hourGapDetails.length,
-      outlierGapsOver120: outlierGapDetails.length,
-      totalGapMinutesOver10: Math.round(totalGapMinutesOver10 * 10) / 10,
-      largestGapMinutes: Math.round(largestGapMinutes * 10) / 10,
+      gapsOver10: sections.gaps ? gapDetails.length : result.summary.gapsOver10,
+      bigGapsOver30: sections.gaps ? bigGapDetails.length : result.summary.bigGapsOver30,
+      gapsOver60: sections.gaps ? (hourGapDetails ?? []).length : result.summary.gapsOver60,
+      outlierGapsOver120: sections.gaps ? (outlierGapDetails ?? []).length : result.summary.outlierGapsOver120,
+      totalGapMinutesOver10: sections.gaps
+        ? Math.round(totalGapMinutesOver10 * 10) / 10
+        : result.summary.totalGapMinutesOver10,
+      largestGapMinutes: sections.gaps
+        ? Math.round(largestGapMinutes * 10) / 10
+        : result.summary.largestGapMinutes,
     },
   };
 }

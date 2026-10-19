@@ -34,6 +34,9 @@ export type DoorknockCanvasserRow = {
   contactRate: number;
   surveyAnswers: Record<string, number>;
   nonContacts: Record<string, number>;
+  geoCheck?: string;
+  timingCheck?: string;
+  lastSync?: string;
 };
 
 export type DoorknockCampaignDetection = {

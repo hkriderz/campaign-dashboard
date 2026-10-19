@@ -1,8 +1,14 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ExcludeCanvassersControl from "@/components/canvassing/ExcludeCanvassersControl";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
+import {
+  DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS,
+  resolveExcludeSections,
+  type DoorknockExcludeSections,
+} from "@/lib/canvassing/exclude-sections";
 import {
   DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
   type DoorknockCampaignReport,
@@ -28,7 +34,16 @@ type PersistedDoorknockResultsState = {
   activeReport: SavedDoorknockResultsReport | null;
   settings: DoorknockSummarySettings;
   excludedCanvassersRaw: string;
+  excludeSections: DoorknockExcludeSections;
 };
+
+const DOORKNOCK_EXCLUDE_SECTIONS = [
+  { id: "pivot", label: "Pivot" },
+  { id: "low_doors_low_support", label: "Low doors" },
+  { id: "low_contact_rate", label: "Low contact rate" },
+  { id: "survey_support_struggle", label: "Survey support" },
+  { id: "non_contact_outlier", label: "Non-contact outliers" },
+];
 
 const SUMMARY_LABELS: Record<DoorknockSummaryFlagKind, string> = {
   low_doors_low_support: "People who knocked on less than the target doors with low SS",
@@ -455,15 +470,19 @@ function filterCampaignReport(
 
 function filterDoorknockReport(
   report: DoorknockResultsReport | null,
-  excludedCanvassers: Set<string>
+  excludedCanvassers: Set<string>,
+  sections: DoorknockExcludeSections
 ): DoorknockResultsReport | null {
   if (!report || excludedCanvassers.size === 0) return report;
 
   const keepName = (name: string) => !isExcludedCanvasser(name, excludedCanvassers);
-  const campaigns = report.campaigns.map((campaign) => filterCampaignReport(campaign, keepName));
-  const flags = (Object.keys(report.summary.flags) as DoorknockSummaryFlagKind[]).reduce<DoorknockResultsReport["summary"]["flags"]>(
+  const campaigns = sections.pivot
+    ? report.campaigns.map((campaign) => filterCampaignReport(campaign, keepName))
+    : report.campaigns;
+  const flags = (Object.keys(emptyFlags()) as DoorknockSummaryFlagKind[]).reduce<DoorknockResultsReport["summary"]["flags"]>(
     (nextFlags, kind) => {
-      nextFlags[kind] = report.summary.flags[kind].filter((flag) => keepName(flag.canvasserName));
+      const source = report.summary.flags[kind] ?? [];
+      nextFlags[kind] = sections[kind] ? source.filter((flag) => keepName(flag.canvasserName)) : source;
       return nextFlags;
     },
     emptyFlags()
@@ -493,6 +512,7 @@ function emptyPersistedState(): PersistedDoorknockResultsState {
     activeReport: null,
     settings: DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
     excludedCanvassersRaw: "",
+    excludeSections: DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS,
   };
 }
 
@@ -509,6 +529,7 @@ function readPersistedState(): PersistedDoorknockResultsState {
       settings: parsed.settings ?? DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
       excludedCanvassersRaw:
         typeof parsed.excludedCanvassersRaw === "string" ? parsed.excludedCanvassersRaw : "",
+      excludeSections: resolveExcludeSections(parsed.excludeSections, DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS),
     };
   } catch {
     return emptyPersistedState();
@@ -922,6 +943,7 @@ export default function DoorknocksResultsClient() {
   const [savedReports, setSavedReports] = useState<SavedDoorknockResultsListItem[]>([]);
   const [activeTab, setActiveTab] = useState("summary");
   const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState("");
+  const [excludeSections, setExcludeSections] = useState<DoorknockExcludeSections>(DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS);
   const [showSummaryDetails, setShowSummaryDetails] = useState(false);
   const [loadingReports, setLoadingReports] = useState(true);
   const [running, setRunning] = useState(false);
@@ -933,8 +955,8 @@ export default function DoorknocksResultsClient() {
   const rawCurrentReport = activeReport ?? result;
   const excludedCanvassers = useMemo(() => parseExcludedCanvassers(excludedCanvassersRaw), [excludedCanvassersRaw]);
   const currentReport = useMemo(
-    () => filterDoorknockReport(rawCurrentReport, excludedCanvassers),
-    [excludedCanvassers, rawCurrentReport]
+    () => filterDoorknockReport(rawCurrentReport, excludedCanvassers, excludeSections),
+    [excludeSections, excludedCanvassers, rawCurrentReport]
   );
   const currentName = activeReport?.name || reportName || `Doorknocks results ${currentReport?.summary.reportDate ?? ""}`.trim();
   const excludedVisibleCount = rawCurrentReport
@@ -952,6 +974,7 @@ export default function DoorknocksResultsClient() {
     setResult(persisted.result);
     setActiveReport(persisted.activeReport);
     setExcludedCanvassersRaw(persisted.excludedCanvassersRaw);
+    setExcludeSections(persisted.excludeSections);
     setActiveTab(
       persisted.activeReport?.campaigns[0]?.id ?? persisted.result?.campaigns[0]?.id ?? "summary"
     );
@@ -987,9 +1010,9 @@ export default function DoorknocksResultsClient() {
     if (!hasHydratedSession) return;
     window.sessionStorage.setItem(
       SESSION_KEY,
-      JSON.stringify({ reportName, result, activeReport, settings, excludedCanvassersRaw })
+      JSON.stringify({ reportName, result, activeReport, settings, excludedCanvassersRaw, excludeSections })
     );
-  }, [activeReport, excludedCanvassersRaw, hasHydratedSession, reportName, result, settings]);
+  }, [activeReport, excludeSections, excludedCanvassersRaw, hasHydratedSession, reportName, result, settings]);
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -1174,8 +1197,8 @@ export default function DoorknocksResultsClient() {
             which canvassers appear in the Summary flag boxes before you run the report.
           </li>
           <li>
-            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude exceptions</span> — hide
-            leads/supervisors from pivots and flags when their schedules are irregular (names stay in the saved file).
+            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude canvassers</span> — check the
+            pivot or summary boxes those names should leave. Names stay in the saved file.
           </li>
         </ul>
       </section>
@@ -1221,22 +1244,19 @@ export default function DoorknocksResultsClient() {
 
           <SettingsPanel settings={settings} setSettings={setSettings} />
 
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Exclude canvasser exceptions
-            </span>
-            <textarea
-              value={excludedCanvassersRaw}
-              onChange={(event) => setExcludedCanvassersRaw(event.target.value)}
-              rows={3}
-              placeholder={"One name per line, e.g.\nJane Smith\nSmith, Jane\nSupervisor Name"}
-              className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:border-white/10 dark:bg-gray-950 dark:text-gray-100"
-            />
-            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-              Add names before or after running a report. Matching ignores capitalization and first/last name order; use one name per line for comma-formatted names.
-              {excludedVisibleCount > 0 ? ` ${excludedVisibleCount} matching row${excludedVisibleCount === 1 ? "" : "s"} currently excluded.` : ""}
-            </span>
-          </label>
+          <ExcludeCanvassersControl
+            names={excludedCanvassersRaw}
+            onNamesChange={setExcludedCanvassersRaw}
+            sections={DOORKNOCK_EXCLUDE_SECTIONS}
+            selected={excludeSections}
+            onSelectedChange={(next) => setExcludeSections(resolveExcludeSections(next, DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS))}
+            help="Leads, outreach teams, volunteers, and anyone else. Matching ignores capitalization and first/last name order. Checked sections hide those names; the saved file keeps them."
+            matchNote={
+              excludedVisibleCount > 0
+                ? `${excludedVisibleCount} matching row${excludedVisibleCount === 1 ? "" : "s"} currently excluded.`
+                : ""
+            }
+          />
 
           {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">{error}</div> : null}
           {message ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">{message}</div> : null}
@@ -1285,22 +1305,20 @@ export default function DoorknocksResultsClient() {
       {currentReport ? (
         <section className="space-y-6">
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-900 dark:bg-emerald-950/20">
-            <label className="block">
-              <span className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                Adjust canvasser exceptions for this report
-              </span>
-              <textarea
-                value={excludedCanvassersRaw}
-                onChange={(event) => setExcludedCanvassersRaw(event.target.value)}
-                rows={2}
-                placeholder={"Jane Smith\nSmith, Jane"}
-                className="mt-2 w-full rounded-xl border border-emerald-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200 dark:border-emerald-900 dark:bg-gray-950 dark:text-gray-100"
-              />
-            </label>
-            <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200">
-              Updates tables, summary boxes, summary flag lists, and exports immediately.
-              {excludedVisibleCount > 0 ? ` ${excludedVisibleCount} matching row${excludedVisibleCount === 1 ? "" : "s"} excluded.` : ""}
-            </p>
+            <ExcludeCanvassersControl
+              names={excludedCanvassersRaw}
+              onNamesChange={setExcludedCanvassersRaw}
+              sections={DOORKNOCK_EXCLUDE_SECTIONS}
+              selected={excludeSections}
+              onSelectedChange={(next) => setExcludeSections(resolveExcludeSections(next, DEFAULT_DOORKNOCK_EXCLUDE_SECTIONS))}
+              rows={2}
+              help="Updates the checked sections and exports immediately."
+              matchNote={
+                excludedVisibleCount > 0
+                  ? `${excludedVisibleCount} matching row${excludedVisibleCount === 1 ? "" : "s"} excluded.`
+                  : ""
+              }
+            />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

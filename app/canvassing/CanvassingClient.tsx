@@ -3,6 +3,12 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
+import ExcludeCanvassersControl from "@/components/canvassing/ExcludeCanvassersControl";
+import {
+  DEFAULT_KNOCK_EXCLUDE_SECTIONS,
+  resolveExcludeSections,
+  type KnockExcludeSections,
+} from "@/lib/canvassing/exclude-sections";
 import {
   buildShiftFlagRows,
   currentLaTimeHm,
@@ -67,6 +73,7 @@ type PersistedKnockAnalysisState = {
   previewResult: CanvassingReportResult | null;
   activeReport: SavedCanvassingReport | null;
   excludedCanvassersRaw: string;
+  excludeSections: KnockExcludeSections;
   activeResultsTab: ResultsTab;
   reportMode: KnockAnalysisReportMode;
   startTime: string;
@@ -427,7 +434,7 @@ function shiftFlagsListText(
 }
 
 function excludedLeadsListText(leads: CanvasserGapStats[]): string {
-  const lines = [`Excluded from gap report (leads) (${leads.length})`, ""];
+  const lines = [`Excluded canvassers (${leads.length})`, ""];
   if (!leads.length) {
     lines.push("None.");
     return lines.join("\n");
@@ -533,6 +540,7 @@ function readPersistedState(): PersistedKnockAnalysisState {
     previewResult: null,
     activeReport: null,
     excludedCanvassersRaw: "",
+    excludeSections: DEFAULT_KNOCK_EXCLUDE_SECTIONS,
     activeResultsTab: "pivot",
     reportMode: "lunch",
     startTime: lunchDefaults.startTime,
@@ -557,6 +565,7 @@ function readPersistedState(): PersistedKnockAnalysisState {
       activeReport: parsed.activeReport ?? null,
       excludedCanvassersRaw:
         typeof parsed.excludedCanvassersRaw === "string" ? parsed.excludedCanvassersRaw : "",
+      excludeSections: resolveExcludeSections(parsed.excludeSections, DEFAULT_KNOCK_EXCLUDE_SECTIONS),
       activeResultsTab: tab,
       reportMode: mode,
       startTime: typeof parsed.startTime === "string" ? parsed.startTime : modeDefaults.startTime,
@@ -1018,7 +1027,8 @@ function ReportResults({
   shiftSettings,
   customGapMinutes,
   excludedLeads,
-  excludedCanvassers,
+  excludeSections,
+  shiftStats,
   onCopyText,
 }: {
   result: CanvassingReportResult;
@@ -1031,12 +1041,13 @@ function ReportResults({
   /** When set, an extra gap list is shown for gaps at or above this many minutes. */
   customGapMinutes: number | null;
   excludedLeads: CanvasserGapStats[];
-  excludedCanvassers: Set<string>;
+  excludeSections: KnockExcludeSections;
+  shiftStats: CanvasserGapStats[];
   onCopyText: CopyTextHandler;
 }) {
   const displayDate = reportDate || result.summary.detectedReportDate;
   const isoDate = resolveReportDate(result, reportDate);
-  const flagStats = filterCanvasserStatsForFlags(result.canvasserStats, excludedCanvassers);
+  const flagStats = shiftStats;
   const shiftRows = buildShiftFlagRows(flagStats, shiftSettings, isoDate);
   const lateFirst = shiftRows.filter((row) => row.isLateFirstKnock).sort(
     (a, b) => (b.minutesLateAfterStart ?? 0) - (a.minutesLateAfterStart ?? 0)
@@ -1065,7 +1076,9 @@ function ReportResults({
     {
       label: "Canvassers in report",
       value: formatNumber(result.summary.totalCanvassers),
-      help: excludedLeads.length ? `${excludedLeads.length} leads excluded from gap report` : "From knock details",
+      help: excludedLeads.length
+        ? `${excludedLeads.length} canvassers excluded from checked sections`
+        : "From knock details",
     },
     {
       label: "Gaps over 1 hour",
@@ -1121,11 +1134,18 @@ function ReportResults({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-                Excluded from gap report (leads)
+                Excluded canvassers
               </h3>
               <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
-                Still in the saved data, campaign workbooks, and the knock analysis pivot; omitted from gap/shift
-                flags only.
+                Hidden from{" "}
+                {[
+                  excludeSections.pivot ? "pivot" : "",
+                  excludeSections.gaps ? "gap sections" : "",
+                  excludeSections.shift ? "shift flags" : "",
+                ]
+                  .filter(Boolean)
+                  .join(", ") || "no sections"}
+                . Saved data and campaign workbooks still include them.
               </p>
             </div>
             <CopyMiniButton
@@ -1262,7 +1282,7 @@ function ReportResults({
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Campaign result workbooks</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Productivity totals keep all canvassers, including excluded leads.
+            Productivity totals keep all canvassers, including excluded names.
           </p>
           {result.campaignResults.map((campaign) => (
             <CampaignResultCard
@@ -1286,6 +1306,7 @@ export default function CanvassingClient() {
   const [savedReports, setSavedReports] = useState<SavedCanvassingReportListItem[]>([]);
   const [activeReport, setActiveReport] = useState<SavedCanvassingReport | null>(initialState.activeReport);
   const [excludedCanvassersRaw, setExcludedCanvassersRaw] = useState(initialState.excludedCanvassersRaw);
+  const [excludeSections, setExcludeSections] = useState<KnockExcludeSections>(initialState.excludeSections);
   const [activeResultsTab, setActiveResultsTab] = useState<ResultsTab>(initialState.activeResultsTab);
   const [reportMode, setReportMode] = useState<KnockAnalysisReportMode>(initialState.reportMode);
   const [startTime, setStartTime] = useState(initialState.startTime);
@@ -1305,9 +1326,13 @@ export default function CanvassingClient() {
   const rawCurrentResult = activeReport ?? previewResult;
   const excludedCanvassers = useMemo(() => parseExcludedCanvassers(excludedCanvassersRaw), [excludedCanvassersRaw]);
   const currentResult = useMemo(
-    () => filterKnockResultForReports(rawCurrentResult, excludedCanvassers),
-    [excludedCanvassers, rawCurrentResult]
+    () => filterKnockResultForReports(rawCurrentResult, excludedCanvassers, excludeSections),
+    [excludeSections, excludedCanvassers, rawCurrentResult]
   );
+  const shiftStats = useMemo(() => {
+    const stats = rawCurrentResult?.canvasserStats ?? [];
+    return excludeSections.shift ? filterCanvasserStatsForFlags(stats, excludedCanvassers) : stats;
+  }, [excludeSections.shift, excludedCanvassers, rawCurrentResult]);
   const excludedLeads = useMemo(
     () => excludedLeadRows(rawCurrentResult, excludedCanvassers),
     [excludedCanvassers, rawCurrentResult]
@@ -1356,6 +1381,7 @@ export default function CanvassingClient() {
       previewResult,
       activeReport,
       excludedCanvassersRaw,
+      excludeSections,
       activeResultsTab,
       reportMode,
       startTime,
@@ -1372,6 +1398,7 @@ export default function CanvassingClient() {
     asOfTime,
     customGapMinutesRaw,
     endTime,
+    excludeSections,
     excludedCanvassersRaw,
     lunchClockOutTime,
     lunchReturnTime,
@@ -1577,8 +1604,8 @@ export default function CanvassingClient() {
         <hr className="section-hero__rule" />
         <p className="mt-3 max-w-3xl text-[var(--section-muted)]">
           Upload PDI Canvasser Details (knock timeline) plus optional campaign result workbooks.
-          Choose a Lunch or Final gap report, set shift times, and exclude leads from schedule
-          sections while keeping them in the saved data. Run Report also appends knock rows to
+          Choose a Lunch or Final gap report, set shift times, and exclude canvassers from the
+          sections you check while keeping them in the saved data. Run Report also appends knock rows to
           Unique IDs (duplicate PRIMARYID + time + question + response skipped). Save still writes
           the gap report as before.
         </p>
@@ -1592,8 +1619,8 @@ export default function CanvassingClient() {
             early vs last-door-knock end time, plus the same 1h / 2h+ gap lists and pivot.
           </li>
           <li>
-            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude leads</span> — omit
-            irregular lead schedules from gap/shift flags only; the pivot and campaign workbooks still include them.
+            <span className="font-medium text-gray-800 dark:text-gray-200">Exclude canvassers</span> — check
+            pivot, gap sections, or shift flags. Campaign workbooks keep every name.
           </li>
         </ul>
       </section>
@@ -1798,25 +1825,23 @@ export default function CanvassingClient() {
             </div>
           </div>
 
-          <label className="block">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
-              Exclude leads from gap report
-            </span>
-            <textarea
-              value={excludedCanvassersRaw}
-              onChange={(event) => setExcludedCanvassersRaw(event.target.value)}
-              rows={3}
-              placeholder={"One name per line, e.g.\nJane Smith\nSmith, Jane\nLead Name"}
-              className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-200 dark:border-white/10 dark:bg-gray-950 dark:text-gray-100"
-            />
-            <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">
-              Accepts First Last or Last, First. Omits irregular lead schedules from gap/shift flags only — not
-              the knock analysis pivot. Keeps them in saved source data and campaign workbooks.
-              {excludedLeads.length
-                ? ` ${excludedLeads.length} matching lead${excludedLeads.length === 1 ? "" : "s"} currently excluded from gap/shift flags.`
-                : ""}
-            </span>
-          </label>
+          <ExcludeCanvassersControl
+            names={excludedCanvassersRaw}
+            onNamesChange={setExcludedCanvassersRaw}
+            sections={[
+              { id: "pivot", label: "Pivot" },
+              { id: "gaps", label: "Gap sections" },
+              { id: "shift", label: "Shift flags" },
+            ]}
+            selected={excludeSections}
+            onSelectedChange={(next) => setExcludeSections(resolveExcludeSections(next, DEFAULT_KNOCK_EXCLUDE_SECTIONS))}
+            help="Leads, outreach teams, volunteers, and anyone else. Accepts First Last or Last, First. Checked sections hide those names. Saved data and campaign workbooks keep them."
+            matchNote={
+              excludedLeads.length
+                ? `${excludedLeads.length} matching name${excludedLeads.length === 1 ? "" : "s"} in this report.`
+                : ""
+            }
+          />
 
           {error ? (
             <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
@@ -1917,7 +1942,8 @@ export default function CanvassingClient() {
           shiftSettings={shiftSettings}
           customGapMinutes={customGapMinutes}
           excludedLeads={excludedLeads}
-          excludedCanvassers={excludedCanvassers}
+          excludeSections={excludeSections}
+          shiftStats={shiftStats}
           onCopyText={(text, successMessage) => void copyTextToClipboard(text, successMessage)}
         />
       ) : null}

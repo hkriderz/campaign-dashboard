@@ -78,6 +78,14 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
                 Doorknocks and Results
               </Link>
               <Link
+                href="/canvassing/data-checks"
+                onClick={onNavClick}
+                className={navLinkClass(pathname.startsWith("/canvassing/data-checks"))}
+              >
+                <span className="w-1.5 h-1.5 rounded-none bg-cyan-700 dark:bg-cyan-400 flex-shrink-0" />
+                Data Checks
+              </Link>
+              <Link
                 href="/canvassing/non-contact-patterns"
                 onClick={onNavClick}
                 className={navLinkClass(pathname.startsWith("/canvassing/non-contact-patterns"))}

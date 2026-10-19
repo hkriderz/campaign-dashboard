@@ -97,14 +97,35 @@ function buildLowContactFlags(campaign: DoorknockCampaignReport, settings: Doork
     }));
 }
 
-function buildSurveyFlags(campaign: DoorknockCampaignReport, settings: DoorknockSummarySettings): DoorknockSummaryFlag[] {
+export type DoorknockSummaryOptions = {
+  /** Lean Support counts toward the struggle rate only on the first survey question. */
+  leanSupportFirstQuestionOnly?: boolean;
+};
+
+function countsAsSupport(
+  answer: string,
+  settings: DoorknockSummarySettings,
+  countLeanSupport: boolean
+): boolean {
+  if (!answerMatches(answer, settings.supportAnswerLabels)) return false;
+  if (countLeanSupport) return true;
+  return !answerMatches(answer, ["lean support"]);
+}
+
+function buildSurveyFlags(
+  campaign: DoorknockCampaignReport,
+  settings: DoorknockSummarySettings,
+  options?: DoorknockSummaryOptions
+): DoorknockSummaryFlag[] {
   const groups = selectedSurveyGroups(campaign, settings);
+  const first = firstSurveyGroup(campaign);
   const threshold = settings.surveySupportThresholdPct / 100;
   const flags: DoorknockSummaryFlag[] = [];
 
   for (const row of campaign.rows) {
     if (row.contacts <= 0) continue;
     for (const group of groups) {
+      const countLeanSupport = !options?.leanSupportFirstQuestionOnly || group === first;
       let support = 0;
       let strongSupport = 0;
       let undecided = 0;
@@ -112,7 +133,7 @@ function buildSurveyFlags(campaign: DoorknockCampaignReport, settings: Doorknock
       for (const col of group.columns) {
         const value = row.surveyAnswers[col.key] ?? 0;
         answered += value;
-        if (answerMatches(col.answer, settings.supportAnswerLabels)) support += value;
+        if (countsAsSupport(col.answer, settings, countLeanSupport)) support += value;
         if (answerMatches(col.answer, settings.strongSupportAnswerLabels)) strongSupport += value;
         if (answerMatches(col.answer, settings.undecidedAnswerLabels)) undecided += value;
       }
@@ -203,13 +224,14 @@ function detectOverallReportDate(campaigns: DoorknockCampaignReport[]): string |
 
 export function summarizeDoorknockCampaigns(
   campaigns: DoorknockCampaignReport[],
-  settings: DoorknockSummarySettings
+  settings: DoorknockSummarySettings,
+  options?: DoorknockSummaryOptions
 ): DoorknockResultsSummary {
   const flags = flagBucket();
   for (const campaign of campaigns) {
     flags.low_doors_low_support.push(...buildLowDoorsFlags(campaign, settings));
     flags.low_contact_rate.push(...buildLowContactFlags(campaign, settings));
-    flags.survey_support_struggle.push(...buildSurveyFlags(campaign, settings));
+    flags.survey_support_struggle.push(...buildSurveyFlags(campaign, settings, options));
     flags.non_contact_outlier.push(...buildNonContactFlags(campaign, settings));
   }
 
