@@ -278,6 +278,7 @@ class CsvDistrictProcessor:
                 result,
                 district_label=label,
                 selected_labels=selected,
+                layer_id=layer.layer_id,
                 targeted_mode=False,
                 review_confidence_threshold=self.config.review_confidence_threshold,
             )
@@ -298,6 +299,7 @@ class CsvDistrictProcessor:
                 result,
                 district_label=label,
                 selected_labels=selected,
+                layer_id=layer.layer_id,
                 targeted_mode=True,
                 review_confidence_threshold=self.config.review_confidence_threshold,
             )

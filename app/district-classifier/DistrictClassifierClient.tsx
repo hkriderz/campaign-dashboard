@@ -279,6 +279,9 @@ export default function DistrictClassifierClient() {
                       <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
                         Target {DISTRICT_RANGES[layer.id].label}s
                       </span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Ctrl-click to choose several. Leave empty to export every district in this layer as one file.
+                      </span>
                       <select
                         multiple
                         disabled={!layers.has(layer.id)}

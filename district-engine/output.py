@@ -3,7 +3,8 @@ Streaming CSV export helpers for district classification jobs.
 
 Rows are written as they are processed, so large uploads do not need to be held
 in memory. Export buckets are intentionally simple:
-- matched_<label>.csv for selected target districts
+- matched_<label>.csv for each selected target district
+- matched_all_<layer>.csv for every district in a layer when none are selected
 - other_districts.csv for rows matched outside selected districts
 - outside_layer.csv for geocoded rows outside a selected polygon layer
 - inferred_districts.csv for non-polygon inference rows
@@ -51,11 +52,17 @@ def result_label(result: MatchResult, label_prefix: str = "") -> str | None:
     return f"{label_prefix}{result.district}" if label_prefix else result.district
 
 
+def grouped_layer_bucket(layer_id: str) -> str:
+    """One export for every district in a layer when the user selects none."""
+    return f"matched_all_{safe_bucket_label(layer_id or 'districts')}"
+
+
 def export_bucket_for_result(
     result: MatchResult,
     *,
     district_label: str | None,
     selected_labels: set[str],
+    layer_id: str = "",
     targeted_mode: bool = False,
     review_confidence_threshold: float = DEFAULT_REVIEW_CONFIDENCE_THRESHOLD,
 ) -> str:
@@ -71,8 +78,8 @@ def export_bucket_for_result(
         return "manual_review"
     if selected_labels and district_label not in selected_labels:
         return "other_districts" if targeted_mode else "outside_target"
-    if targeted_mode and not selected_labels:
-        return "other_districts"
+    if not selected_labels:
+        return grouped_layer_bucket(layer_id or result.district_layer)
     return f"matched_{safe_bucket_label(district_label or result.district)}"
 
 

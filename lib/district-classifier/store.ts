@@ -140,6 +140,7 @@ function classifyExportKind(fileName: string): DistrictExportFile["kind"] {
   if (fileName.includes("geocode-failed")) return "geocode_failed";
   if (fileName.includes("geocode_failed")) return "geocode_failed";
   if (fileName.includes("manual_review")) return "manual_review";
+  if (/matched_all_/i.test(fileName)) return "matched";
   if (/matched_(cd|ad)\d+\.csv$/i.test(fileName) || /-(cd|ad)\d+\.csv$/i.test(fileName)) return "matched";
   return "other";
 }
