@@ -26,6 +26,8 @@ export type QcRecontactSelection = {
   priorActor: string;
   /** Empty string = every QC phonebanker. */
   qcCaller: string;
+  /** When true, only QC calls with a non-empty Disclaimer/Notes answer. */
+  hasNotes: boolean;
 };
 
 export type RecontactCallSummary = {
@@ -47,6 +49,8 @@ export type RecontactCallSummary = {
   /** Script question that matched “were you contacted”. */
   contactedQuestion: string;
   contactedAnswer: string;
+  /** Free-text Disclaimer/Notes short answer. Empty when absent or on older snapshots. */
+  notesAnswer: string;
 };
 
 export type PriorContactSummary = {

@@ -12,6 +12,7 @@ export const RECONTACT_CSV_HEADERS = [
   "Voter name",
   "Voter address",
   "Were you contacted",
+  "QC notes",
   "QC date",
   "QC time",
   "QC list",
@@ -94,6 +95,7 @@ export function recontactPairsToCsvRows(
       qc.voterName ?? "",
       qc.voterAddress ?? "",
       qc.contactedAnswer ?? "",
+      qc.notesAnswer ?? "",
       qc.callDate,
       timeFromIso(qc.callAt),
       qc.campaignName,
@@ -137,6 +139,7 @@ export const RECONTACT_TABLE_HEADERS = [
   "QC date",
   "QC list",
   "Were you contacted",
+  "Notes",
   "QC polling",
   "QC result",
 ] as const;
@@ -176,6 +179,7 @@ export function recontactPairsToTableRows(
       formatShortUsDate(qc.callDate),
       qc.campaignName,
       qc.contactedAnswer ?? "",
+      qc.notesAnswer ?? "",
       displayRecontactResultLabel(qc.pollingLabel, profile),
       displayRecontactResultLabel(qc.finalResultLabel, profile),
     ];

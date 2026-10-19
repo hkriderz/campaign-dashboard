@@ -3,11 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatShortUsDate } from "@/lib/slice-key";
 import { formatSurveyColumnHeader, questionCanonicalGroupKey } from "@/lib/survey-i18n/column-label-gloss";
+import { questionLooksLikeDisclaimerNotes } from "@/lib/survey-i18n/disclaimer-notes";
 import { questionLooksLikeDisclaimer } from "@/lib/survey-i18n/rules";
 import type { SurveyScriptProfile } from "@/lib/types";
 import {
   changeKindLabel,
   displayRecontactResultLabel,
+  recordedSurveyAnswer,
   recontactChannelLabel,
   type QcRecontactDetailPayload,
   type QcRecontactPair,
@@ -31,10 +33,22 @@ function formatThreadStamp(at: string): string {
 
 function usableAnswers(rows: readonly QcRecontactSurveyAnswer[]): QcRecontactSurveyAnswer[] {
   return rows.filter((row) => {
+    // Drop Yes/No disclaimer only; Disclaimer/Notes short answers stay.
     if (questionLooksLikeDisclaimer(row.questionName)) return false;
     const av = row.answerValue.trim();
     return Boolean(row.questionName.trim()) && av && av.toLowerCase() !== "[no answer recorded]";
   });
+}
+
+function notesFromAnswers(rows: readonly QcRecontactSurveyAnswer[] | undefined): string {
+  if (!rows?.length) return "";
+  let notes = "";
+  for (const row of rows) {
+    if (!questionLooksLikeDisclaimerNotes(row.questionName)) continue;
+    const av = recordedSurveyAnswer(row.answerValue);
+    if (av) notes = av;
+  }
+  return notes;
 }
 
 function alignAnswers(
@@ -135,6 +149,12 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
     [detail, surveyScriptProfile]
   );
 
+  const notesText = useMemo(() => {
+    const fromPair = recordedSurveyAnswer(pair?.qc.notesAnswer);
+    if (fromPair) return fromPair;
+    return notesFromAnswers(detail?.qcAnswers);
+  }, [pair, detail]);
+
   if (!pair) return null;
 
   const priors = pair.priors;
@@ -230,6 +250,10 @@ export default function QcRecontactModal({ tagId, pair, surveyScriptProfile, onC
                 <div>
                   <dt className="text-gray-500 dark:text-gray-400">Were you contacted</dt>
                   <dd>{pair.qc.contactedAnswer?.trim() || "—"}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500 dark:text-gray-400">Notes</dt>
+                  <dd className="whitespace-pre-wrap break-words">{notesText || "—"}</dd>
                 </div>
                 <div>
                   <dt className="text-gray-500 dark:text-gray-400">Polling</dt>

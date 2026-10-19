@@ -2,9 +2,22 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import { formatOverviewPercent, overviewPercentBandClass } from "@/lib/qc-recontact/canvasser-overview";
+import {
+  buildOverviewDetailTsv,
+  defaultVisibleOverviewDetailColumnIds,
+  filterOverviewRowsByHasNotes,
+  loadOverviewDetailColumnIds,
+  overviewDetailCellValue,
+  overviewDetailHeadersForColumns,
+  PHONEBANKER_OVERVIEW_DETAIL_COLS_STORAGE_KEY,
+  saveOverviewDetailColumnIds,
+  toggleOverviewDetailColumn,
+  type OverviewDetailColumnId,
+} from "@/lib/qc-recontact/overview-detail-columns";
 import {
   buildPhonebankerOverviewCsv,
   phonebankerOverviewExportFilename,
@@ -22,8 +35,6 @@ type ApiResponse<T> = {
   data?: T;
   error?: string;
 };
-
-const DETAIL_COL_SPAN = 21;
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
@@ -61,44 +72,61 @@ function FamilyCells({ block }: { block: PhonebankerFamilyBlock }) {
   );
 }
 
-function DetailTable({ details }: { details: PhonebankerOverviewDetail[] }) {
+function DetailTable({
+  details,
+  columnIds,
+}: {
+  details: PhonebankerOverviewDetail[];
+  columnIds: readonly OverviewDetailColumnId[];
+}) {
+  const headers = overviewDetailHeadersForColumns(columnIds, "phonebanker");
   return (
     <table className="border-collapse w-full text-xs min-w-max">
       <thead>
         <tr className="text-left text-gray-500 dark:text-gray-400">
-          <th className="px-2.5 py-1.5 font-medium">Phoned by</th>
-          <th className="px-2.5 py-1.5 font-medium">Original flag</th>
-          <th className="px-2.5 py-1.5 font-medium">Original flag date</th>
-          <th className="px-2.5 py-1.5 font-medium">PDI</th>
-          <th className="px-2.5 py-1.5 font-medium">First name</th>
-          <th className="px-2.5 py-1.5 font-medium">Last name</th>
-          <th className="px-2.5 py-1.5 font-medium">Address</th>
-          <th className="px-2.5 py-1.5 font-medium">Were you contacted?</th>
-          <th className="px-2.5 py-1.5 font-medium">Polling</th>
-          <th className="px-2.5 py-1.5 font-medium">Final result</th>
-          <th className="px-2.5 py-1.5 font-medium">QC caller</th>
-          <th className="px-2.5 py-1.5 font-medium">Call date</th>
-          <th className="px-2.5 py-1.5 font-medium">Call time</th>
+          {headers.map((header) => (
+            <th key={header} className="px-2.5 py-1.5 font-medium">
+              {header}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
         {details.map((detail) => (
           <tr key={`${detail.pdiId}-${detail.callDate}-${detail.callTime}`}>
-            <td className="px-2.5 py-1.5">{detail.phonebankerName}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.originalFlagFamily)}`}>{detail.originalFlag}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{formatShortUsDate(detail.originalFlagDate)}</td>
-            <td className="px-2.5 py-1.5 font-mono">{detail.pdiId}</td>
-            <td className="px-2.5 py-1.5">{detail.voterFirstName}</td>
-            <td className="px-2.5 py-1.5">{detail.voterLastName}</td>
-            <td className="px-2.5 py-1.5">{detail.address}</td>
-            <td className="px-2.5 py-1.5">{detail.contactedAnswer || "—"}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.pollingFamily)}`}>{detail.pollingLabel || "—"}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.finalResultFamily)}`}>
-              {detail.finalResultLabel || "—"}
-            </td>
-            <td className="px-2.5 py-1.5">{detail.callerName}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{formatShortUsDate(detail.callDate)}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{detail.callTime || "—"}</td>
+            {columnIds.map((id) => {
+              let text = overviewDetailCellValue(detail, id);
+              if (id === "originalFlagDate" || id === "callDate") text = formatShortUsDate(text) || text;
+              if (
+                (id === "contactedAnswer" ||
+                  id === "notesAnswer" ||
+                  id === "pollingLabel" ||
+                  id === "finalResultLabel" ||
+                  id === "callTime") &&
+                !text
+              ) {
+                text = "—";
+              }
+              const tone =
+                id === "originalFlag"
+                  ? familyTone(detail.originalFlagFamily)
+                  : id === "pollingLabel"
+                    ? familyTone(detail.pollingFamily)
+                    : id === "finalResultLabel"
+                      ? familyTone(detail.finalResultFamily)
+                      : "";
+              const mono = id === "pdiId" ? "font-mono" : "";
+              const nums =
+                id === "originalFlagDate" || id === "callDate" || id === "callTime" ? "tabular-nums" : "";
+              const title = id === "notesAnswer" && detail.notesAnswer ? detail.notesAnswer : undefined;
+              const display =
+                id === "notesAnswer" && text.length > 48 ? `${text.slice(0, 48)}…` : text;
+              return (
+                <td key={id} className={`px-2.5 py-1.5 ${tone} ${mono} ${nums}`} title={title}>
+                  {display}
+                </td>
+              );
+            })}
           </tr>
         ))}
       </tbody>
@@ -114,6 +142,15 @@ export default function PhonebankerOverviewClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openName, setOpenName] = useState<string | null>(null);
+  const [detailColumns, setDetailColumns] = useState<OverviewDetailColumnId[]>(
+    defaultVisibleOverviewDetailColumnIds
+  );
+  const [hasNotesOnly, setHasNotesOnly] = useState(false);
+  const [copyLabel, setCopyLabel] = useState("Copy table");
+
+  useEffect(() => {
+    setDetailColumns(loadOverviewDetailColumnIds(PHONEBANKER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
+  }, []);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -151,13 +188,17 @@ export default function PhonebankerOverviewClient() {
     return () => controller.abort();
   }, [loadOverview]);
 
+  const visiblePhonebankers = useMemo(
+    () => filterOverviewRowsByHasNotes(payload?.phonebankers ?? [], hasNotesOnly),
+    [payload, hasNotesOnly]
+  );
   const surveyedTotal = useMemo(
-    () => (payload?.phonebankers ?? []).reduce((sum, row) => sum + row.surveyed, 0),
-    [payload]
+    () => visiblePhonebankers.reduce((sum, row) => sum + row.surveyed, 0),
+    [visiblePhonebankers]
   );
   const totals = useMemo(
-    () => summarizePhonebankerOverview(payload?.phonebankers ?? []),
-    [payload]
+    () => summarizePhonebankerOverview(visiblePhonebankers),
+    [visiblePhonebankers]
   );
 
   function selectCandidate(id: string) {
@@ -167,10 +208,29 @@ export default function PhonebankerOverviewClient() {
     setOpenName(null);
   }
 
+  function setColumns(next: OverviewDetailColumnId[]) {
+    setDetailColumns(next);
+    saveOverviewDetailColumnIds(PHONEBANKER_OVERVIEW_DETAIL_COLS_STORAGE_KEY, next);
+  }
+
   function downloadCsv() {
-    if (!payload?.phonebankers.length) return;
-    const csv = buildPhonebankerOverviewCsv({ phonebankers: payload.phonebankers });
+    if (!visiblePhonebankers.length || !payload) return;
+    const csv = buildPhonebankerOverviewCsv({ phonebankers: visiblePhonebankers }, detailColumns);
     downloadCsvFile(csv, phonebankerOverviewExportFilename(payload.tagId, startDate, endDate));
+  }
+
+  async function copyTable() {
+    if (!visiblePhonebankers.length) return;
+    const details = visiblePhonebankers.flatMap((row) => row.details);
+    const tsv = buildOverviewDetailTsv(details, detailColumns, "phonebanker");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setCopyLabel("Copied");
+      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
+    } catch {
+      setCopyLabel("Copy failed");
+      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
+    }
   }
 
   const selected = Boolean(tagId);
@@ -251,24 +311,41 @@ export default function PhonebankerOverviewClient() {
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[var(--section-rule)]">
             <div className="min-w-0 space-y-1">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {loading ? "Updating…" : `${formatNumber(payload?.phonebankers.length ?? 0)} phonebankers · ${formatNumber(surveyedTotal)} surveyed`}
+                {loading
+                  ? "Updating…"
+                  : `${formatNumber(visiblePhonebankers.length)} phonebankers · ${formatNumber(surveyedTotal)} surveyed`}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Click each phonebanker name to show more details
               </p>
             </div>
-            <button
-              type="button"
-              onClick={downloadCsv}
-              disabled={!payload?.phonebankers.length}
-              className="ml-auto dash-btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
-            >
-              Download CSV
-            </button>
+            <div className="ml-auto flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--section-muted)]">
+                <input
+                  type="checkbox"
+                  checked={hasNotesOnly}
+                  onChange={(event) => setHasNotesOnly(event.target.checked)}
+                  className="rounded border-gray-300 dark:border-gray-600"
+                />
+                Has Notes
+              </label>
+              <OverviewDetailColumnControls
+                visibleIds={detailColumns}
+                onToggle={(id, on) => setColumns(toggleOverviewDetailColumn(detailColumns, id, on))}
+                onDownloadCsv={downloadCsv}
+                onCopyTable={() => void copyTable()}
+                copyLabel={copyLabel}
+                csvDisabled={!visiblePhonebankers.length}
+              />
+            </div>
           </div>
           {!payload?.phonebankers.length ? (
             <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
               No phonebanker recontacts in this date range.
+            </p>
+          ) : !visiblePhonebankers.length ? (
+            <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
+              No phonebanker recontacts with notes in this date range.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -315,12 +392,14 @@ export default function PhonebankerOverviewClient() {
                 </thead>
                 <tbody>
                   {totals ? <OverviewTotalRow row={totals} /> : null}
-                  {(payload?.phonebankers ?? []).map((row) => (
+                  {visiblePhonebankers.map((row) => (
                     <PhonebankerRows
                       key={row.phonebankerName}
                       row={row}
                       open={openName === row.phonebankerName}
                       onToggle={() => setOpenName((current) => (current === row.phonebankerName ? null : row.phonebankerName))}
+                      detailColumns={detailColumns}
+                      summaryColSpan={21}
                     />
                   ))}
                 </tbody>
@@ -366,10 +445,14 @@ function PhonebankerRows({
   row,
   open,
   onToggle,
+  detailColumns,
+  summaryColSpan,
 }: {
   row: PhonebankerOverviewRow;
   open: boolean;
   onToggle: () => void;
+  detailColumns: readonly OverviewDetailColumnId[];
+  summaryColSpan: number;
 }) {
   return (
     <Fragment>
@@ -400,8 +483,8 @@ function PhonebankerRows({
       </tr>
       {open ? (
         <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
-          <td colSpan={DETAIL_COL_SPAN} className="px-3 py-3">
-            <DetailTable details={row.details} />
+          <td colSpan={summaryColSpan} className="px-3 py-3">
+            <DetailTable details={row.details} columnIds={detailColumns} />
           </td>
         </tr>
       ) : null}

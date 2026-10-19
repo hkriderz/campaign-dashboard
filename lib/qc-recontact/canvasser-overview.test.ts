@@ -170,6 +170,7 @@ function qcCall(voter: Voter, canvassLabel = "Talking to Correct Person"): Recon
     canvassLabel,
     contactedQuestion: "Were you contacted?",
     contactedAnswer: voter.contacted,
+    notesAnswer: "",
   };
 }
 

@@ -79,6 +79,9 @@ export async function runPhonebankingBqSnapshotRefresh(args: {
     const batchId = args.batchId ?? "";
     try {
       if (batchId) discardSharedDialerRefresh(batchId);
+      // Staged Refresh all already synced QC pairs on the later counterpart; warm memory only.
+      const { warmQcPairCachesFromDisk } = await import("./qc-recontact/local-pairs");
+      warmQcPairCachesFromDisk();
       return { ok: true, stage: "discard" };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -179,6 +179,14 @@ const COL_GROUPS: ColGroup[] = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getCellValue(row: PhoneBankCsvRow, key: ColKey): string {
+  // Short-answer Disclaimer/Notes scripts have no Yes/No counts — show N/A instead of 0/0.
+  if (
+    (key === "disclaimerYes" || key === "disclaimerNo") &&
+    (row.disclaimerYes ?? 0) === 0 &&
+    (row.disclaimerNo ?? 0) === 0
+  ) {
+    return "N/A";
+  }
   const val = row[key];
   if (val === undefined || val === null) return "0";
   return String(val);

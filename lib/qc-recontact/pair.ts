@@ -128,21 +128,23 @@ export function resolvePhonebankPriors(
     });
 }
 
-/** Fill identity fields missing from snapshots saved before name, address, and Were you contacted. */
+/** Fill identity fields missing from snapshots saved before name, address, Were you contacted, and Notes. */
 export function withRecontactCallDefaults(qc: RecontactCallSummary): RecontactCallSummary {
   const voterName = qc.voterName ?? "";
   const voterAddress = qc.voterAddress ?? "";
   const contactedQuestion = qc.contactedQuestion ?? "";
   const contactedAnswer = qc.contactedAnswer ?? "";
+  const notesAnswer = qc.notesAnswer ?? "";
   if (
     qc.voterName === voterName &&
     qc.voterAddress === voterAddress &&
     qc.contactedQuestion === contactedQuestion &&
-    qc.contactedAnswer === contactedAnswer
+    qc.contactedAnswer === contactedAnswer &&
+    qc.notesAnswer === notesAnswer
   ) {
     return qc;
   }
-  return { ...qc, voterName, voterAddress, contactedQuestion, contactedAnswer };
+  return { ...qc, voterName, voterAddress, contactedQuestion, contactedAnswer, notesAnswer };
 }
 
 /** True when the QC call reached the voter (canvass result is talking to correct person). */
@@ -206,7 +208,12 @@ export function pairWithSupportAnswers(
 }
 
 export function emptyRecontactSelection(): QcRecontactSelection {
-  return { channels: [], outcomes: [], matches: [], priorActor: "", qcCaller: "" };
+  return { channels: [], outcomes: [], matches: [], priorActor: "", qcCaller: "", hasNotes: false };
+}
+
+/** True when the QC call has a non-empty Disclaimer/Notes short answer. */
+export function pairHasNotes(pair: QcRecontactPair): boolean {
+  return Boolean(recordedSurveyAnswer(pair.qc.notesAnswer));
 }
 
 /** Text prior with a stored false inbound flag. Missing flag (old snapshots) is unknown. */
@@ -289,6 +296,7 @@ export function pairMatchesSelections(pair: QcRecontactPair, selection: QcRecont
   if (priorActor && !pairMatchesPriorActor(pair, priorActor)) return false;
   const qcCaller = selection.qcCaller?.trim() ?? "";
   if (qcCaller && !pairMatchesQcCaller(pair, qcCaller)) return false;
+  if (selection.hasNotes && !pairHasNotes(pair)) return false;
   return true;
 }
 

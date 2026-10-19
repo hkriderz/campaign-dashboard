@@ -34,6 +34,7 @@ export {
   emptyRecontactSelection,
   filterPairsByQcDateRange,
   firstClassifiablePrior,
+  pairHasNotes,
   pairHasNoReply,
   pairHasQcContact,
   pairIsUsefulRecontact,

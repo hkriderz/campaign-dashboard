@@ -22,6 +22,7 @@ const matched: QcRecontactPair = {
     canvassLabel: "Talking to Correct Person",
     contactedQuestion: "Were you contacted?",
     contactedAnswer: "Yes",
+    notesAnswer: "Left a voicemail",
   },
   priors: [
     {
@@ -68,17 +69,19 @@ const unmatched: QcRecontactPair = {
     canvassLabel: "",
     contactedQuestion: "",
     contactedAnswer: "",
+    notesAnswer: "",
   },
   priors: [],
 };
 
 test("recontact CSV remaps candidate result labels to generic SS / U / SO", () => {
   const rows = recontactPairsToCsvRows([matched], "faizahTraci");
-  const resultCells = [rows[0]?.[12], rows[0]?.[13], rows[0]?.[20], rows[0]?.[21], rows[0]?.[22]].join("|");
+  const resultCells = [rows[0]?.[13], rows[0]?.[14], rows[0]?.[21], rows[0]?.[22], rows[0]?.[23]].join("|");
   assert.equal(rows[0]?.[5], "Yes");
-  assert.equal(rows[0]?.[12], "Strong oppose");
-  assert.equal(rows[0]?.[20], "Strong support");
+  assert.equal(rows[0]?.[6], "Left a voicemail");
+  assert.equal(rows[0]?.[13], "Strong oppose");
   assert.equal(rows[0]?.[21], "Strong support");
+  assert.equal(rows[0]?.[22], "Strong support");
   assert.doesNotMatch(resultCells, /faizah|nithya/i);
 });
 
@@ -89,12 +92,12 @@ test("recontact CSV is one row per prior and keeps unmatched QC calls", () => {
   assert.equal(rows[0]?.[2], "PDI123");
   assert.equal(rows[0]?.[3], "Ada Lovelace");
   assert.equal(rows[0]?.[4], "1 Main St, Los Angeles, CA 90001");
-  assert.equal(rows[0]?.[15], "Phone bank");
-  assert.equal(rows[0]?.[26], "Yes");
-  assert.equal(rows[1]?.[15], "Canvass");
-  assert.equal(rows[1]?.[26], "No");
+  assert.equal(rows[0]?.[16], "Phone bank");
+  assert.equal(rows[0]?.[27], "Yes");
+  assert.equal(rows[1]?.[16], "Canvass");
+  assert.equal(rows[1]?.[27], "No");
   assert.equal(rows[2]?.[1], "Unmatched");
-  assert.equal(rows[2]?.[15], "");
+  assert.equal(rows[2]?.[16], "");
 });
 
 test("copy table keeps a comma address in one column", () => {
@@ -102,14 +105,15 @@ test("copy table keeps a comma address in one column", () => {
   const [header, first] = tsv.split("\r\n");
   assert.equal(
     header,
-    "Change\tPDI\tVoter name\tVoter address\tPrior\tPrior channel\tPrior date\tPrior list\tPrior result\tQC\tQC date\tQC list\tWere you contacted\tQC polling\tQC result"
+    "Change\tPDI\tVoter name\tVoter address\tPrior\tPrior channel\tPrior date\tPrior list\tPrior result\tQC\tQC date\tQC list\tWere you contacted\tNotes\tQC polling\tQC result"
   );
   const cells = first?.split("\t") ?? [];
-  assert.equal(cells.length, 15);
+  assert.equal(cells.length, 16);
   assert.equal(cells[3], "1 Main St, Los Angeles, CA 90001");
   assert.equal(cells[4], "Sidney");
   assert.equal(cells[6], "9/9/26");
   assert.equal(cells[9], "Ava");
+  assert.equal(cells[13], "Left a voicemail");
   const lines = tsv.trim().split("\r\n");
   assert.equal(lines.length, 3);
 });

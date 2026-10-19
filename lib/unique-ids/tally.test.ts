@@ -45,6 +45,7 @@ function call(
     voterAddress: "",
     contactedQuestion: "",
     contactedAnswer: "",
+    notesAnswer: "",
     ...partial,
   };
 }

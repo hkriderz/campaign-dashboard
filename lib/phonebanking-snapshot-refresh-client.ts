@@ -271,9 +271,12 @@ export async function refreshAllPhonebankingTags(
       else errors.push({ tagId, error: result.error ?? "Refresh failed" });
     }
   } finally {
-    if (scan.batchId) {
-      await postTagSnapshotRefresh(secret, { refreshAll: true, stage: "discard", batchId: scan.batchId });
-    }
+    // Discard shared scan (if any) and warm QC pair caches — no second pair rebuild.
+    await postTagSnapshotRefresh(secret, {
+      refreshAll: true,
+      stage: "discard",
+      batchId: scan.batchId ?? undefined,
+    });
   }
 
   if (refreshed.length === 0 && errors.length > 0) {
@@ -343,6 +346,8 @@ export async function refreshPhonebankingTagsSequential(options: {
       errors.push({ tagId, error: result.error ?? "Unknown error" });
     }
   }
+
+  await postTagSnapshotRefresh(secret, { refreshAll: true, stage: "discard" });
 
   onProgress({
     completed: total * 3,

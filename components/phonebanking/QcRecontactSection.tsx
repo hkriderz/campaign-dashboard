@@ -10,6 +10,7 @@ import {
   displayRecontactResultLabel,
   emptyRecontactSelection,
   matchesPdiOrNameQuery,
+  pairHasNotes,
   pairIsUsefulRecontact,
   pairWithSupportAnswers,
   pairMatchesChannelChip,
@@ -150,6 +151,7 @@ export default function QcRecontactSection({
     searchQuery,
     selection.priorActor,
     selection.qcCaller,
+    selection.hasNotes ? "1" : "0",
     selection.channels.join("\0"),
     selection.outcomes.join("\0"),
     selection.matches.join("\0"),
@@ -193,6 +195,7 @@ export default function QcRecontactSection({
     }
     return counts;
   }, [scopedPairs]);
+  const notesCount = useMemo(() => scopedPairs.filter(pairHasNotes).length, [scopedPairs]);
 
   function exportCsv(): string {
     return buildRecontactPairsCsv(visible, surveyScriptProfile);
@@ -361,6 +364,25 @@ export default function QcRecontactSection({
                 })}
               </div>
             </div>
+            <div>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                Notes
+              </p>
+              <label className="inline-flex cursor-pointer items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={selection.hasNotes}
+                  onChange={(event) =>
+                    setSelection((prev) => ({ ...prev, hasNotes: event.target.checked }))
+                  }
+                  className="rounded border-gray-300 dark:border-gray-600"
+                />
+                Has Notes{" "}
+                <span className="tabular-nums text-[11px] text-gray-500 dark:text-gray-400">
+                  ({notesCount.toLocaleString()})
+                </span>
+              </label>
+            </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
               <PersonFilter
                 id="qc-recontact-prior"
@@ -446,6 +468,7 @@ export default function QcRecontactSection({
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Prior result</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Were you contacted</th>
+                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Notes</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC polling</th>
                     <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC result</th>
                   </tr>
@@ -516,6 +539,16 @@ export default function QcRecontactSection({
                         </td>
                         <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
                           {pair.qc.contactedAnswer?.trim() || "—"}
+                        </td>
+                        <td
+                          className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200 max-w-[12rem]"
+                          title={pair.qc.notesAnswer?.trim() || undefined}
+                        >
+                          {(() => {
+                            const notes = pair.qc.notesAnswer?.trim() || "";
+                            if (!notes) return "—";
+                            return notes.length > 48 ? `${notes.slice(0, 48)}…` : notes;
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-xs">
                           {displayRecontactResultLabel(pair.qc.pollingLabel, surveyScriptProfile) || "—"}

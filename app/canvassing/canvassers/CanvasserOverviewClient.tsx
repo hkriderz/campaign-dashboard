@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
@@ -15,6 +16,18 @@ import {
   type CanvasserOverviewPayload,
   type CanvasserOverviewRow,
 } from "@/lib/qc-recontact/canvasser-overview";
+import {
+  buildOverviewDetailTsv,
+  CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY,
+  defaultVisibleOverviewDetailColumnIds,
+  filterOverviewRowsByHasNotes,
+  loadOverviewDetailColumnIds,
+  overviewDetailHeadersForColumns,
+  overviewDetailCellValue,
+  saveOverviewDetailColumnIds,
+  toggleOverviewDetailColumn,
+  type OverviewDetailColumnId,
+} from "@/lib/qc-recontact/overview-detail-columns";
 import { formatShortUsDate } from "@/lib/slice-key";
 import type { UniqueIdFamily } from "@/lib/unique-ids/types";
 
@@ -23,8 +36,6 @@ type ApiResponse<T> = {
   data?: T;
   error?: string;
 };
-
-const DETAIL_COL_SPAN = 21;
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value);
@@ -62,44 +73,61 @@ function FamilyCells({ block }: { block: CanvasserFamilyBlock }) {
   );
 }
 
-function DetailTable({ details }: { details: CanvasserOverviewDetail[] }) {
+function DetailTable({
+  details,
+  columnIds,
+}: {
+  details: CanvasserOverviewDetail[];
+  columnIds: readonly OverviewDetailColumnId[];
+}) {
+  const headers = overviewDetailHeadersForColumns(columnIds, "canvasser");
   return (
     <table className="border-collapse w-full text-xs min-w-max">
       <thead>
         <tr className="text-left text-gray-500 dark:text-gray-400">
-          <th className="px-2.5 py-1.5 font-medium">Canvassed by</th>
-          <th className="px-2.5 py-1.5 font-medium">Original flag</th>
-          <th className="px-2.5 py-1.5 font-medium">Original flag date</th>
-          <th className="px-2.5 py-1.5 font-medium">PDI</th>
-          <th className="px-2.5 py-1.5 font-medium">First name</th>
-          <th className="px-2.5 py-1.5 font-medium">Last name</th>
-          <th className="px-2.5 py-1.5 font-medium">Address</th>
-          <th className="px-2.5 py-1.5 font-medium">Were you contacted?</th>
-          <th className="px-2.5 py-1.5 font-medium">Polling</th>
-          <th className="px-2.5 py-1.5 font-medium">Final result</th>
-          <th className="px-2.5 py-1.5 font-medium">QC caller</th>
-          <th className="px-2.5 py-1.5 font-medium">Call date</th>
-          <th className="px-2.5 py-1.5 font-medium">Call time</th>
+          {headers.map((header) => (
+            <th key={header} className="px-2.5 py-1.5 font-medium">
+              {header}
+            </th>
+          ))}
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
         {details.map((detail) => (
           <tr key={`${detail.pdiId}-${detail.callDate}-${detail.callTime}`}>
-            <td className="px-2.5 py-1.5">{detail.canvasserName}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.originalFlagFamily)}`}>{detail.originalFlag}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{formatShortUsDate(detail.originalFlagDate)}</td>
-            <td className="px-2.5 py-1.5 font-mono">{detail.pdiId}</td>
-            <td className="px-2.5 py-1.5">{detail.voterFirstName}</td>
-            <td className="px-2.5 py-1.5">{detail.voterLastName}</td>
-            <td className="px-2.5 py-1.5">{detail.address}</td>
-            <td className="px-2.5 py-1.5">{detail.contactedAnswer || "—"}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.pollingFamily)}`}>{detail.pollingLabel || "—"}</td>
-            <td className={`px-2.5 py-1.5 ${familyTone(detail.finalResultFamily)}`}>
-              {detail.finalResultLabel || "—"}
-            </td>
-            <td className="px-2.5 py-1.5">{detail.callerName}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{formatShortUsDate(detail.callDate)}</td>
-            <td className="px-2.5 py-1.5 tabular-nums">{detail.callTime || "—"}</td>
+            {columnIds.map((id) => {
+              let text = overviewDetailCellValue(detail, id);
+              if (id === "originalFlagDate" || id === "callDate") text = formatShortUsDate(text) || text;
+              if (
+                (id === "contactedAnswer" ||
+                  id === "notesAnswer" ||
+                  id === "pollingLabel" ||
+                  id === "finalResultLabel" ||
+                  id === "callTime") &&
+                !text
+              ) {
+                text = "—";
+              }
+              const tone =
+                id === "originalFlag"
+                  ? familyTone(detail.originalFlagFamily)
+                  : id === "pollingLabel"
+                    ? familyTone(detail.pollingFamily)
+                    : id === "finalResultLabel"
+                      ? familyTone(detail.finalResultFamily)
+                      : "";
+              const mono = id === "pdiId" ? "font-mono" : "";
+              const nums =
+                id === "originalFlagDate" || id === "callDate" || id === "callTime" ? "tabular-nums" : "";
+              const title = id === "notesAnswer" && detail.notesAnswer ? detail.notesAnswer : undefined;
+              const display =
+                id === "notesAnswer" && text.length > 48 ? `${text.slice(0, 48)}…` : text;
+              return (
+                <td key={id} className={`px-2.5 py-1.5 ${tone} ${mono} ${nums}`} title={title}>
+                  {display}
+                </td>
+              );
+            })}
           </tr>
         ))}
       </tbody>
@@ -115,6 +143,15 @@ export default function CanvasserOverviewClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openName, setOpenName] = useState<string | null>(null);
+  const [detailColumns, setDetailColumns] = useState<OverviewDetailColumnId[]>(
+    defaultVisibleOverviewDetailColumnIds
+  );
+  const [hasNotesOnly, setHasNotesOnly] = useState(false);
+  const [copyLabel, setCopyLabel] = useState("Copy table");
+
+  useEffect(() => {
+    setDetailColumns(loadOverviewDetailColumnIds(CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
+  }, []);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -152,14 +189,15 @@ export default function CanvasserOverviewClient() {
     return () => controller.abort();
   }, [loadOverview]);
 
+  const visibleCanvassers = useMemo(
+    () => filterOverviewRowsByHasNotes(payload?.canvassers ?? [], hasNotesOnly),
+    [payload, hasNotesOnly]
+  );
   const surveyedTotal = useMemo(
-    () => (payload?.canvassers ?? []).reduce((sum, row) => sum + row.surveyed, 0),
-    [payload]
+    () => visibleCanvassers.reduce((sum, row) => sum + row.surveyed, 0),
+    [visibleCanvassers]
   );
-  const totals = useMemo(
-    () => summarizeCanvasserOverview(payload?.canvassers ?? []),
-    [payload]
-  );
+  const totals = useMemo(() => summarizeCanvasserOverview(visibleCanvassers), [visibleCanvassers]);
 
   function selectCandidate(id: string) {
     setTagId(id);
@@ -168,10 +206,29 @@ export default function CanvasserOverviewClient() {
     setOpenName(null);
   }
 
+  function setColumns(next: OverviewDetailColumnId[]) {
+    setDetailColumns(next);
+    saveOverviewDetailColumnIds(CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY, next);
+  }
+
   function downloadCsv() {
-    if (!payload?.canvassers.length) return;
-    const csv = buildCanvasserOverviewCsv({ canvassers: payload.canvassers });
+    if (!visibleCanvassers.length || !payload) return;
+    const csv = buildCanvasserOverviewCsv({ canvassers: visibleCanvassers }, detailColumns);
     downloadCsvFile(csv, canvasserOverviewExportFilename(payload.tagId, startDate, endDate));
+  }
+
+  async function copyTable() {
+    if (!visibleCanvassers.length) return;
+    const details = visibleCanvassers.flatMap((row) => row.details);
+    const tsv = buildOverviewDetailTsv(details, detailColumns, "canvasser");
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setCopyLabel("Copied");
+      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
+    } catch {
+      setCopyLabel("Copy failed");
+      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
+    }
   }
 
   const selected = Boolean(tagId);
@@ -252,24 +309,41 @@ export default function CanvasserOverviewClient() {
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[var(--section-rule)]">
             <div className="min-w-0 space-y-1">
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                {loading ? "Updating…" : `${formatNumber(payload?.canvassers.length ?? 0)} canvassers · ${formatNumber(surveyedTotal)} surveyed`}
+                {loading
+                  ? "Updating…"
+                  : `${formatNumber(visibleCanvassers.length)} canvassers · ${formatNumber(surveyedTotal)} surveyed`}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Click each canvasser name to show more details
               </p>
             </div>
-            <button
-              type="button"
-              onClick={downloadCsv}
-              disabled={!payload?.canvassers.length}
-              className="ml-auto dash-btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
-            >
-              Download CSV
-            </button>
+            <div className="ml-auto flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--section-muted)]">
+                <input
+                  type="checkbox"
+                  checked={hasNotesOnly}
+                  onChange={(event) => setHasNotesOnly(event.target.checked)}
+                  className="rounded border-gray-300 dark:border-gray-600"
+                />
+                Has Notes
+              </label>
+              <OverviewDetailColumnControls
+                visibleIds={detailColumns}
+                onToggle={(id, on) => setColumns(toggleOverviewDetailColumn(detailColumns, id, on))}
+                onDownloadCsv={downloadCsv}
+                onCopyTable={() => void copyTable()}
+                copyLabel={copyLabel}
+                csvDisabled={!visibleCanvassers.length}
+              />
+            </div>
           </div>
           {!payload?.canvassers.length ? (
             <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
               No canvasser recontacts in this date range.
+            </p>
+          ) : !visibleCanvassers.length ? (
+            <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
+              No canvasser recontacts with notes in this date range.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -316,12 +390,14 @@ export default function CanvasserOverviewClient() {
                 </thead>
                 <tbody>
                   {totals ? <OverviewTotalRow row={totals} /> : null}
-                  {(payload?.canvassers ?? []).map((row) => (
+                  {visibleCanvassers.map((row) => (
                     <CanvasserRows
                       key={row.canvasserName}
                       row={row}
                       open={openName === row.canvasserName}
                       onToggle={() => setOpenName((current) => (current === row.canvasserName ? null : row.canvasserName))}
+                      detailColumns={detailColumns}
+                      summaryColSpan={21}
                     />
                   ))}
                 </tbody>
@@ -367,10 +443,14 @@ function CanvasserRows({
   row,
   open,
   onToggle,
+  detailColumns,
+  summaryColSpan,
 }: {
   row: CanvasserOverviewRow;
   open: boolean;
   onToggle: () => void;
+  detailColumns: readonly OverviewDetailColumnId[];
+  summaryColSpan: number;
 }) {
   return (
     <Fragment>
@@ -401,8 +481,8 @@ function CanvasserRows({
       </tr>
       {open ? (
         <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
-          <td colSpan={DETAIL_COL_SPAN} className="px-3 py-3">
-            <DetailTable details={row.details} />
+          <td colSpan={summaryColSpan} className="px-3 py-3">
+            <DetailTable details={row.details} columnIds={detailColumns} />
           </td>
         </tr>
       ) : null}

@@ -16,6 +16,7 @@ import {
 } from "./canvass";
 import {
   emptyRecontactSelection,
+  pairHasNotes,
   pairHasQcContact,
   pairIsUsefulRecontact,
   pairMatchesPriorActor,
@@ -53,6 +54,7 @@ function call(partial: Partial<RecontactCallSummary> & Pick<RecontactCallSummary
     canvassLabel: "",
     contactedQuestion: "",
     contactedAnswer: "",
+    notesAnswer: "",
     ...partial,
   };
 }
@@ -586,6 +588,54 @@ test("pairMatchesSelections ORs within a group and ANDs across groups", () => {
   );
 });
 
+test("pairHasNotes and hasNotes selection require a recorded notes answer", () => {
+  const empty = emptyRecontactSelection();
+  const withNotes: QcRecontactPair = {
+    pairId: "qc-notes",
+    matchStatus: "matched",
+    changeKind: "held",
+    qc: call({
+      callId: "qc-notes",
+      callDate: "2026-03-10",
+      pdiId: "CA1",
+      notesAnswer: "Callback Friday",
+    }),
+    priors: [
+      {
+        channel: "phonebank",
+        pdiId: "CA1",
+        actorName: "Maria",
+        occurredOn: "2026-03-01",
+        listOrAssignment: "Faizah 001",
+        resultLabel: "Strong Support",
+      },
+    ],
+  };
+  const blankNotes: QcRecontactPair = {
+    ...withNotes,
+    pairId: "qc-blank",
+    qc: call({ callId: "qc-blank", callDate: "2026-03-10", pdiId: "CA2", notesAnswer: "" }),
+  };
+  const placeholderNotes: QcRecontactPair = {
+    ...withNotes,
+    pairId: "qc-placeholder",
+    qc: call({
+      callId: "qc-placeholder",
+      callDate: "2026-03-10",
+      pdiId: "CA3",
+      notesAnswer: "[no answer recorded]",
+    }),
+  };
+  assert.equal(pairHasNotes(withNotes), true);
+  assert.equal(pairHasNotes(blankNotes), false);
+  assert.equal(pairHasNotes(placeholderNotes), false);
+  assert.equal(pairMatchesSelections(withNotes, empty), true);
+  assert.equal(pairMatchesSelections(blankNotes, empty), true);
+  assert.equal(pairMatchesSelections(withNotes, { ...empty, hasNotes: true }), true);
+  assert.equal(pairMatchesSelections(blankNotes, { ...empty, hasNotes: true }), false);
+  assert.equal(pairMatchesSelections(placeholderNotes, { ...empty, hasNotes: true }), false);
+});
+
 test("No Reply matches only a text prior with hasInboundReply false", () => {
   const empty = emptyRecontactSelection();
   const noReply: QcRecontactPair = {
@@ -651,6 +701,17 @@ test("donation-only knocks do not create a canvass prior", () => {
     },
   ]);
   assert.equal(priors.length, 0);
+});
+
+test("extractCallSurveyLabels stores Disclaimer/Notes free text", () => {
+  const labels = extractCallSurveyLabels(
+    [
+      { questionName: "Disclaimer/Notes", answerValue: "Needs Spanish callback" },
+      { questionName: "Final Result", answerValue: "A. Strong Support" },
+    ],
+    "faizahTraci"
+  );
+  assert.equal(labels.notesAnswer, "Needs Spanish callback");
 });
 
 test("extractCallSurveyLabels stores Were you contacted in English and Spanish", () => {

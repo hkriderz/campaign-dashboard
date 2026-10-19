@@ -23,6 +23,7 @@ function qcCall(overrides: Partial<RecontactCallSummary> = {}): RecontactCallSum
     canvassLabel: "Talking to Correct Person",
     contactedQuestion: "Were you contacted?",
     contactedAnswer: "A. Yes",
+    notesAnswer: "",
     ...overrides,
   };
 }
@@ -62,7 +63,7 @@ test("groups phonebank priors and merges name aliases", () => {
   assert.equal(row.surveyed, 2);
   assert.equal(row.contactedYes, 2);
   const csv = buildPhonebankerOverviewCsv(tally);
-  assert.match(csv, /Phoned by\?/);
+  assert.match(csv, /Phoned by,/);
   assert.match(csv, /Traci Henderson,2,/);
   assert.equal(summarizePhonebankerOverview(tally.phonebankers)?.phonebankerName, "Total");
 });

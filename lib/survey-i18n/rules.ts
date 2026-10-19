@@ -6,6 +6,10 @@
  *
  * Order: longer / more specific phrases first to avoid partial overwrites.
  */
+import { questionLooksLikeDisclaimerNotes as isDisclaimerNotesQuestion } from "./disclaimer-notes";
+
+export { questionLooksLikeDisclaimerNotes } from "./disclaimer-notes";
+
 export type I18nPhraseRule = {
   id: string;
   match: string;
@@ -84,6 +88,9 @@ export const CORRECT_PERSON_DISPOSITION_HINTS: readonly string[] = [
 /** Hints that a question is disclaimer-like (any language), for surveyed exclusion. */
 export const DISCLAIMER_QUESTION_HINTS: readonly string[] = ["disclaimer", "aviso legal", "leyó aviso"];
 
+/** Free-text Disclaimer/Notes short-answer tabs (not Yes/No disclaimer). */
+export const DISCLAIMER_NOTES_HINTS: readonly string[] = ["note", "notes", "notas"];
+
 /**
  * Regex body (single line) for script blocks that are NOT canvass dispositions — extend here only.
  * Used inside REGEXP_CONTAINS(LOWER(question_name), r'...') in BigQuery.
@@ -120,9 +127,11 @@ export function isTraciViolationLayoutCanonicalKey(canonicalKey: string): boolea
   return false;
 }
 
+/** Yes/No disclaimer script block — excludes Disclaimer/Notes short-answer tabs. */
 export function questionLooksLikeDisclaimer(questionName: string): boolean {
   const q = questionName.trim().toLowerCase();
-  return DISCLAIMER_QUESTION_HINTS.some((hint) => q.includes(hint));
+  if (!DISCLAIMER_QUESTION_HINTS.some((hint) => q.includes(hint))) return false;
+  return !isDisclaimerNotesQuestion(questionName);
 }
 
 /** Column-style canvass row: disposition encoded in question_name after a dash. */

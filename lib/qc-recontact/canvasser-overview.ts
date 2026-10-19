@@ -8,6 +8,12 @@ import { familyFromResultLabel } from "../unique-ids/classify";
 import type { UniqueIdFamily } from "../unique-ids/types";
 import { displayRecontactResultLabel } from "./labels";
 import {
+  ALL_OVERVIEW_DETAIL_COLUMN_IDS,
+  overviewDetailHeadersForColumns,
+  overviewDetailValuesForColumns,
+  type OverviewDetailColumnId,
+} from "./overview-detail-columns";
+import {
   isRecordedSupportLabel,
   pairIsUsefulRecontact,
   pairWithSupportAnswers,
@@ -34,6 +40,7 @@ export type CanvasserOverviewDetail = {
   voterLastName: string;
   address: string;
   contactedAnswer: string;
+  notesAnswer: string;
   contactedBucket: ContactedBucket | null;
   pollingLabel: string;
   pollingFamily: UniqueIdFamily | null;
@@ -124,21 +131,10 @@ const SUMMARY_COLUMN_HEADERS = [
   ...FAMILY_HEADERS,
 ] as const;
 
-export const CANVASSER_OVERVIEW_DETAIL_HEADERS = [
-  "Canvassed by?",
-  "Original Flag",
-  "Original Flag Date",
-  "PDI ID",
-  "Voter First Name",
-  "Voter Last Name",
-  "Address",
-  "1. Were you contacted?",
-  "2. Polling",
-  "4. Final Result",
-  "Caller Name",
-  "Call Date Adjusted",
-  "Call Time",
-] as const;
+export const CANVASSER_OVERVIEW_DETAIL_HEADERS = overviewDetailHeadersForColumns(
+  ALL_OVERVIEW_DETAIL_COLUMN_IDS,
+  "canvasser"
+);
 
 function emptyFamilyBlock(): CanvasserFamilyBlock {
   return { surveyed: 0, strongSupport: 0, undecided: 0, strongOppose: 0 };
@@ -364,6 +360,7 @@ function detailFromPair(
     voterLastName: voter.last,
     address: pair.qc.voterAddress ?? "",
     contactedAnswer,
+    notesAnswer: pair.qc.notesAnswer ?? "",
     contactedBucket: classifyContactedAnswer(contactedAnswer),
     pollingLabel: displayRecontactResultLabel(pair.qc.pollingLabel, profile),
     pollingFamily: familyFromResultLabel(pair.qc.pollingLabel, profile),
@@ -473,30 +470,24 @@ function summaryDataRow(row: CanvasserOverviewRow): Array<string | number> {
   ];
 }
 
-function detailDataRow(detail: CanvasserOverviewDetail): Array<string | number> {
-  return [
-    detail.canvasserName,
-    detail.originalFlag,
-    detail.originalFlagDate,
-    detail.pdiId,
-    detail.voterFirstName,
-    detail.voterLastName,
-    detail.address,
-    detail.contactedAnswer,
-    detail.pollingLabel,
-    detail.finalResultLabel,
-    detail.callerName,
-    detail.callDate,
-    detail.callTime,
-  ];
+function detailDataRow(
+  detail: CanvasserOverviewDetail,
+  columnIds: readonly OverviewDetailColumnId[] = ALL_OVERVIEW_DETAIL_COLUMN_IDS
+): Array<string | number> {
+  return overviewDetailValuesForColumns(detail, columnIds);
 }
 
 function csvLine(values: readonly (string | number)[]): string {
   return values.map((value) => escapeCsvCell(value)).join(",");
 }
 
-/** Summary block, then every canvasser’s voter rows, in the sheet’s column order. */
-export function buildCanvasserOverviewCsv(tally: CanvasserOverviewTally): string {
+/** Summary block, then every canvasser’s voter rows. Detail columns follow `visibleDetailColumnIds`. */
+export function buildCanvasserOverviewCsv(
+  tally: CanvasserOverviewTally,
+  visibleDetailColumnIds: readonly OverviewDetailColumnId[] = ALL_OVERVIEW_DETAIL_COLUMN_IDS
+): string {
+  const detailIds =
+    visibleDetailColumnIds.length > 0 ? visibleDetailColumnIds : ALL_OVERVIEW_DETAIL_COLUMN_IDS;
   const totals = summarizeCanvasserOverview(tally.canvassers);
   const summaryRows = totals ? [totals, ...tally.canvassers] : [...tally.canvassers];
   const lines = [
@@ -504,8 +495,10 @@ export function buildCanvasserOverviewCsv(tally: CanvasserOverviewTally): string
     csvLine(SUMMARY_COLUMN_HEADERS),
     ...summaryRows.map((row) => csvLine(summaryDataRow(row))),
     "",
-    csvLine(CANVASSER_OVERVIEW_DETAIL_HEADERS),
-    ...tally.canvassers.flatMap((row) => row.details.map((detail) => csvLine(detailDataRow(detail)))),
+    csvLine(overviewDetailHeadersForColumns(detailIds, "canvasser")),
+    ...tally.canvassers.flatMap((row) =>
+      row.details.map((detail) => csvLine(detailDataRow(detail, detailIds)))
+    ),
   ];
   return lines.join("\r\n");
 }

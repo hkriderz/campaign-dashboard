@@ -27,6 +27,7 @@ import { groupQuestionNamesForPicker, pickDisplayQuestionName } from "@/lib/surv
 import { formatCallsPerLoggedInHour } from "@/lib/calls-rate";
 import type { PbDashboardSlice } from "./PbDashboardStack";
 import type { SurveyScriptProfile } from "@/lib/types";
+import { questionLooksLikeDisclaimerNotes } from "@/lib/survey-i18n/disclaimer-notes";
 import { isTraciViolationLayoutCanonicalKey, isTraciViolationQuestionName } from "@/lib/survey-i18n/rules";
 import { isFinalResultPivotQuestion } from "@/lib/final-result-synthesis-overlay";
 import {
@@ -432,6 +433,17 @@ export default function DailyAggregateSection({
       const title = questionTitle(
         names.length ? pickDisplayQuestionName(names) : displayTitleFromCanonicalKey(config.canonicalKey)
       );
+      const notesOnly =
+        (names.length > 0 && names.every((n) => questionLooksLikeDisclaimerNotes(n))) ||
+        (names.length === 0 && questionLooksLikeDisclaimerNotes(config.canonicalKey));
+      if (notesOnly) {
+        return (
+          <div className={slotCellClass(false)}>
+            <div className="font-semibold text-gray-700 dark:text-gray-200">{title}</div>
+            <p className="text-gray-500 dark:text-gray-400">N/A</p>
+          </div>
+        );
+      }
       const isFrQuestion = names.some((n) => isFinalResultPivotQuestion(n));
       return (
         <div className={slotCellClass(traci)}>

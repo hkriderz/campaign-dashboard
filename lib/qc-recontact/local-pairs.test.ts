@@ -185,6 +185,7 @@ function sentinelPair(pairId: string): QcRecontactPair {
       canvassLabel: "",
       contactedQuestion: "",
       contactedAnswer: "",
+      notesAnswer: "",
     },
     priors: [],
     matchStatus: "unmatched",

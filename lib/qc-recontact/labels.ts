@@ -19,6 +19,7 @@ import {
   normalizedQuestionIsCorrectPersonColumn,
   questionLooksLikeDisclaimer,
 } from "../survey-i18n/rules";
+import { questionLooksLikeDisclaimerNotes } from "../survey-i18n/disclaimer-notes";
 import type { SurveyScriptProfile } from "../types";
 import type { RecontactCallSummary } from "./types";
 
@@ -138,6 +139,7 @@ export function extractCallSurveyLabels(
   canvassLabel: string;
   contactedQuestion: string;
   contactedAnswer: string;
+  notesAnswer: string;
 } {
   let finalResultLabel = "";
   let pollingLabel = "";
@@ -145,9 +147,15 @@ export function extractCallSurveyLabels(
   let canvassLabel = "";
   let contactedQuestion = "";
   let contactedAnswer = "";
+  let notesAnswer = "";
   let sawTalkingToCorrectPerson = false;
 
   for (const row of rows) {
+    if (questionLooksLikeDisclaimerNotes(row.questionName)) {
+      const note = usableSurveyAnswer(row.answerValue);
+      if (note) notesAnswer = note;
+      continue;
+    }
     if (questionLooksLikeDisclaimer(row.questionName)) continue;
     const fr = effectiveFinalResultAnswerLabelForRollup(row.questionName, row.answerValue);
     if (fr) {
@@ -202,11 +210,11 @@ export function extractCallSurveyLabels(
     }
   }
 
-  return { finalResultLabel, pollingLabel, canvassLabel, contactedQuestion, contactedAnswer };
+  return { finalResultLabel, pollingLabel, canvassLabel, contactedQuestion, contactedAnswer, notesAnswer };
 }
 
 /**
- * Older snapshots omitted canvass, polling, or Were you contacted.
+ * Older snapshots omitted canvass, polling, Were you contacted, or Notes.
  * Fills only the fields that are still empty. Leaves a recorded value in place.
  */
 export function fillMissingCanvassLabel(
@@ -218,7 +226,8 @@ export function fillMissingCanvassLabel(
   const needsCanvass = !recordedSurveyAnswer(qc.canvassLabel);
   const needsPolling = !recordedSurveyAnswer(qc.pollingLabel);
   const needsContacted = !recordedSurveyAnswer(qc.contactedAnswer);
-  if (!needsCanvass && !needsPolling && !needsContacted) return qc;
+  const needsNotes = !recordedSurveyAnswer(qc.notesAnswer);
+  if (!needsCanvass && !needsPolling && !needsContacted && !needsNotes) return qc;
   if (!rows.length) return qc;
 
   const labels = extractCallSurveyLabels(rows, profile, terms);
@@ -235,6 +244,10 @@ export function fillMissingCanvassLabel(
   if (needsContacted && labels.contactedAnswer) {
     next.contactedQuestion = labels.contactedQuestion;
     next.contactedAnswer = labels.contactedAnswer;
+    changed = true;
+  }
+  if (needsNotes && labels.notesAnswer) {
+    next.notesAnswer = labels.notesAnswer;
     changed = true;
   }
   return changed ? next : qc;
