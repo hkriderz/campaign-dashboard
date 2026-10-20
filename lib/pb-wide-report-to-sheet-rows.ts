@@ -6,6 +6,7 @@ import { parseRawCsvToMatrix } from "./stw-raw-to-pb-report";
 import { normalizeName, parseTimeToSec, secToTime } from "./csv-parser";
 import { formatShortUsDate } from "./slice-key";
 import { EMPTY_CSV_ROW, type PhoneBankCsvRow } from "./types";
+import { questionLooksLikeDisclaimerNotes } from "./survey-i18n/disclaimer-notes";
 import { normalizeWideHeaderKey, stripWideQuestionPrefixes } from "./wide-header-utils";
 
 export type WideColumnMatch = {
@@ -158,12 +159,26 @@ function isCanvassSheetField(field: keyof PhoneBankCsvRow): boolean {
   return String(field).startsWith("canvass");
 }
 
+function isDisclaimerYesNoField(field: keyof PhoneBankCsvRow): boolean {
+  return field === "disclaimerNo" || field === "disclaimerYes";
+}
+
+/** Free-text Disclaimer/Notes must not match Disclaimer No via the letters in "Notes". */
+function isDisclaimerNotesWideHeader(header: string): boolean {
+  return (
+    questionLooksLikeDisclaimerNotes(header) ||
+    questionLooksLikeDisclaimerNotes(stripWideQuestionPrefixes(header))
+  );
+}
+
 function matchRuleOnHeaderVariants(header: string): Rule | null {
+  const skipDisclaimerYesNo = isDisclaimerNotesWideHeader(header);
   const variants = [header, stripWideQuestionPrefixes(header)];
   for (const text of variants) {
     if (!text) continue;
     for (const rule of WIDE_HEADER_RULES) {
       if (isCanvassSheetField(rule.field) && looksLikeNumberedScriptWideHeader(header)) continue;
+      if (skipDisclaimerYesNo && isDisclaimerYesNoField(rule.field)) continue;
       if (rule.re.test(text)) return rule;
     }
   }

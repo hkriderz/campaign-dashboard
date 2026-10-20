@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { applyWideColumnOrderToCsvText } from "@/lib/wide-csv-column-order";
 import type { WidePbPrepareResult } from "@/lib/wide-csv-prepare";
+import {
+  buildWideColumnVisualRows,
+  moveWideColumnBlock,
+  reorderWideColumnsByVisualRows,
+  wideColumnCollapseLabel,
+} from "@/lib/wide-header-utils";
 
 type SliceRow = {
   sliceKey: string;
@@ -47,6 +53,8 @@ export default function WidePbImportPanel({
   const [columnOrder, setColumnOrder] = useState<string[]>(
     () => meta.sourceColumnOrder ?? meta.columns ?? []
   );
+  const [removedColumns, setRemovedColumns] = useState<string[]>([]);
+  const [expandedColumnKeys, setExpandedColumnKeys] = useState<Set<string>>(() => new Set());
   const [phoneBankName, setPhoneBankName] = useState("");
   const [replaceMode, setReplaceMode] = useState(false);
   const [replaceSliceKey, setReplaceSliceKey] = useState("");
@@ -67,6 +75,8 @@ export default function WidePbImportPanel({
 
   useEffect(() => {
     setColumnOrder(meta.sourceColumnOrder ?? meta.columns ?? []);
+    setRemovedColumns([]);
+    setExpandedColumnKeys(new Set());
     setImportDatesSelected(new Set(meta.datesIso));
     if (meta.datesIso.length === 1) {
       setTargetIsoDate(meta.datesIso[0]!);
@@ -110,42 +120,25 @@ export default function WidePbImportPanel({
     return null;
   }
 
-  function moveColumn(index: number, dir: -1 | 1) {
-    const j = index + dir;
-    if (j < 0 || j >= columnOrder.length) return;
-    setColumnOrder((prev) => {
-      const next = [...prev];
-      const tmp = next[index]!;
-      next[index] = next[j]!;
-      next[j] = tmp;
-      return next;
-    });
+  const visualRows = useMemo(
+    () => buildWideColumnVisualRows(columnOrder, expandedColumnKeys),
+    [columnOrder, expandedColumnKeys]
+  );
+
+  function moveVisualRow(visualIndex: number, dir: -1 | 1) {
+    const target = visualIndex + dir;
+    if (target < 0 || target >= visualRows.length) return;
+    setColumnOrder((prev) => reorderWideColumnsByVisualRows(prev, visualRows, visualIndex, target));
   }
 
-  function moveColumnToPosition(fromIndex: number, oneBasedPosition: number) {
-    setColumnOrder((prev) => {
-      if (fromIndex < 0 || fromIndex >= prev.length) return prev;
-      const target = Math.min(prev.length, Math.max(1, Math.floor(oneBasedPosition)));
-      if (target === fromIndex + 1) return prev;
-      const next = [...prev];
-      const [item] = next.splice(fromIndex, 1);
-      next.splice(target - 1, 0, item!);
-      return next;
-    });
+  function moveVisualRowToPosition(visualIndex: number, oneBasedPosition: number) {
+    const row = visualRows[visualIndex];
+    if (!row) return;
+    setColumnOrder((prev) => moveWideColumnBlock(prev, row.indexes, oneBasedPosition));
   }
 
-  function reorderColumnByDrag(fromIndex: number, toIndex: number) {
-    setColumnOrder((prev) => {
-      if (fromIndex < 0 || fromIndex >= prev.length || toIndex < 0 || toIndex >= prev.length) {
-        return prev;
-      }
-      if (fromIndex === toIndex) return prev;
-      const next = [...prev];
-      const [item] = next.splice(fromIndex, 1);
-      const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex;
-      next.splice(insertAt, 0, item!);
-      return next;
-    });
+  function reorderVisualRowByDrag(fromVisual: number, toVisual: number) {
+    setColumnOrder((prev) => reorderWideColumnsByVisualRows(prev, visualRows, fromVisual, toVisual));
   }
 
   function clearColumnDragState() {
@@ -177,13 +170,70 @@ export default function WidePbImportPanel({
     const raw = e.dataTransfer.getData("text/plain");
     const from = dragFromRef.current ?? (raw !== "" ? parseInt(raw, 10) : NaN);
     if (Number.isFinite(from)) {
-      reorderColumnByDrag(from, index);
+      reorderVisualRowByDrag(from, index);
     }
     clearColumnDragState();
   }
 
+  function isProtectedColumn(header: string): boolean {
+    const trimmed = header.trim();
+    return trimmed === "Caller Name" || trimmed === "Date";
+  }
+
+  function removeColumnsAt(indexes: readonly number[]) {
+    const drop = new Set(
+      indexes.filter((index) => {
+        const header = columnOrder[index];
+        return Boolean(header) && !isProtectedColumn(header!);
+      })
+    );
+    if (!drop.size) return;
+    const headers = [...drop].map((index) => columnOrder[index]!);
+    setColumnOrder((prev) => prev.filter((_, index) => !drop.has(index)));
+    setRemovedColumns((prev) => {
+      const next = [...prev];
+      for (const header of headers) {
+        if (!next.includes(header)) next.push(header);
+      }
+      return next;
+    });
+  }
+
+  function columnPresentation(header: string): { role: string; detail: string } {
+    const fixed = describeFixedHeader(header);
+    const mapped = columnKindByHeader.get(header.trim());
+    let role = fixed?.role ?? mapped?.role ?? "—";
+    const detail = fixed?.detail ?? mapped?.detail ?? "—";
+    if (mapped?.detail?.match(/^(callsAnswered|correctPerson|surveyed)\b/)) {
+      role = "Contact metrics";
+    }
+    return { role, detail };
+  }
+
+  function setColumnGroupExpanded(key: string, expanded: boolean) {
+    setExpandedColumnKeys((prev) => {
+      const next = new Set(prev);
+      if (expanded && key) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  function restoreColumn(header: string) {
+    setRemovedColumns((prev) => prev.filter((item) => item !== header));
+    setColumnOrder((prev) => (prev.includes(header) ? prev : [...prev, header]));
+  }
+
   function resetColumnOrder() {
     setColumnOrder(meta.sourceColumnOrder ?? meta.columns ?? []);
+    setRemovedColumns([]);
+    setExpandedColumnKeys(new Set());
+  }
+
+  function applyDashboardFieldOrder() {
+    const next = meta.defaultColumnOrder ?? meta.columns ?? [];
+    const removed = new Set(removedColumns);
+    setColumnOrder(next.filter((header) => !removed.has(header)));
   }
 
   const importDatesSorted = useMemo(() => {
@@ -391,7 +441,7 @@ export default function WidePbImportPanel({
 
   const defaultOrderHelp =
     orderHelpText ??
-    "Default order: Caller, Date, time columns, script questions in file order (01, 02, …), then Canvass Result columns last. Drag ⋮⋮, type a position, or use ↑ ↓. Import saves this order for the Data tab pivot.";
+    "Default order: Caller, Date, time columns, script questions in file order (01, 02, …), then Canvass Result columns last. A question with more than 10 answers starts collapsed. Drag ⋮⋮, type a position, or use ↑ ↓. Import saves this order for the Data tab pivot.";
 
   const focusRadioName = `wide-pb-focus-${tagId}`;
 
@@ -486,7 +536,7 @@ export default function WidePbImportPanel({
             </button>
             <button
               type="button"
-              onClick={() => setColumnOrder(meta.defaultColumnOrder ?? meta.columns ?? [])}
+              onClick={applyDashboardFieldOrder}
               className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100/80 dark:hover:bg-gray-800/60"
               title="Groups columns by dashboard rollup fields (not raw file layout)"
             >
@@ -504,23 +554,27 @@ export default function WidePbImportPanel({
                 <th className="p-1.5 border-b border-violet-200 dark:border-violet-800">Column</th>
                 <th className="p-1.5 border-b border-violet-200 dark:border-violet-800">Role</th>
                 <th className="p-1.5 border-b border-violet-200 dark:border-violet-800">Detail</th>
-                <th className="p-1.5 border-b border-violet-200 dark:border-violet-800 w-24">Reorder</th>
+                <th className="p-1.5 border-b border-violet-200 dark:border-violet-800">Actions</th>
               </tr>
             </thead>
             <tbody className="text-gray-800 dark:text-gray-200">
-              {columnOrder.map((header, i) => {
-                const fixed = describeFixedHeader(header);
-                const mapped = columnKindByHeader.get(header.trim());
-                let role = fixed?.role ?? mapped?.role ?? "—";
-                let detail = fixed?.detail ?? mapped?.detail ?? "—";
-                if (mapped?.detail?.match(/^(callsAnswered|correctPerson|surveyed)\b/)) {
-                  role = "Contact metrics";
-                }
+              {visualRows.map((row, i) => {
+                const headers = row.indexes.map((index) => columnOrder[index]!).filter(Boolean);
+                const presentations = headers.map((header) => columnPresentation(header));
+                const role = presentations.every((item) => item.role === presentations[0]?.role)
+                  ? presentations[0]?.role ?? "—"
+                  : "Several";
+                const detail = row.collapsed
+                  ? headers.join(" · ")
+                  : presentations[0]?.detail ?? "—";
+                const position = (row.indexes[0] ?? i) + 1;
+                const groupLabel = row.collapseKey ? wideColumnCollapseLabel(headers[0] ?? row.label) : row.label;
+                const removable = headers.some((header) => !isProtectedColumn(header));
                 const isDragging = draggingFromIndex === i;
                 const isDropTarget = dragOverIndex === i && draggingFromIndex !== i;
                 return (
                   <tr
-                    key={`${header}-${i}`}
+                    key={`${row.collapseKey ?? row.label}-${row.indexes.join("-")}`}
                     onDragOver={(e) => handleColumnDragOver(i, e)}
                     onDrop={(e) => handleColumnDrop(i, e)}
                     className={[
@@ -538,7 +592,7 @@ export default function WidePbImportPanel({
                         onDragStart={(e) => handleColumnDragStart(i, e)}
                         onDragEnd={clearColumnDragState}
                         className="cursor-grab touch-none rounded px-1 py-0.5 text-gray-500 hover:bg-violet-100/80 hover:text-gray-800 active:cursor-grabbing dark:hover:bg-violet-900/60 dark:hover:text-gray-200"
-                        aria-label={`Drag to reorder ${header}`}
+                        aria-label={`Drag to reorder ${row.label}`}
                         title="Drag to reorder"
                       >
                         ⋮⋮
@@ -549,46 +603,71 @@ export default function WidePbImportPanel({
                         type="number"
                         min={1}
                         max={columnOrder.length}
-                        defaultValue={i + 1}
-                        key={`${header}-pos-${i}`}
+                        defaultValue={position}
+                        key={`${row.label}-pos-${position}`}
                         onBlur={(e) => {
                           const n = parseInt(e.target.value, 10);
-                          if (Number.isFinite(n)) moveColumnToPosition(i, n);
+                          if (Number.isFinite(n)) moveVisualRowToPosition(i, n);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") e.currentTarget.blur();
                         }}
                         className="w-12 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 px-1 py-0.5 text-[11px] tabular-nums"
-                        aria-label={`Position for ${header}`}
+                        aria-label={`Position for ${row.label}`}
                       />
                     </td>
                     <td className="p-1.5 font-mono text-[10px] whitespace-pre-wrap break-words max-w-[14rem]">
-                      {header}
+                      {row.label}
+                      {row.collapsed ? (
+                        <span className="mt-0.5 block font-sans text-[10px] text-gray-500 dark:text-gray-400">
+                          {headers.length} columns
+                        </span>
+                      ) : null}
                     </td>
                     <td className="p-1.5 text-[11px]">{role}</td>
                     <td className="p-1.5 text-[10px] text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words max-w-[18rem]">
                       {detail}
                     </td>
                     <td className="p-1.5">
-                      <div className="flex gap-1">
+                      <div className="flex flex-wrap gap-1">
                         <button
                           type="button"
                           disabled={i === 0}
-                          onClick={() => moveColumn(i, -1)}
+                          onClick={() => moveVisualRow(i, -1)}
                           className="rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-40 hover:bg-white/80 dark:hover:bg-gray-800"
-                          aria-label="Move column up"
+                          aria-label={`Move ${row.label} up`}
                         >
                           ↑
                         </button>
                         <button
                           type="button"
-                          disabled={i >= columnOrder.length - 1}
-                          onClick={() => moveColumn(i, 1)}
+                          disabled={i >= visualRows.length - 1}
+                          onClick={() => moveVisualRow(i, 1)}
                           className="rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-[10px] font-semibold disabled:opacity-40 hover:bg-white/80 dark:hover:bg-gray-800"
-                          aria-label="Move column down"
+                          aria-label={`Move ${row.label} down`}
                         >
                           ↓
                         </button>
+                        {row.collapseKey ? (
+                          <button
+                            type="button"
+                            onClick={() => setColumnGroupExpanded(row.collapseKey!, row.collapsed)}
+                            className="rounded border border-violet-300 dark:border-violet-700 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800 dark:text-violet-200 hover:bg-violet-100/70 dark:hover:bg-violet-900/40"
+                            aria-label={`${row.collapsed ? "Uncollapse" : "Collapse"} ${groupLabel}`}
+                          >
+                            {row.collapsed ? "Uncollapse" : "Collapse"}
+                          </button>
+                        ) : null}
+                        {removable ? (
+                          <button
+                            type="button"
+                            onClick={() => removeColumnsAt(row.indexes)}
+                            className="rounded border border-gray-300 dark:border-gray-600 px-1.5 py-0.5 text-[10px] font-semibold hover:bg-white/80 dark:hover:bg-gray-800"
+                            aria-label={`Remove ${row.label}`}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -597,6 +676,24 @@ export default function WidePbImportPanel({
             </tbody>
           </table>
         </div>
+        {removedColumns.length > 0 ? (
+          <div className="rounded border border-gray-200 dark:border-gray-700 p-2 space-y-2">
+            <p className="font-semibold text-gray-800 dark:text-gray-200">Removed from import</p>
+            <ul className="flex flex-wrap gap-2">
+              {removedColumns.map((header) => (
+                <li key={header}>
+                  <button
+                    type="button"
+                    onClick={() => restoreColumn(header)}
+                    className="rounded border border-gray-300 dark:border-gray-600 px-2 py-1 text-[11px] font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-100/80 dark:hover:bg-gray-800/60"
+                  >
+                    Restore {header}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
       <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
