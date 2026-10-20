@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ColumnChecklist } from "@/components/canvassing/OverviewDetailColumnControls";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
@@ -28,6 +29,14 @@ import {
   type RecontactMatchFilter,
   type RecontactOutcomeFilter,
 } from "@/lib/qc-recontact";
+import {
+  defaultVisibleRecontactTableColumnIds,
+  loadRecontactTableColumnIds,
+  RECONTACT_TABLE_COLUMNS,
+  saveRecontactTableColumnIds,
+  toggleRecontactTableColumn,
+  type RecontactTableColumnId,
+} from "@/lib/qc-recontact/table-columns";
 import { formatShortUsDate } from "@/lib/slice-key";
 import type { SurveyScriptProfile } from "@/lib/types";
 import QcRecontactModal from "./QcRecontactModal";
@@ -78,6 +87,112 @@ function changeBadgeClass(kind: QcRecontactChangeKind): string {
       return "bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/40 dark:text-rose-200 dark:border-rose-800";
     default:
       return "bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600";
+  }
+}
+
+function RecontactTableCell({
+  columnId,
+  pair,
+  priors,
+  surveyScriptProfile,
+}: {
+  columnId: RecontactTableColumnId;
+  pair: QcRecontactPair;
+  priors: QcRecontactPair["priors"];
+  surveyScriptProfile: SurveyScriptProfile;
+}) {
+  switch (columnId) {
+    case "change":
+      return (
+        <td className="px-3 py-2">
+          <span
+            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${changeBadgeClass(pair.changeKind)}`}
+          >
+            {changeKindLabel(pair.changeKind)}
+          </span>
+        </td>
+      );
+    case "pdi":
+      return (
+        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+          <div className="font-mono">{pair.qc.pdiId || "—"}</div>
+          <div>{pair.qc.voterName?.trim() || "—"}</div>
+          <div className="text-gray-500 dark:text-gray-400">{pair.qc.voterAddress?.trim() || "—"}</div>
+        </td>
+      );
+    case "prior":
+      return (
+        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+          {priors.length ? (
+            <div className="space-y-2">
+              {priors.map((item, index) => (
+                <div key={`${item.channel}-${item.callId ?? item.callAt ?? item.occurredOn}-${index}`}>
+                  <div className="font-medium">{item.actorName || "—"}</div>
+                  <div className="text-gray-500 dark:text-gray-400">
+                    {recontactChannelLabel(item.channel)} · {formatShortUsDate(item.occurredOn)}
+                  </div>
+                  <div className="text-gray-500 dark:text-gray-400">{item.listOrAssignment}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <span className="text-gray-500 dark:text-gray-400">
+              {pair.matchStatus === "no_pdi" ? "No PDI on QC call" : "No prior contact"}
+            </span>
+          )}
+        </td>
+      );
+    case "priorResult":
+      return (
+        <td className="px-3 py-2 text-xs">
+          {priors.length
+            ? priors.map((item, index) => (
+                <div key={`${item.resultLabel}-${index}`} className={index > 0 ? "mt-2" : undefined}>
+                  {displayRecontactResultLabel(item.resultLabel, surveyScriptProfile) || "—"}
+                </div>
+              ))
+            : "—"}
+        </td>
+      );
+    case "qc":
+      return (
+        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+          <div className="font-medium">{pair.qc.phonebankerName || "—"}</div>
+          <div className="text-gray-500 dark:text-gray-400">{formatShortUsDate(pair.qc.callDate)}</div>
+          <div className="text-gray-500 dark:text-gray-400">{pair.qc.campaignName}</div>
+        </td>
+      );
+    case "contacted":
+      return (
+        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
+          {pair.qc.contactedAnswer?.trim() || "—"}
+        </td>
+      );
+    case "notes": {
+      const notes = pair.qc.notesAnswer?.trim() || "";
+      return (
+        <td
+          className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200 max-w-[12rem]"
+          title={notes || undefined}
+        >
+          {!notes ? "—" : notes.length > 48 ? `${notes.slice(0, 48)}…` : notes}
+        </td>
+      );
+    }
+    case "polling":
+      return (
+        <td className="px-3 py-2 text-xs">
+          {displayRecontactResultLabel(pair.qc.pollingLabel, surveyScriptProfile) || "—"}
+        </td>
+      );
+    case "result":
+      return (
+        <td className="px-3 py-2 text-xs">
+          {displayRecontactResultLabel(pair.qc.finalResultLabel, surveyScriptProfile) || "—"}
+        </td>
+      );
+    default:
+      return null;
   }
 }
 
@@ -138,6 +253,16 @@ export default function QcRecontactSection({
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [tableColumns, setTableColumns] = useState<RecontactTableColumnId[]>(defaultVisibleRecontactTableColumnIds);
+
+  useEffect(() => {
+    setTableColumns(loadRecontactTableColumnIds());
+  }, []);
+
+  function setColumns(next: RecontactTableColumnId[]) {
+    setTableColumns(next);
+    saveRecontactTableColumnIds(next);
+  }
   const scopedPairs = useMemo(
     () =>
       pairs
@@ -209,7 +334,7 @@ export default function QcRecontactSection({
       return;
     }
     try {
-      await writeTextToClipboard(buildRecontactTableTsv(visible, surveyScriptProfile));
+      await writeTextToClipboard(buildRecontactTableTsv(visible, surveyScriptProfile, tableColumns));
       setExportMessage(
         `Copied ${visible.length.toLocaleString()} recontact row${visible.length === 1 ? "" : "s"}. Paste into a spreadsheet to keep each column in its own cell.`
       );
@@ -248,6 +373,12 @@ export default function QcRecontactSection({
         </div>
         {hasSnapshot ? (
           <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <ColumnChecklist
+              columns={RECONTACT_TABLE_COLUMNS}
+              visibleIds={tableColumns}
+              onToggle={(id, on) => setColumns(toggleRecontactTableColumn(tableColumns, id, on))}
+              menuLabel="Recontact table columns"
+            />
             <button
               type="button"
               onClick={() => void copyTable()}
@@ -462,15 +593,11 @@ export default function QcRecontactSection({
               <table className="w-full text-sm text-left">
                 <thead>
                   <tr className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Change</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">PDI</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Prior</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Prior result</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Were you contacted</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">Notes</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC polling</th>
-                    <th className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">QC result</th>
+                    {tableColumns.map((id) => (
+                      <th key={id} className="px-3 py-2 font-semibold text-gray-600 dark:text-gray-300">
+                        {RECONTACT_TABLE_COLUMNS.find((column) => column.id === id)?.label}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -490,72 +617,15 @@ export default function QcRecontactSection({
                           }
                         }}
                       >
-                        <td className="px-3 py-2">
-                          <span
-                            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${changeBadgeClass(pair.changeKind)}`}
-                          >
-                            {changeKindLabel(pair.changeKind)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
-                          <div className="font-mono">{pair.qc.pdiId || "—"}</div>
-                          <div>{pair.qc.voterName?.trim() || "—"}</div>
-                          <div className="text-gray-500 dark:text-gray-400">{pair.qc.voterAddress?.trim() || "—"}</div>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
-                          {priors.length ? (
-                            <div className="space-y-2">
-                              {priors.map((item, index) => (
-                                <div key={`${item.channel}-${item.callId ?? item.callAt ?? item.occurredOn}-${index}`}>
-                                  <div className="font-medium">{item.actorName || "—"}</div>
-                                  <div className="text-gray-500 dark:text-gray-400">
-                                    {recontactChannelLabel(item.channel)} · {formatShortUsDate(item.occurredOn)}
-                                  </div>
-                                  <div className="text-gray-500 dark:text-gray-400">{item.listOrAssignment}</div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-gray-500 dark:text-gray-400">
-                              {pair.matchStatus === "no_pdi" ? "No PDI on QC call" : "No prior contact"}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          {priors.length
-                            ? priors.map((item, index) => (
-                                <div key={`${item.resultLabel}-${index}`} className={index > 0 ? "mt-2" : undefined}>
-                                  {displayRecontactResultLabel(item.resultLabel, surveyScriptProfile) || "—"}
-                                </div>
-                              ))
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
-                          <div className="font-medium">{pair.qc.phonebankerName || "—"}</div>
-                          <div className="text-gray-500 dark:text-gray-400">
-                            {formatShortUsDate(pair.qc.callDate)}
-                          </div>
-                          <div className="text-gray-500 dark:text-gray-400">{pair.qc.campaignName}</div>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200">
-                          {pair.qc.contactedAnswer?.trim() || "—"}
-                        </td>
-                        <td
-                          className="px-3 py-2 text-xs text-gray-800 dark:text-gray-200 max-w-[12rem]"
-                          title={pair.qc.notesAnswer?.trim() || undefined}
-                        >
-                          {(() => {
-                            const notes = pair.qc.notesAnswer?.trim() || "";
-                            if (!notes) return "—";
-                            return notes.length > 48 ? `${notes.slice(0, 48)}…` : notes;
-                          })()}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          {displayRecontactResultLabel(pair.qc.pollingLabel, surveyScriptProfile) || "—"}
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          {displayRecontactResultLabel(pair.qc.finalResultLabel, surveyScriptProfile) || "—"}
-                        </td>
+                        {tableColumns.map((id) => (
+                          <RecontactTableCell
+                            key={id}
+                            columnId={id}
+                            pair={pair}
+                            priors={priors}
+                            surveyScriptProfile={surveyScriptProfile}
+                          />
+                        ))}
                       </tr>
                     );
                   })}

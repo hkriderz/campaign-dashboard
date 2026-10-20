@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRecontactPairsCsv, buildRecontactTableTsv, recontactExportFilename, recontactPairsToCsvRows } from "./export";
+import { toggleRecontactTableColumn } from "./table-columns";
 import type { QcRecontactPair } from "./types";
 
 const matched: QcRecontactPair = {
@@ -116,6 +117,32 @@ test("copy table keeps a comma address in one column", () => {
   assert.equal(cells[13], "Left a voicemail");
   const lines = tsv.trim().split("\r\n");
   assert.equal(lines.length, 3);
+});
+
+test("copy table drops unchecked columns and keeps the address cell intact", () => {
+  const columns = toggleRecontactTableColumn(
+    toggleRecontactTableColumn(
+      ["change", "pdi", "prior", "priorResult", "qc", "contacted", "notes", "polling", "result"],
+      "notes",
+      false
+    ),
+    "polling",
+    false
+  );
+  const tsv = buildRecontactTableTsv([matched], "faizahTraci", columns);
+  const [header, first] = tsv.split("\r\n");
+  assert.equal(
+    header,
+    "Change\tPDI\tVoter name\tVoter address\tPrior\tPrior channel\tPrior date\tPrior list\tPrior result\tQC\tQC date\tQC list\tWere you contacted\tQC result"
+  );
+  const cells = first?.split("\t") ?? [];
+  assert.equal(cells.length, 14);
+  assert.equal(cells[3], "1 Main St, Los Angeles, CA 90001");
+  assert.equal(cells[13], "Strong oppose");
+});
+
+test("the last visible recontact column stays checked", () => {
+  assert.deepEqual(toggleRecontactTableColumn(["notes"], "notes", false), ["notes"]);
 });
 
 test("buildRecontactPairsCsv includes a header and escaped cells", () => {

@@ -3,6 +3,12 @@ import { formatShortUsDate } from "../slice-key";
 import type { SurveyScriptProfile } from "../types";
 import { displayRecontactResultLabel } from "./labels";
 import { changeKindLabel, firstClassifiablePrior, recontactChannelLabel } from "./pair";
+import {
+  ALL_RECONTACT_TABLE_COLUMN_IDS,
+  recontactTableColumnIndexes,
+  recontactTableHeadersForColumns,
+  type RecontactTableColumnId,
+} from "./table-columns";
 import type { PriorContactSummary, QcRecontactPair } from "./types";
 
 export const RECONTACT_CSV_HEADERS = [
@@ -201,11 +207,18 @@ export function recontactPairsToTableRows(
  */
 export function buildRecontactTableTsv(
   pairs: readonly QcRecontactPair[],
-  profile: SurveyScriptProfile = "faizahTraci"
+  profile: SurveyScriptProfile = "faizahTraci",
+  columnIds: readonly RecontactTableColumnId[] = ALL_RECONTACT_TABLE_COLUMN_IDS
 ): string {
+  const indexes = recontactTableColumnIndexes(columnIds);
+  const headers = recontactTableHeadersForColumns(
+    ALL_RECONTACT_TABLE_COLUMN_IDS.filter((id) => columnIds.includes(id))
+  );
   const lines = [
-    RECONTACT_TABLE_HEADERS.map((header) => spreadsheetCell(header)).join("\t"),
-    ...recontactPairsToTableRows(pairs, profile).map((row) => row.map((cell) => spreadsheetCell(cell)).join("\t")),
+    headers.map((header) => spreadsheetCell(header)).join("\t"),
+    ...recontactPairsToTableRows(pairs, profile).map((row) =>
+      indexes.map((index) => spreadsheetCell(row[index] ?? "")).join("\t")
+    ),
   ];
   return lines.join("\r\n");
 }
