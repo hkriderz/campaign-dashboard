@@ -14,6 +14,11 @@ import {
 } from "@/lib/daily-aggregate-survey-rollup";
 import { questionLooksLikeDisclaimer } from "@/lib/survey-i18n/rules";
 import {
+  collapseDisclaimerNotesPivotHeaders,
+  upsertPivotAnswerColumn,
+  type PivotAnswerColumn,
+} from "@/lib/pivot-disclaimer-notes";
+import {
   classifySurveyAnswerDisplayLabel,
   consolidateSurveyAnswerLines,
   isSplitStrongOpposeQuestionName,
@@ -86,11 +91,7 @@ export type PbQuestionAnswerRow = {
   synthesizedCount?: number;
 };
 
-type PivotColumn = {
-  key: string;
-  questionName: string;
-  answerValue: string;
-};
+type PivotColumn = PivotAnswerColumn;
 
 function isFinalResultPivotColumn(col: PivotColumn): boolean {
   return isFinalResultPivotQuestion(col.questionName);
@@ -229,13 +230,8 @@ function fillMissingSyntheticPivotColumns(
 }
 
 function fillMissingWideScriptHeaders(colByKey: Map<string, PivotColumn>, order: readonly string[]): void {
-  for (const header of order) {
-    const t = header.trim();
-    if (!t) continue;
-    const key = `${t}::`;
-    if (!colByKey.has(key)) {
-      colByKey.set(key, { key, questionName: t, answerValue: "" });
-    }
+  for (const header of collapseDisclaimerNotesPivotHeaders(order)) {
+    upsertPivotAnswerColumn(colByKey, header, "");
   }
 }
 
@@ -317,6 +313,10 @@ function buildQuestionResponsesPivotTsv(
   ];
   if (hasPivot) {
     for (const col of renderedColumns) {
+      if (col.notesNa) {
+        totalCells.push(col.answerValue);
+        continue;
+      }
       const isFr = isFinalResultPivotColumn(col);
       let total = 0;
       let synthesized = 0;
@@ -350,6 +350,10 @@ function buildQuestionResponsesPivotTsv(
     ];
     if (hasPivot) {
       for (const col of renderedColumns) {
+        if (col.notesNa) {
+          rowCells.push(col.answerValue);
+          continue;
+        }
         const total = valMap.get(col.key) ?? 0;
         const synthesized = synthMap.get(col.key) ?? 0;
         rowCells.push(
@@ -409,10 +413,7 @@ function buildObservedPivotColumnsByCampaign(
 
     for (const row of rows) {
       if (questionLooksLikeDisclaimer(row.questionName)) continue;
-      const key = `${row.questionName}::${row.answerValue}`;
-      if (!cols.has(key)) {
-        cols.set(key, { key, questionName: row.questionName, answerValue: row.answerValue });
-      }
+      upsertPivotAnswerColumn(cols, row.questionName, row.answerValue);
     }
   }
 
@@ -436,7 +437,6 @@ function computeSliceRenderModel(
   const rows = questionRowsBySlice[slice.sliceKey] ?? [];
   const spanishSlice = isSpanishPhonebankSlice(slice.campaignName, rows);
   const rowsByPhonebanker = new Map<string, PbQuestionAnswerRow[]>();
-  const colKeySet = new Set<string>();
   const colByKey = new Map<string, PivotColumn>();
   const hideSyntheticRollups = sliceRowsLookLikeBqSplitScript(rows);
 
@@ -449,15 +449,7 @@ function computeSliceRenderModel(
     arr.push(row);
     rowsByPhonebanker.set(bankerKey, arr);
 
-    const key = `${row.questionName}::${row.answerValue}`;
-    if (!colKeySet.has(key)) {
-      colKeySet.add(key);
-      colByKey.set(key, {
-        key,
-        questionName: row.questionName,
-        answerValue: row.answerValue,
-      });
-    }
+    upsertPivotAnswerColumn(colByKey, row.questionName, row.answerValue);
   }
 
   for (const col of observedColumnsForCampaign) {
@@ -471,7 +463,7 @@ function computeSliceRenderModel(
   }
   const pivotHintHeaders =
     widePivotHeaderOrderHint?.length && !hideSyntheticRollups
-      ? filterWidePivotImportHeaders(widePivotHeaderOrderHint)
+      ? collapseDisclaimerNotesPivotHeaders(filterWidePivotImportHeaders(widePivotHeaderOrderHint))
       : [];
   if (pivotHintHeaders.length > 0) {
     fillMissingWideScriptHeaders(colByKey, pivotHintHeaders);
@@ -1055,6 +1047,13 @@ export default function PbDashboardStack({
                           </td>
                           {hasPivot &&
                             renderedColumns.map((col) => {
+                              if (col.notesNa) {
+                                return (
+                                  <td key={`total-${col.key}`} className="px-2 py-1 border border-gray-200 dark:border-gray-700 text-center text-gray-500 dark:text-gray-400">
+                                    {col.answerValue}
+                                  </td>
+                                );
+                              }
                               const isFr = isFinalResultPivotColumn(col);
                               let total = 0;
                               let synthesized = 0;
@@ -1122,6 +1121,13 @@ export default function PbDashboardStack({
                               </td>
                               {hasPivot &&
                                 renderedColumns.map((col) => {
+                                  if (col.notesNa) {
+                                    return (
+                                      <td key={`${phonebankerName}-${col.key}`} className="px-2 py-1 border border-gray-100 dark:border-gray-700 text-center text-gray-500 dark:text-gray-400">
+                                        {col.answerValue}
+                                      </td>
+                                    );
+                                  }
                                   const total = valMap.get(col.key) ?? 0;
                                   const synthesized = synthMap.get(col.key) ?? 0;
                                   const isFr = isFinalResultPivotColumn(col);
