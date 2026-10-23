@@ -2,6 +2,7 @@
  * Canvasser Overview: QC recontacts rolled up by the canvasser who originally ID'd the voter.
  * Definitions are locked to the Detailed Canvasser View sheet (Dilan Davila sample).
  */
+import { assignmentCampaignPrefix } from "../canvassing/data-checks/parser";
 import { escapeCsvCell } from "../pivot-csv-export";
 import type { SurveyScriptProfile } from "../types";
 import { familyFromResultLabel } from "../unique-ids/classify";
@@ -49,8 +50,10 @@ export type CanvasserOverviewDetail = {
   callerName: string;
   callDate: string;
   callTime: string;
-  /** Canvass assignment the latest prior came from. Used by the project filter, not a table column. */
+  /** Canvass assignment the latest prior came from. The project filter groups this by project, not turf. */
   sourceList: string;
+  /** QC campaign name. Used by the QC phone-bank filter, not a table column. */
+  qcCampaignName: string;
 };
 
 export type CanvasserOverviewRow = {
@@ -372,7 +375,35 @@ function detailFromPair(
     callDate: pair.qc.callDate,
     callTime: callTimeFromIso(pair.qc.callAt),
     sourceList: prior.listOrAssignment.trim(),
+    qcCampaignName: pair.qc.campaignName.trim(),
   };
+}
+
+/** Project label for a canvass assignment, dropping a trailing turf or precinct id. */
+export function canvasserProjectName(sourceList: string): string {
+  return assignmentCampaignPrefix(sourceList);
+}
+
+export function canvasserProjectOptions(rows: readonly CanvasserOverviewRow[]): string[] {
+  const names = new Set<string>();
+  for (const row of rows) {
+    for (const detail of row.details) {
+      const name = canvasserProjectName(detail.sourceList);
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+}
+
+export function canvasserQcPhonebankOptions(rows: readonly CanvasserOverviewRow[]): string[] {
+  const names = new Set<string>();
+  for (const row of rows) {
+    for (const detail of row.details) {
+      const name = detail.qcCampaignName.trim();
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 export function canvasserOverviewRowFromDetails(
@@ -430,21 +461,41 @@ export function canvasserOverviewRowFromDetails(
   };
 }
 
-/** Keep voter rows whose canvass assignment is checked. An empty list leaves the rows unchanged. */
-export function filterCanvasserOverviewByProjects(
+function filterCanvasserRows(
   rows: readonly CanvasserOverviewRow[],
-  projects: readonly string[]
+  selected: readonly string[],
+  matches: (detail: CanvasserOverviewDetail, wanted: Set<string>) => boolean
 ): readonly CanvasserOverviewRow[] {
-  const wanted = new Set(projects.map((project) => project.trim()).filter(Boolean));
+  const wanted = new Set(selected.map((name) => name.trim()).filter(Boolean));
   if (wanted.size === 0) return rows;
   const next: CanvasserOverviewRow[] = [];
   for (const row of rows) {
-    const details = row.details.filter((detail) => wanted.has(detail.sourceList.trim()));
+    const details = row.details.filter((detail) => matches(detail, wanted));
     if (!details.length) continue;
     next.push(canvasserOverviewRowFromDetails(row.canvasserName, details));
   }
   next.sort((a, b) => b.surveyed - a.surveyed || a.canvasserName.localeCompare(b.canvasserName));
   return next;
+}
+
+/** Keep voter rows whose canvass project is checked. An empty list leaves the rows unchanged. */
+export function filterCanvasserOverviewByProjects(
+  rows: readonly CanvasserOverviewRow[],
+  projects: readonly string[]
+): readonly CanvasserOverviewRow[] {
+  return filterCanvasserRows(rows, projects, (detail, wanted) =>
+    wanted.has(canvasserProjectName(detail.sourceList))
+  );
+}
+
+/** Keep voter rows whose QC phone bank is checked. An empty list leaves the rows unchanged. */
+export function filterCanvasserOverviewByQcPhonebanks(
+  rows: readonly CanvasserOverviewRow[],
+  phonebanks: readonly string[]
+): readonly CanvasserOverviewRow[] {
+  return filterCanvasserRows(rows, phonebanks, (detail, wanted) =>
+    wanted.has(detail.qcCampaignName.trim())
+  );
 }
 
 export function tallyCanvasserOverview(

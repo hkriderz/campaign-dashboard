@@ -9,7 +9,10 @@ import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
   buildCanvasserOverviewCsv,
   canvasserOverviewExportFilename,
+  canvasserProjectOptions,
+  canvasserQcPhonebankOptions,
   filterCanvasserOverviewByProjects,
+  filterCanvasserOverviewByQcPhonebanks,
   formatOverviewPercent,
   overviewPercentBandClass,
   summarizeCanvasserOverview,
@@ -155,6 +158,7 @@ export default function CanvasserOverviewClient() {
   );
   const [hasNotesOnly, setHasNotesOnly] = useState(false);
   const [projects, setProjects] = useState<string[]>([]);
+  const [qcPhonebanks, setQcPhonebanks] = useState<string[]>([]);
   const [canvassersSelected, setCanvassersSelected] = useState<string[]>([]);
   const [canvasserMode, setCanvasserMode] = useState<PeopleFilterMode>("include");
   const canvasserGroups = useActorGroups("canvasser");
@@ -201,24 +205,20 @@ export default function CanvasserOverviewClient() {
   }, [loadOverview]);
 
   const dateRows = payload?.canvassers ?? [];
-  const projectOptions = useMemo(() => {
-    const names = new Set<string>();
-    for (const row of dateRows) {
-      for (const detail of row.details) {
-        const list = detail.sourceList.trim();
-        if (list) names.add(list);
-      }
-    }
-    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
-  }, [dateRows]);
+  const projectOptions = useMemo(() => canvasserProjectOptions(dateRows), [dateRows]);
+  const qcPhonebankOptions = useMemo(() => canvasserQcPhonebankOptions(dateRows), [dateRows]);
   const canvasserOptions = useMemo(() => dateRows.map((row) => row.canvasserName), [dateRows]);
   const projectRows = useMemo(
     () => filterCanvasserOverviewByProjects(dateRows, projects),
     [dateRows, projects]
   );
+  const qcRows = useMemo(
+    () => filterCanvasserOverviewByQcPhonebanks(projectRows, qcPhonebanks),
+    [projectRows, qcPhonebanks]
+  );
   const peopleRows = useMemo(
-    () => filterNamedRows(projectRows, canvassersSelected, canvasserMode, (row) => row.canvasserName, recontactNamesMatch),
-    [projectRows, canvassersSelected, canvasserMode]
+    () => filterNamedRows(qcRows, canvassersSelected, canvasserMode, (row) => row.canvasserName, recontactNamesMatch),
+    [qcRows, canvassersSelected, canvasserMode]
   );
   const visibleCanvassers = useMemo(
     () => filterOverviewRowsByHasNotes(peopleRows, hasNotesOnly),
@@ -300,6 +300,12 @@ export default function CanvasserOverviewClient() {
             options={projectOptions}
             selected={projects}
             onSelectedChange={setProjects}
+          />
+          <CheckboxFilterMenu
+            label="QC phone banks"
+            options={qcPhonebankOptions}
+            selected={qcPhonebanks}
+            onSelectedChange={setQcPhonebanks}
           />
           <CheckboxFilterMenu
             label="Canvassers"

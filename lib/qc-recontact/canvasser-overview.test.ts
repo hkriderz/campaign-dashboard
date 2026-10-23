@@ -2,6 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCanvasserOverviewCsv,
+  canvasserProjectOptions,
+  filterCanvasserOverviewByProjects,
+  filterCanvasserOverviewByQcPhonebanks,
   formatOverviewPercent,
   overviewPercentBand,
   summarizeCanvasserOverview,
@@ -154,11 +157,15 @@ const DILAN: Voter[] = [
   },
 ];
 
-function qcCall(voter: Voter, canvassLabel = "Talking to Correct Person"): RecontactCallSummary {
+function qcCall(
+  voter: Voter,
+  canvassLabel = "Talking to Correct Person",
+  campaignName = "Nithya QC"
+): RecontactCallSummary {
   return {
     callId: voter.callId,
     campaignId: "qc-1",
-    campaignName: "Nithya QC",
+    campaignName,
     callDate: voter.callDate,
     callAt: voter.callAt,
     phonebankerName: voter.caller,
@@ -174,24 +181,39 @@ function qcCall(voter: Voter, canvassLabel = "Talking to Correct Person"): Recon
   };
 }
 
-function canvassPrior(voter: Voter, actorName = "Dilan Davila"): PriorContactSummary {
+function canvassPrior(
+  voter: Voter,
+  actorName = "Dilan Davila",
+  listOrAssignment = "Walk"
+): PriorContactSummary {
   return {
     channel: "canvass",
     pdiId: voter.pdiId,
     actorName,
     occurredOn: voter.originalDate,
-    listOrAssignment: "Walk",
+    listOrAssignment,
     resultLabel: voter.originalFlag,
     callAt: `${voter.originalDate}T18:00:00`,
   };
 }
 
-function pairFrom(voter: Voter, options?: { canvasser?: string; canvassLabel?: string; canvass?: boolean }): QcRecontactPair {
+function pairFrom(
+  voter: Voter,
+  options?: {
+    canvasser?: string;
+    canvassLabel?: string;
+    canvass?: boolean;
+    assignment?: string;
+    campaignName?: string;
+  }
+): QcRecontactPair {
   const priors: PriorContactSummary[] = [];
-  if (options?.canvass !== false) priors.push(canvassPrior(voter, options?.canvasser ?? "Dilan Davila"));
+  if (options?.canvass !== false) {
+    priors.push(canvassPrior(voter, options?.canvasser ?? "Dilan Davila", options?.assignment));
+  }
   return {
     pairId: voter.callId,
-    qc: qcCall(voter, options?.canvassLabel),
+    qc: qcCall(voter, options?.canvassLabel, options?.campaignName),
     priors,
     matchStatus: priors.length ? "matched" : "unmatched",
     changeKind: "held",
@@ -402,6 +424,75 @@ test("totals weight percentages by counts instead of averaging row percents", ()
   assert.equal(formatOverviewPercent(totals.strongSupportOnPollingRate), "25.00%");
   assert.equal(formatOverviewPercent(totals.strongSupportAfterPersuasionRate), "25.00%");
   assert.equal(totals.details.length, 0);
+});
+
+test("canvass project filter groups turfs and keeps names without a suffix", () => {
+  const turfA = DILAN[0];
+  const turfB = DILAN[1];
+  const plain = DILAN[2];
+  assert.ok(turfA);
+  assert.ok(turfB);
+  assert.ok(plain);
+  const tally = tallyCanvasserOverview([
+    pairFrom(turfA, { assignment: "Nithya Boyle Heights Esp 9-6-26 - 199000902" }),
+    pairFrom(turfB, { assignment: "Nithya Boyle Heights Esp 9-6-26 - 199001851" }),
+    pairFrom(plain, { assignment: "Walk" }),
+  ]);
+  assert.deepEqual(canvasserProjectOptions(tally.canvassers), [
+    "Nithya Boyle Heights Esp 9-6-26",
+    "Walk",
+  ]);
+
+  const boyle = filterCanvasserOverviewByProjects(tally.canvassers, ["Nithya Boyle Heights Esp 9-6-26"]);
+  assert.equal(boyle.length, 1);
+  assert.equal(boyle[0]?.surveyed, 2);
+  assert.deepEqual(
+    boyle[0]?.details.map((detail) => detail.sourceList).sort(),
+    [
+      "Nithya Boyle Heights Esp 9-6-26 - 199000902",
+      "Nithya Boyle Heights Esp 9-6-26 - 199001851",
+    ]
+  );
+
+  const walk = filterCanvasserOverviewByProjects(tally.canvassers, ["Walk"]);
+  assert.equal(walk.length, 1);
+  assert.equal(walk[0]?.surveyed, 1);
+  assert.equal(walk[0]?.details[0]?.sourceList, "Walk");
+});
+
+test("QC phone bank filter is empty-open and ANDs with the project filter", () => {
+  const onBoyle = DILAN[0];
+  const onWalk = DILAN[1];
+  const otherBank = DILAN[2];
+  assert.ok(onBoyle);
+  assert.ok(onWalk);
+  assert.ok(otherBank);
+  const tally = tallyCanvasserOverview([
+    pairFrom(onBoyle, {
+      assignment: "Nithya Boyle Heights Esp 9-6-26 - 199000902",
+      campaignName: "Nithya QC PB 9.12",
+    }),
+    pairFrom(onWalk, { assignment: "Walk", campaignName: "Nithya QC PB 9.12" }),
+    pairFrom(otherBank, {
+      assignment: "Nithya Boyle Heights Esp 9-6-26 - 199001851",
+      campaignName: "9.21 Nithya QC PB",
+    }),
+  ]);
+
+  assert.equal(filterCanvasserOverviewByQcPhonebanks(tally.canvassers, []), tally.canvassers);
+
+  const oneBank = filterCanvasserOverviewByQcPhonebanks(tally.canvassers, ["Nithya QC PB 9.12"]);
+  assert.equal(oneBank.length, 1);
+  assert.equal(oneBank[0]?.surveyed, 2);
+
+  const both = filterCanvasserOverviewByQcPhonebanks(
+    filterCanvasserOverviewByProjects(tally.canvassers, ["Nithya Boyle Heights Esp 9-6-26"]),
+    ["Nithya QC PB 9.12"]
+  );
+  assert.equal(both.length, 1);
+  assert.equal(both[0]?.surveyed, 1);
+  assert.equal(both[0]?.details[0]?.pdiId, onBoyle.pdiId);
+  assert.equal(both[0]?.details[0]?.qcCampaignName, "Nithya QC PB 9.12");
 });
 
 test("percent bands include the lower edge of each range", () => {
