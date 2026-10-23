@@ -33,6 +33,12 @@ import {
   templateStorageKey,
   type QuestionTemplates,
 } from "./mapping-templates";
+import {
+  premapPhonebanks,
+  type PhonebankForPremap,
+  type PhonebankMapScope,
+  type PhonebankPremapSummary,
+} from "./premap-phonebanks";
 
 const CHANNEL_STORAGE_KEY = "campaign_dashboard_pdi_mapper_channel";
 const TEXT_SCOPE_STORAGE_KEY = "campaign_dashboard_pdi_mapper_text_scope_v1";
@@ -96,6 +102,9 @@ export interface AppState {
   loadError: string | null;
   lastRefreshedAt: string | null;
   questionTemplates: QuestionTemplates;
+  /** Survey names for the selected day range. Null shows every loaded survey. */
+  phonebankSurveyFilter: string[] | null;
+  phonebankPremapSummary: PhonebankPremapSummary | null;
 }
 
 const initialState: AppState = {
@@ -112,6 +121,8 @@ const initialState: AppState = {
   loadError: null,
   lastRefreshedAt: null,
   questionTemplates: {},
+  phonebankSurveyFilter: null,
+  phonebankPremapSummary: null,
 };
 
 type Action =
@@ -161,7 +172,14 @@ type Action =
   | { type: "SET_TEXT_MAPPING_SCOPE"; scope: TextMappingScope }
   | { type: "LOAD_TEMPLATES"; templates: QuestionTemplates }
   | { type: "SAVE_QUESTION_TEMPLATE"; questionName: string; template: QuestionTemplates[string] }
-  | { type: "DELETE_QUESTION_TEMPLATE"; questionName: string };
+  | { type: "DELETE_QUESTION_TEMPLATE"; questionName: string }
+  | {
+      type: "PREMAP_PHONEBANKS";
+      campaigns: PhonebankForPremap[];
+      scope: PhonebankMapScope;
+    }
+  | { type: "SET_PHONEBANK_FILTER"; names: string[] }
+  | { type: "CLEAR_PHONEBANK_FILTER" };
 
 function qKey(survey: string, question: string): string {
   return `${survey}||${question}`;
@@ -182,6 +200,8 @@ function reducer(state: AppState, action: Action): AppState {
         dataLoaded: true,
         loadError: null,
         isRefreshing: false,
+        phonebankSurveyFilter: null,
+        phonebankPremapSummary: null,
       };
     }
 
@@ -390,6 +410,8 @@ function reducer(state: AppState, action: Action): AppState {
         loadError: null,
         lastRefreshedAt: null,
         questionTemplates: {},
+        phonebankSurveyFilter: null,
+        phonebankPremapSummary: null,
       };
 
     case "SET_TEXT_MAPPING_SCOPE":
@@ -413,6 +435,49 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         questionTemplates: deleteQuestionTemplate(state.questionTemplates, action.questionName),
       };
+
+    case "PREMAP_PHONEBANKS": {
+      const premapped = premapPhonebanks({
+        campaigns: action.campaigns,
+        scope: action.scope,
+        stwData: state.stwData,
+        pdiQuestions: state.pdiQuestions,
+        questionMappings: state.questionMappings,
+        answerMappings: state.answerMappings,
+        questionTemplates: state.questionTemplates,
+      });
+      const included = premapped.summary.included;
+      const activeSurvey = included.includes(state.activeSurvey ?? "")
+        ? state.activeSurvey
+        : (included[0] ?? null);
+      return {
+        ...state,
+        questionMappings: premapped.questionMappings,
+        answerMappings: premapped.answerMappings,
+        phonebankSurveyFilter: included,
+        phonebankPremapSummary: premapped.summary,
+        activeSurvey,
+      };
+    }
+
+    case "SET_PHONEBANK_FILTER": {
+      const included = action.names;
+      const current = state.phonebankSurveyFilter;
+      if (
+        current &&
+        current.length === included.length &&
+        current.every((name, index) => name === included[index])
+      ) {
+        return state;
+      }
+      const activeSurvey = included.includes(state.activeSurvey ?? "")
+        ? state.activeSurvey
+        : (included[0] ?? null);
+      return { ...state, phonebankSurveyFilter: included, activeSurvey };
+    }
+
+    case "CLEAR_PHONEBANK_FILTER":
+      return { ...state, phonebankSurveyFilter: null, phonebankPremapSummary: null };
 
     default:
       return state;

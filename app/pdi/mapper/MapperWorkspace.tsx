@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { AppProvider, useApp } from "@/lib/pdi-tools/mapping-context";
 import DataLoader from "@/components/pdi-tools/DataLoader";
 import SurveySidebar from "@/components/pdi-tools/SurveySidebar";
@@ -50,7 +50,9 @@ function MapperBody() {
             <div
               className={`${mobilePane === "surveys" ? "flex" : "hidden"} lg:flex flex-col min-h-0 flex-1 lg:flex-none lg:max-h-full`}
             >
-              <SurveySidebar />
+              <Suspense fallback={<p className="px-3 py-4 text-[11px] text-gray-400">Loading surveys…</p>}>
+                <SurveySidebar />
+              </Suspense>
             </div>
             <div
               className={`${mobilePane === "map" ? "flex" : "hidden"} lg:flex flex-col min-h-0 flex-1 min-w-0`}

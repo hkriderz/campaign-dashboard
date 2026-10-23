@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import PhoneBankTable from "@/components/phonebanking/PhoneBankTable";
@@ -269,6 +270,16 @@ export default function AllCampaignsDaySection({ defaultPhoneBanks }: Props) {
           allowEmpty
         />
       </div>
+      {allStartDate ? (
+        <Link
+          href={`/pdi/mapper?start=${encodeURIComponent(allStartDate)}&end=${encodeURIComponent(
+            allEndDate || allStartDate
+          )}&scope=tags`}
+          className="inline-flex items-center rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50 dark:border-indigo-800 dark:bg-gray-900 dark:text-indigo-300 dark:hover:bg-indigo-950/40"
+        >
+          Map phonebanks
+        </Link>
+      ) : null}
       <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
         Defaults to <strong className="font-medium text-gray-600 dark:text-gray-300">Today</strong> (Pacific).{" "}
         <strong className="font-medium text-gray-600 dark:text-gray-300">Total</strong> shows the full window list

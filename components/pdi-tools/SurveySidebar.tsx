@@ -1,22 +1,170 @@
 "use client";
 
-import React, { useRef, useState, useMemo } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import type { PdiQuestion, StwRow } from "@/lib/pdi-tools/types";
 import { mappingAnswerKey, mappingQuestionKey } from "@/lib/pdi-tools/channel";
 import { hasMappableTextQuestions } from "@/lib/pdi-tools/text-tag-stw-data";
+import { laCalendarYmd } from "@/lib/la-dates";
+import {
+  selectPhonebanksForPremap,
+  type PhonebankForPremap,
+  type PhonebankMapScope,
+} from "@/lib/pdi-tools/premap-phonebanks";
 
 type CompletionFilter = "all" | "filled" | "empty";
 
 export default function SurveySidebar() {
   const { state, dispatch } = useApp();
+  const searchParams = useSearchParams();
   const pdiFileRef = useRef<HTMLInputElement>(null);
   const stwFileRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [completionFilter, setCompletionFilter] = useState<CompletionFilter>("all");
+  const [mapRange, setMapRange] = useState(() => {
+    const start = searchParams.get("day") || searchParams.get("start") || laCalendarYmd();
+    const end = searchParams.get("end")?.trim() || start;
+    return { start, end };
+  });
+  const [mapScope, setMapScope] = useState<PhonebankMapScope>(
+    () => (searchParams.get("scope") === "all" ? "all" : "tags")
+  );
+  const [dayCampaigns, setDayCampaigns] = useState<PhonebankForPremap[] | null>(null);
+  const [listBusy, setListBusy] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [applyRange, setApplyRange] = useState(
+    () => Boolean(searchParams.get("day") || searchParams.get("start"))
+  );
+  const [mappedKey, setMappedKey] = useState<string | null>(null);
+  const mapAfterLoad = useRef(false);
+  const rangeKey = `${mapRange.start}|${mapRange.end}|${mapScope}`;
 
-  const surveyNames = useMemo(() => Object.keys(state.stwData).sort(), [state.stwData]);
+  const surveyNames = useMemo(() => {
+    const names = Object.keys(state.stwData).sort();
+    if (!state.phonebankSurveyFilter) return names;
+    const allow = new Set(state.phonebankSurveyFilter);
+    return names.filter((name) => allow.has(name));
+  }, [state.stwData, state.phonebankSurveyFilter]);
+
+  const listSummary = useMemo(() => {
+    if (!dayCampaigns) return null;
+    const { selected, skippedUntagged } = selectPhonebanksForPremap(dayCampaigns, mapScope);
+    const included: string[] = [];
+    const missingFromSurveys: string[] = [];
+    for (const campaign of selected) {
+      if (state.stwData[campaign.campaignName]) included.push(campaign.campaignName);
+      else missingFromSurveys.push(campaign.campaignName);
+    }
+    included.sort();
+    missingFromSurveys.sort();
+    return { included, missingFromSurveys, skippedUntagged };
+  }, [dayCampaigns, mapScope, state.stwData]);
+
+  function setRangeStart(value: string) {
+    setApplyRange(true);
+    setMapRange((range) => ({
+      start: value,
+      end: !value || !range.end || value <= range.end ? range.end || value : value,
+    }));
+  }
+
+  function setRangeEnd(value: string) {
+    setApplyRange(true);
+    setMapRange((range) => ({
+      start: !value || !range.start || range.start <= value ? range.start : value,
+      end: value,
+    }));
+  }
+
+  function chooseScope(scope: PhonebankMapScope) {
+    setMapScope(scope);
+  }
+
+  function showEverySurvey() {
+    mapAfterLoad.current = false;
+    setApplyRange(false);
+    dispatch({ type: "CLEAR_PHONEBANK_FILTER" });
+  }
+
+  function mapPhonebanks() {
+    if (!dayCampaigns || !applyRange) {
+      mapAfterLoad.current = true;
+      setApplyRange(true);
+      return;
+    }
+    mapAfterLoad.current = false;
+    dispatch({
+      type: "PREMAP_PHONEBANKS",
+      campaigns: dayCampaigns,
+      scope: mapScope,
+    });
+    setMappedKey(rangeKey);
+  }
+
+  useEffect(() => {
+    if (!applyRange || !state.dataLoaded || state.channel !== "dialer") return;
+    const start = mapRange.start.trim();
+    const through = mapRange.end.trim() || start;
+    if (!start || !through || start > through) {
+      setDayCampaigns(null);
+      setMapError(
+        start && through && start > through
+          ? "Start date must be on or before the end date."
+          : "Pick a start and end date."
+      );
+      return;
+    }
+
+    const ac = new AbortController();
+    setListBusy(true);
+    setMapError(null);
+    fetch(
+      `/api/pdi/phonebanks-for-day?start=${encodeURIComponent(start)}&end=${encodeURIComponent(through)}`,
+      { credentials: "same-origin", cache: "no-store", signal: ac.signal }
+    )
+      .then(async (res) => {
+        const data = (await res.json()) as { campaigns?: PhonebankForPremap[]; error?: string };
+        if (!res.ok) throw new Error(data.error ?? res.statusText);
+        return data.campaigns ?? [];
+      })
+      .then((campaigns) => {
+        if (!ac.signal.aborted) setDayCampaigns(campaigns);
+      })
+      .catch((e: unknown) => {
+        if (ac.signal.aborted) return;
+        setDayCampaigns(null);
+        setMapError(e instanceof Error ? e.message : "Could not load phonebanks");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setListBusy(false);
+      });
+
+    return () => ac.abort();
+  }, [applyRange, state.dataLoaded, state.channel, mapRange.start, mapRange.end]);
+
+  useEffect(() => {
+    if (!applyRange || state.channel !== "dialer" || !listSummary) return;
+    dispatch({ type: "SET_PHONEBANK_FILTER", names: listSummary.included });
+    if (!mapAfterLoad.current || !dayCampaigns) return;
+    mapAfterLoad.current = false;
+    dispatch({
+      type: "PREMAP_PHONEBANKS",
+      campaigns: dayCampaigns,
+      scope: mapScope,
+    });
+    setMappedKey(`${mapRange.start}|${mapRange.end}|${mapScope}`);
+  }, [
+    applyRange,
+    dayCampaigns,
+    dispatch,
+    listSummary,
+    mapRange.end,
+    mapRange.start,
+    mapScope,
+    state.channel,
+  ]);
 
   function handlePdiUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -140,9 +288,111 @@ export default function SurveySidebar() {
         </div>
       </div>
 
+      {state.channel === "dialer" ? (
+        <div className="px-3 py-2.5 border-b border-gray-200 dark:border-zinc-700/50 space-y-2">
+          <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
+            Map phonebanks
+          </p>
+          <button
+            type="button"
+            onClick={showEverySurvey}
+            className={`w-full text-[11px] py-1.5 rounded border font-medium transition-colors ${
+              applyRange
+                ? "border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
+                : "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
+            }`}
+          >
+            All surveys
+          </button>
+          <label className="block">
+            <span className="text-[10px] text-gray-500 dark:text-zinc-400">Start</span>
+            <input
+              type="date"
+              value={mapRange.start}
+              max={mapRange.end || undefined}
+              onChange={(e) => setRangeStart(e.target.value)}
+              className="mt-0.5 w-full text-[11px] px-2 py-1 rounded border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-800 dark:text-zinc-100"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] text-gray-500 dark:text-zinc-400">End</span>
+            <input
+              type="date"
+              value={mapRange.end}
+              min={mapRange.start || undefined}
+              onChange={(e) => setRangeEnd(e.target.value)}
+              className="mt-0.5 w-full text-[11px] px-2 py-1 rounded border border-gray-300 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 text-gray-800 dark:text-zinc-100"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-1" role="group" aria-label="Which phonebanks to map">
+            {(
+              [
+                ["tags", "Campaign tags"],
+                ["all", "All campaigns"],
+              ] as const
+            ).map(([scope, label]) => (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => chooseScope(scope)}
+                className={`text-[10px] rounded border px-1.5 py-1 font-medium transition-colors ${
+                  mapScope === scope
+                    ? "border-green-500 bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400"
+                    : "border-gray-200 dark:border-zinc-700 text-gray-500 dark:text-zinc-400 hover:bg-gray-50 dark:hover:bg-zinc-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            disabled={
+              !state.dataLoaded ||
+              listBusy ||
+              (applyRange && (listSummary?.included.length ?? 0) === 0)
+            }
+            onClick={mapPhonebanks}
+            className="w-full text-[11px] py-1.5 rounded bg-green-600 text-white font-medium hover:bg-green-500 disabled:opacity-50"
+          >
+            Map phonebanks
+          </button>
+          {listBusy ? (
+            <p className="text-[10px] text-gray-500 dark:text-zinc-400">Loading phonebanks…</p>
+          ) : null}
+          {mapError ? <p className="text-[10px] text-red-600 dark:text-red-400">{mapError}</p> : null}
+          {!listBusy && applyRange && listSummary ? (
+            <div className="text-[10px] text-gray-500 dark:text-zinc-400 leading-snug space-y-1">
+              <p>
+                {mappedKey === rangeKey && state.phonebankPremapSummary
+                  ? `${state.phonebankPremapSummary.included.length} phonebank${
+                      state.phonebankPremapSummary.included.length === 1 ? "" : "s"
+                    } premapped.`
+                  : `${listSummary.included.length} phonebank${
+                      listSummary.included.length === 1 ? "" : "s"
+                    } in this range.`}
+                {listSummary.skippedUntagged > 0
+                  ? ` ${listSummary.skippedUntagged} without a campaign tag left out.`
+                  : ""}
+              </p>
+              {listSummary.missingFromSurveys.length > 0 ? (
+                <p>
+                  {listSummary.missingFromSurveys.length} had calls but no survey questions loaded.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="px-3 pt-2.5 pb-2 border-b border-gray-200 dark:border-zinc-700/50">
         <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">
-          {state.channel === "text" ? "Text campaigns" : "STW Surveys"} ({surveyNames.length})
+          {state.channel === "text"
+            ? "Text campaigns"
+            : state.phonebankSurveyFilter
+              ? "Phonebanks"
+              : "STW Surveys"}{" "}
+          ({surveyNames.length})
         </p>
         <input
           type="search"
