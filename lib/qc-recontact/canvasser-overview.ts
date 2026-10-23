@@ -49,6 +49,8 @@ export type CanvasserOverviewDetail = {
   callerName: string;
   callDate: string;
   callTime: string;
+  /** Canvass assignment the latest prior came from. Used by the project filter, not a table column. */
+  sourceList: string;
 };
 
 export type CanvasserOverviewRow = {
@@ -369,7 +371,80 @@ function detailFromPair(
     callerName: pair.qc.phonebankerName,
     callDate: pair.qc.callDate,
     callTime: callTimeFromIso(pair.qc.callAt),
+    sourceList: prior.listOrAssignment.trim(),
   };
+}
+
+export function canvasserOverviewRowFromDetails(
+  canvasserName: string,
+  details: readonly CanvasserOverviewDetail[]
+): CanvasserOverviewRow {
+  const sorted = [...details].sort((a, b) => {
+    const byDate = a.callDate.localeCompare(b.callDate);
+    if (byDate !== 0) return byDate;
+    const byTime = a.callTime.localeCompare(b.callTime);
+    if (byTime !== 0) return byTime;
+    return a.pdiId.localeCompare(b.pdiId);
+  });
+
+  const originalStrongSupportPolling = emptyFamilyBlock();
+  const originalStrongSupportFinal = emptyFamilyBlock();
+  const originalUndecidedFinal = emptyFamilyBlock();
+  let originallyStrongSupport = 0;
+  let contactedYes = 0;
+  let contactedUnsure = 0;
+  let contactedNo = 0;
+
+  for (const detail of sorted) {
+    if (detail.contactedBucket === "yes") contactedYes += 1;
+    else if (detail.contactedBucket === "unsure") contactedUnsure += 1;
+    else if (detail.contactedBucket === "no") contactedNo += 1;
+
+    if (detail.originalFlagFamily === "strongSupport") {
+      originallyStrongSupport += 1;
+      addFamily(originalStrongSupportPolling, detail.pollingFamily);
+      addFamily(originalStrongSupportFinal, detail.finalResultFamily);
+    } else if (detail.originalFlagFamily === "undecided") {
+      addFamily(originalUndecidedFinal, detail.finalResultFamily);
+    }
+  }
+
+  const surveyed = sorted.length;
+  return {
+    canvasserName,
+    surveyed,
+    originallyStrongSupport,
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
+    strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+      originalStrongSupportPolling,
+      originallyStrongSupport
+    ),
+    strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
+    contactedYes,
+    contactedUnsure,
+    contactedNo,
+    originalStrongSupportPolling,
+    originalStrongSupportFinal,
+    originalUndecidedFinal,
+    details: sorted,
+  };
+}
+
+/** Keep voter rows whose canvass assignment is checked. An empty list leaves the rows unchanged. */
+export function filterCanvasserOverviewByProjects(
+  rows: readonly CanvasserOverviewRow[],
+  projects: readonly string[]
+): readonly CanvasserOverviewRow[] {
+  const wanted = new Set(projects.map((project) => project.trim()).filter(Boolean));
+  if (wanted.size === 0) return rows;
+  const next: CanvasserOverviewRow[] = [];
+  for (const row of rows) {
+    const details = row.details.filter((detail) => wanted.has(detail.sourceList.trim()));
+    if (!details.length) continue;
+    next.push(canvasserOverviewRowFromDetails(row.canvasserName, details));
+  }
+  next.sort((a, b) => b.surveyed - a.surveyed || a.canvasserName.localeCompare(b.canvasserName));
+  return next;
 }
 
 export function tallyCanvasserOverview(
@@ -387,60 +462,9 @@ export function tallyCanvasserOverview(
     byName.set(detail.canvasserName, list);
   }
 
-  const canvassers: CanvasserOverviewRow[] = [...byName.entries()].map(([canvasserName, details]) => {
-    const sorted = [...details].sort((a, b) => {
-      const byDate = a.callDate.localeCompare(b.callDate);
-      if (byDate !== 0) return byDate;
-      const byTime = a.callTime.localeCompare(b.callTime);
-      if (byTime !== 0) return byTime;
-      return a.pdiId.localeCompare(b.pdiId);
-    });
-
-    const originalStrongSupportPolling = emptyFamilyBlock();
-    const originalStrongSupportFinal = emptyFamilyBlock();
-    const originalUndecidedFinal = emptyFamilyBlock();
-    let originallyStrongSupport = 0;
-    let contactedYes = 0;
-    let contactedUnsure = 0;
-    let contactedNo = 0;
-
-    for (const detail of sorted) {
-      if (detail.contactedBucket === "yes") contactedYes += 1;
-      else if (detail.contactedBucket === "unsure") contactedUnsure += 1;
-      else if (detail.contactedBucket === "no") contactedNo += 1;
-
-      if (detail.originalFlagFamily === "strongSupport") {
-        originallyStrongSupport += 1;
-        addFamily(originalStrongSupportPolling, detail.pollingFamily);
-        addFamily(originalStrongSupportFinal, detail.finalResultFamily);
-      } else if (detail.originalFlagFamily === "undecided") {
-        addFamily(originalUndecidedFinal, detail.finalResultFamily);
-      }
-    }
-
-    const surveyed = sorted.length;
-    return {
-      canvasserName,
-      surveyed,
-      originallyStrongSupport,
-      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
-      strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
-        originalStrongSupportPolling,
-        originallyStrongSupport
-      ),
-      strongSupportAfterPersuasionRate: rate(
-        originalStrongSupportFinal.strongSupport,
-        originallyStrongSupport
-      ),
-      contactedYes,
-      contactedUnsure,
-      contactedNo,
-      originalStrongSupportPolling,
-      originalStrongSupportFinal,
-      originalUndecidedFinal,
-      details: sorted,
-    };
-  });
+  const canvassers: CanvasserOverviewRow[] = [...byName.entries()].map(([canvasserName, details]) =>
+    canvasserOverviewRowFromDetails(canvasserName, details)
+  );
 
   canvassers.sort(
     (a, b) => b.surveyed - a.surveyed || a.canvasserName.localeCompare(b.canvasserName)

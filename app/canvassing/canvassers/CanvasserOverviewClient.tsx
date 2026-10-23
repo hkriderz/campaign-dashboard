@@ -3,11 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
+import CheckboxFilterMenu, { useActorGroups } from "@/components/qc-recontact/CheckboxFilterMenu";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
   buildCanvasserOverviewCsv,
   canvasserOverviewExportFilename,
+  filterCanvasserOverviewByProjects,
   formatOverviewPercent,
   overviewPercentBandClass,
   summarizeCanvasserOverview,
@@ -16,6 +18,11 @@ import {
   type CanvasserOverviewPayload,
   type CanvasserOverviewRow,
 } from "@/lib/qc-recontact/canvasser-overview";
+import { recontactNamesMatch } from "@/lib/qc-recontact/names";
+import {
+  filterNamedRows,
+  type PeopleFilterMode,
+} from "@/lib/qc-recontact/project-people-filter";
 import {
   buildOverviewDetailTsv,
   CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY,
@@ -147,6 +154,10 @@ export default function CanvasserOverviewClient() {
     defaultVisibleOverviewDetailColumnIds
   );
   const [hasNotesOnly, setHasNotesOnly] = useState(false);
+  const [projects, setProjects] = useState<string[]>([]);
+  const [canvassersSelected, setCanvassersSelected] = useState<string[]>([]);
+  const [canvasserMode, setCanvasserMode] = useState<PeopleFilterMode>("include");
+  const canvasserGroups = useActorGroups("canvasser");
   const [copyLabel, setCopyLabel] = useState("Copy table");
 
   useEffect(() => {
@@ -189,9 +200,29 @@ export default function CanvasserOverviewClient() {
     return () => controller.abort();
   }, [loadOverview]);
 
+  const dateRows = payload?.canvassers ?? [];
+  const projectOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of dateRows) {
+      for (const detail of row.details) {
+        const list = detail.sourceList.trim();
+        if (list) names.add(list);
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [dateRows]);
+  const canvasserOptions = useMemo(() => dateRows.map((row) => row.canvasserName), [dateRows]);
+  const projectRows = useMemo(
+    () => filterCanvasserOverviewByProjects(dateRows, projects),
+    [dateRows, projects]
+  );
+  const peopleRows = useMemo(
+    () => filterNamedRows(projectRows, canvassersSelected, canvasserMode, (row) => row.canvasserName, recontactNamesMatch),
+    [projectRows, canvassersSelected, canvasserMode]
+  );
   const visibleCanvassers = useMemo(
-    () => filterOverviewRowsByHasNotes(payload?.canvassers ?? [], hasNotesOnly),
-    [payload, hasNotesOnly]
+    () => filterOverviewRowsByHasNotes(peopleRows, hasNotesOnly),
+    [peopleRows, hasNotesOnly]
   );
   const surveyedTotal = useMemo(
     () => visibleCanvassers.reduce((sum, row) => sum + row.surveyed, 0),
@@ -263,6 +294,24 @@ export default function CanvasserOverviewClient() {
           allowEmpty
           tone="emerald"
         />
+        <div className="flex flex-wrap items-center gap-2">
+          <CheckboxFilterMenu
+            label="Canvass projects"
+            options={projectOptions}
+            selected={projects}
+            onSelectedChange={setProjects}
+          />
+          <CheckboxFilterMenu
+            label="Canvassers"
+            options={canvasserOptions}
+            selected={canvassersSelected}
+            onSelectedChange={setCanvassersSelected}
+            mode={canvasserMode}
+            onModeChange={setCanvasserMode}
+            groups={canvasserGroups.groups}
+            onGroupsChange={canvasserGroups.setGroups}
+          />
+        </div>
         <div>
           <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Candidate</p>
           <div className="flex flex-wrap gap-1.5">

@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
+import CheckboxFilterMenu, { useActorGroups } from "@/components/qc-recontact/CheckboxFilterMenu";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import { formatOverviewPercent, overviewPercentBandClass } from "@/lib/qc-recontact/canvasser-overview";
@@ -20,6 +21,7 @@ import {
 } from "@/lib/qc-recontact/overview-detail-columns";
 import {
   buildPhonebankerOverviewCsv,
+  filterPhonebankerOverviewByPhoneBanks,
   phonebankerOverviewExportFilename,
   summarizePhonebankerOverview,
   type PhonebankerFamilyBlock,
@@ -27,6 +29,11 @@ import {
   type PhonebankerOverviewPayload,
   type PhonebankerOverviewRow,
 } from "@/lib/qc-recontact/phonebanker-overview";
+import {
+  filterNamedRows,
+  phonebankerNamesMatch,
+  type PeopleFilterMode,
+} from "@/lib/qc-recontact/project-people-filter";
 import { formatShortUsDate } from "@/lib/slice-key";
 import type { UniqueIdFamily } from "@/lib/unique-ids/types";
 
@@ -146,6 +153,10 @@ export default function PhonebankerOverviewClient() {
     defaultVisibleOverviewDetailColumnIds
   );
   const [hasNotesOnly, setHasNotesOnly] = useState(false);
+  const [phoneBanks, setPhoneBanks] = useState<string[]>([]);
+  const [phonebankersSelected, setPhonebankersSelected] = useState<string[]>([]);
+  const [phonebankerMode, setPhonebankerMode] = useState<PeopleFilterMode>("include");
+  const phonebankerGroups = useActorGroups("phonebanker");
   const [copyLabel, setCopyLabel] = useState("Copy table");
 
   useEffect(() => {
@@ -188,9 +199,36 @@ export default function PhonebankerOverviewClient() {
     return () => controller.abort();
   }, [loadOverview]);
 
+  const dateRows = payload?.phonebankers ?? [];
+  const phoneBankOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of dateRows) {
+      for (const detail of row.details) {
+        if (detail.sourceList.trim()) names.add(detail.sourceList.trim());
+        if (detail.qcCampaignName.trim()) names.add(detail.qcCampaignName.trim());
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [dateRows]);
+  const phonebankerOptions = useMemo(() => dateRows.map((row) => row.phonebankerName), [dateRows]);
+  const projectRows = useMemo(
+    () => filterPhonebankerOverviewByPhoneBanks(dateRows, phoneBanks),
+    [dateRows, phoneBanks]
+  );
+  const peopleRows = useMemo(
+    () =>
+      filterNamedRows(
+        projectRows,
+        phonebankersSelected,
+        phonebankerMode,
+        (row) => row.phonebankerName,
+        phonebankerNamesMatch
+      ),
+    [projectRows, phonebankersSelected, phonebankerMode]
+  );
   const visiblePhonebankers = useMemo(
-    () => filterOverviewRowsByHasNotes(payload?.phonebankers ?? [], hasNotesOnly),
-    [payload, hasNotesOnly]
+    () => filterOverviewRowsByHasNotes(peopleRows, hasNotesOnly),
+    [peopleRows, hasNotesOnly]
   );
   const surveyedTotal = useMemo(
     () => visiblePhonebankers.reduce((sum, row) => sum + row.surveyed, 0),
@@ -265,6 +303,24 @@ export default function PhonebankerOverviewClient() {
           allowEmpty
           tone="emerald"
         />
+        <div className="flex flex-wrap items-center gap-2">
+          <CheckboxFilterMenu
+            label="Phone banks"
+            options={phoneBankOptions}
+            selected={phoneBanks}
+            onSelectedChange={setPhoneBanks}
+          />
+          <CheckboxFilterMenu
+            label="Phonebankers"
+            options={phonebankerOptions}
+            selected={phonebankersSelected}
+            onSelectedChange={setPhonebankersSelected}
+            mode={phonebankerMode}
+            onModeChange={setPhonebankerMode}
+            groups={phonebankerGroups.groups}
+            onGroupsChange={phonebankerGroups.setGroups}
+          />
+        </div>
         <div>
           <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Candidate</p>
           <div className="flex flex-wrap gap-1.5">

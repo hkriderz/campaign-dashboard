@@ -53,6 +53,10 @@ export type PhonebankerOverviewDetail = {
   callerName: string;
   callDate: string;
   callTime: string;
+  /** Prior phone-bank list. Used by the phone-bank filter, not a table column. */
+  sourceList: string;
+  /** QC campaign name. A checked phone bank matches either this or `sourceList`. */
+  qcCampaignName: string;
 };
 
 export type PhonebankerOverviewRow = {
@@ -263,7 +267,82 @@ function detailFromPair(
     callerName: pair.qc.phonebankerName,
     callDate: pair.qc.callDate,
     callTime: callTimeFromIso(pair.qc.callAt),
+    sourceList: prior.listOrAssignment.trim(),
+    qcCampaignName: pair.qc.campaignName.trim(),
   };
+}
+
+export function phonebankerOverviewRowFromDetails(
+  details: readonly PhonebankerOverviewDetail[]
+): PhonebankerOverviewRow {
+  const sorted = [...details].sort((a, b) => {
+    const byDate = a.callDate.localeCompare(b.callDate);
+    if (byDate !== 0) return byDate;
+    const byTime = a.callTime.localeCompare(b.callTime);
+    if (byTime !== 0) return byTime;
+    return a.pdiId.localeCompare(b.pdiId);
+  });
+
+  const originalStrongSupportPolling = emptyFamilyBlock();
+  const originalStrongSupportFinal = emptyFamilyBlock();
+  const originalUndecidedFinal = emptyFamilyBlock();
+  let originallyStrongSupport = 0;
+  let contactedYes = 0;
+  let contactedUnsure = 0;
+  let contactedNo = 0;
+
+  for (const detail of sorted) {
+    if (detail.contactedBucket === "yes") contactedYes += 1;
+    else if (detail.contactedBucket === "unsure") contactedUnsure += 1;
+    else if (detail.contactedBucket === "no") contactedNo += 1;
+
+    if (detail.originalFlagFamily === "strongSupport") {
+      originallyStrongSupport += 1;
+      addFamily(originalStrongSupportPolling, detail.pollingFamily);
+      addFamily(originalStrongSupportFinal, detail.finalResultFamily);
+    } else if (detail.originalFlagFamily === "undecided") {
+      addFamily(originalUndecidedFinal, detail.finalResultFamily);
+    }
+  }
+
+  const surveyed = sorted.length;
+  return {
+    phonebankerName: sorted[0]?.phonebankerName ?? "",
+    surveyed,
+    originallyStrongSupport,
+    recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
+    strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
+      originalStrongSupportPolling,
+      originallyStrongSupport
+    ),
+    strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
+    contactedYes,
+    contactedUnsure,
+    contactedNo,
+    originalStrongSupportPolling,
+    originalStrongSupportFinal,
+    originalUndecidedFinal,
+    details: sorted,
+  };
+}
+
+/** Keep voter rows on a checked QC list or prior phone bank. An empty list leaves the rows unchanged. */
+export function filterPhonebankerOverviewByPhoneBanks(
+  rows: readonly PhonebankerOverviewRow[],
+  phoneBanks: readonly string[]
+): readonly PhonebankerOverviewRow[] {
+  const wanted = new Set(phoneBanks.map((name) => name.trim()).filter(Boolean));
+  if (wanted.size === 0) return rows;
+  const next: PhonebankerOverviewRow[] = [];
+  for (const row of rows) {
+    const details = row.details.filter(
+      (detail) => wanted.has(detail.sourceList.trim()) || wanted.has(detail.qcCampaignName.trim())
+    );
+    if (!details.length) continue;
+    next.push(phonebankerOverviewRowFromDetails(details));
+  }
+  next.sort((a, b) => b.surveyed - a.surveyed || a.phonebankerName.localeCompare(b.phonebankerName));
+  return next;
 }
 
 export function tallyPhonebankerOverview(
@@ -283,57 +362,9 @@ export function tallyPhonebankerOverview(
     byKey.set(key, list);
   }
 
-  const phonebankers: PhonebankerOverviewRow[] = [...byKey.values()].map((details) => {
-    const sorted = [...details].sort((a, b) => {
-      const byDate = a.callDate.localeCompare(b.callDate);
-      if (byDate !== 0) return byDate;
-      const byTime = a.callTime.localeCompare(b.callTime);
-      if (byTime !== 0) return byTime;
-      return a.pdiId.localeCompare(b.pdiId);
-    });
-
-    const originalStrongSupportPolling = emptyFamilyBlock();
-    const originalStrongSupportFinal = emptyFamilyBlock();
-    const originalUndecidedFinal = emptyFamilyBlock();
-    let originallyStrongSupport = 0;
-    let contactedYes = 0;
-    let contactedUnsure = 0;
-    let contactedNo = 0;
-
-    for (const detail of sorted) {
-      if (detail.contactedBucket === "yes") contactedYes += 1;
-      else if (detail.contactedBucket === "unsure") contactedUnsure += 1;
-      else if (detail.contactedBucket === "no") contactedNo += 1;
-
-      if (detail.originalFlagFamily === "strongSupport") {
-        originallyStrongSupport += 1;
-        addFamily(originalStrongSupportPolling, detail.pollingFamily);
-        addFamily(originalStrongSupportFinal, detail.finalResultFamily);
-      } else if (detail.originalFlagFamily === "undecided") {
-        addFamily(originalUndecidedFinal, detail.finalResultFamily);
-      }
-    }
-
-    const surveyed = sorted.length;
-    return {
-      phonebankerName: sorted[0]?.phonebankerName ?? "",
-      surveyed,
-      originallyStrongSupport,
-      recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
-      strongSupportOnPollingRate: strongSupportOnPollingRateFromCounts(
-        originalStrongSupportPolling,
-        originallyStrongSupport
-      ),
-      strongSupportAfterPersuasionRate: rate(originalStrongSupportFinal.strongSupport, originallyStrongSupport),
-      contactedYes,
-      contactedUnsure,
-      contactedNo,
-      originalStrongSupportPolling,
-      originalStrongSupportFinal,
-      originalUndecidedFinal,
-      details: sorted,
-    };
-  });
+  const phonebankers: PhonebankerOverviewRow[] = [...byKey.values()].map((details) =>
+    phonebankerOverviewRowFromDetails(details)
+  );
 
   phonebankers.sort(
     (a, b) => b.surveyed - a.surveyed || a.phonebankerName.localeCompare(b.phonebankerName)

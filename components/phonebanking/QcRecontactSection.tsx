@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ColumnChecklist } from "@/components/canvassing/OverviewDetailColumnControls";
+import CheckboxFilterMenu, { useActorGroups } from "@/components/qc-recontact/CheckboxFilterMenu";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
@@ -18,8 +19,6 @@ import {
   pairMatchesMatchChip,
   pairMatchesOutcomeChip,
   pairMatchesSelections,
-  priorActorNamesForPairs,
-  qcCallerNamesForPairs,
   recontactChannelLabel,
   recontactExportFilename,
   summarizeRecontactPairs,
@@ -29,6 +28,12 @@ import {
   type RecontactMatchFilter,
   type RecontactOutcomeFilter,
 } from "@/lib/qc-recontact";
+import {
+  emptyProjectPeopleFilter,
+  pairMatchesProjectPeople,
+  projectPeopleOptions,
+  type ProjectPeopleFilter,
+} from "@/lib/qc-recontact/project-people-filter";
 import {
   defaultVisibleRecontactTableColumnIds,
   loadRecontactTableColumnIds,
@@ -196,44 +201,6 @@ function RecontactTableCell({
   }
 }
 
-function PersonFilter({
-  id,
-  label,
-  emptyLabel,
-  value,
-  names,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  emptyLabel: string;
-  value: string;
-  names: readonly string[];
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div>
-      <label htmlFor={id} className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full min-w-[12rem] rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs text-gray-800 shadow-sm dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 sm:w-auto"
-      >
-        <option value="">{emptyLabel}</option>
-        {value && !names.includes(value) ? <option value={value}>{value}</option> : null}
-        {names.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 type Props = {
   tagId: string;
   pairs: QcRecontactPair[];
@@ -248,6 +215,9 @@ export default function QcRecontactSection({
   surveyScriptProfile,
 }: Props) {
   const [selection, setSelection] = useState(emptyRecontactSelection);
+  const [projectPeople, setProjectPeople] = useState<ProjectPeopleFilter>(emptyProjectPeopleFilter);
+  const canvasserGroups = useActorGroups("canvasser");
+  const phonebankerGroups = useActorGroups("phonebanker");
   const [pdiQuery, setPdiQuery] = useState("");
   const [page, setPage] = useState(1);
   const [openPair, setOpenPair] = useState<QcRecontactPair | null>(null);
@@ -280,6 +250,14 @@ export default function QcRecontactSection({
     selection.channels.join("\0"),
     selection.outcomes.join("\0"),
     selection.matches.join("\0"),
+    projectPeople.phoneBanks.join("\0"),
+    projectPeople.canvassProjects.join("\0"),
+    projectPeople.canvassers.join("\0"),
+    projectPeople.canvasserMode,
+    projectPeople.phonebankers.join("\0"),
+    projectPeople.phonebankerMode,
+    projectPeople.qcCallers.join("\0"),
+    projectPeople.qcCallerMode,
   ].join("|");
   const [trackedFilterKey, setTrackedFilterKey] = useState(filterKey);
   if (trackedFilterKey !== filterKey) {
@@ -290,9 +268,10 @@ export default function QcRecontactSection({
     () =>
       scopedPairs.filter((pair) => {
         if (!pairMatchesSelections(pair, selection)) return false;
+        if (!pairMatchesProjectPeople(pair, projectPeople)) return false;
         return matchesPdiOrNameQuery(pdiQuery, pair.qc.pdiId, pair.qc.voterName ?? "");
       }),
-    [scopedPairs, selection, pdiQuery]
+    [scopedPairs, selection, projectPeople, pdiQuery]
   );
   const pageCount = Math.max(1, Math.ceil(visible.length / RECONTACT_PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -311,8 +290,7 @@ export default function QcRecontactSection({
     }
     return counts;
   }, [scopedPairs]);
-  const priorActorNames = useMemo(() => priorActorNamesForPairs(scopedPairs), [scopedPairs]);
-  const qcCallerNames = useMemo(() => qcCallerNamesForPairs(scopedPairs), [scopedPairs]);
+  const filterOptions = useMemo(() => projectPeopleOptions(scopedPairs), [scopedPairs]);
   const matchCounts = useMemo(() => {
     const counts = {} as Record<RecontactMatchFilter, number>;
     for (const chip of MATCH_CHIPS) {
@@ -514,22 +492,48 @@ export default function QcRecontactSection({
                 </span>
               </label>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-              <PersonFilter
-                id="qc-recontact-prior"
-                label="Prior"
-                emptyLabel="All prior callers"
-                value={selection.priorActor}
-                names={priorActorNames}
-                onChange={(priorActor) => setSelection((prev) => ({ ...prev, priorActor }))}
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+              <CheckboxFilterMenu
+                label="Phone banks"
+                options={filterOptions.phoneBanks}
+                selected={projectPeople.phoneBanks}
+                onSelectedChange={(phoneBanks) => setProjectPeople((prev) => ({ ...prev, phoneBanks }))}
               />
-              <PersonFilter
-                id="qc-recontact-qc"
-                label="QC"
-                emptyLabel="All QC callers"
-                value={selection.qcCaller}
-                names={qcCallerNames}
-                onChange={(qcCaller) => setSelection((prev) => ({ ...prev, qcCaller }))}
+              <CheckboxFilterMenu
+                label="Canvass projects"
+                options={filterOptions.canvassProjects}
+                selected={projectPeople.canvassProjects}
+                onSelectedChange={(canvassProjects) => setProjectPeople((prev) => ({ ...prev, canvassProjects }))}
+              />
+              <CheckboxFilterMenu
+                label="Canvassers"
+                options={filterOptions.canvassers}
+                selected={projectPeople.canvassers}
+                onSelectedChange={(canvassers) => setProjectPeople((prev) => ({ ...prev, canvassers }))}
+                mode={projectPeople.canvasserMode}
+                onModeChange={(canvasserMode) => setProjectPeople((prev) => ({ ...prev, canvasserMode }))}
+                groups={canvasserGroups.groups}
+                onGroupsChange={canvasserGroups.setGroups}
+              />
+              <CheckboxFilterMenu
+                label="Phonebankers"
+                options={filterOptions.phonebankers}
+                selected={projectPeople.phonebankers}
+                onSelectedChange={(phonebankers) => setProjectPeople((prev) => ({ ...prev, phonebankers }))}
+                mode={projectPeople.phonebankerMode}
+                onModeChange={(phonebankerMode) => setProjectPeople((prev) => ({ ...prev, phonebankerMode }))}
+                groups={phonebankerGroups.groups}
+                onGroupsChange={phonebankerGroups.setGroups}
+              />
+              <CheckboxFilterMenu
+                label="QC callers"
+                options={filterOptions.qcCallers}
+                selected={projectPeople.qcCallers}
+                onSelectedChange={(qcCallers) => setProjectPeople((prev) => ({ ...prev, qcCallers }))}
+                mode={projectPeople.qcCallerMode}
+                onModeChange={(qcCallerMode) => setProjectPeople((prev) => ({ ...prev, qcCallerMode }))}
+                groups={phonebankerGroups.groups}
+                onGroupsChange={phonebankerGroups.setGroups}
               />
               <div>
                 <label
