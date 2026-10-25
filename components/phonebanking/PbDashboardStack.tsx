@@ -389,8 +389,8 @@ type SliceRenderModel = {
     | ReturnType<typeof consolidateSurveyAnswerLines>;
   finalResultPivotRawTotal: number;
   showFinalResultBucketSummary: boolean;
+  /** Pivot grid for Copy and CSV. Counts only, without synthesized parentheses. */
   pivotTsv: string;
-  pivotCopyTsv: string;
 };
 
 function buildObservedPivotColumnsByCampaign(
@@ -566,8 +566,7 @@ function computeSliceRenderModel(
     rowsByPhonebanker,
     rows,
   ] as const;
-  const pivotTsv = showTable ? buildQuestionResponsesPivotTsv(...pivotTsvArgs, true) : "";
-  const pivotCopyTsv = showTable ? buildQuestionResponsesPivotTsv(...pivotTsvArgs, false) : "";
+  const pivotTsv = showTable ? buildQuestionResponsesPivotTsv(...pivotTsvArgs, false) : "";
 
   return {
     slice,
@@ -590,7 +589,6 @@ function computeSliceRenderModel(
     finalResultPivotRawTotal,
     showFinalResultBucketSummary,
     pivotTsv,
-    pivotCopyTsv,
   };
 }
 
@@ -810,7 +808,6 @@ export default function PbDashboardStack({
           finalResultConsolidated,
           showFinalResultBucketSummary,
           pivotTsv,
-          pivotCopyTsv,
         } = model;
         const hasCsvSlice = csvKeySet.has(slice.sliceKey);
         const safeFile = `${slice.campaignName.replace(/[^\w\d-]+/g, "_")}_${slice.callDate}.csv`;
@@ -848,14 +845,14 @@ export default function PbDashboardStack({
                   <span className="text-sm font-semibold text-gray-700 dark:text-gray-100">
                     Question Responses by Phonebanker
                   </span>
-                  {showTable && pivotCopyTsv ? (
+                  {showTable && pivotTsv ? (
                     <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         className="dash-action-btn dash-action-btn-sm dash-action-btn-copy"
                         onClick={async () => {
                           try {
-                            await writeTextToClipboard(pivotCopyTsv);
+                            await writeTextToClipboard(pivotTsv);
                             setActionMsg("Pivot table copied to clipboard (TSV).");
                           } catch {
                             setActionMsg("Clipboard failed — try Download CSV.");
