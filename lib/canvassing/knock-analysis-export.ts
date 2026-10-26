@@ -242,7 +242,7 @@ function campaignRows(campaign: CampaignResultSummary): Cell[][] {
   return rows;
 }
 
-export async function buildKnockAnalysisWorkbook(input: KnockAnalysisWorkbookInput): Promise<Uint8Array> {
+export async function buildKnockAnalysisWorkbook(input: KnockAnalysisWorkbookInput): Promise<ArrayBuffer> {
   const { result, reportMode, shiftSettings, customGapMinutes, excludedLeads, shiftStats } = input;
   const displayDate = input.reportDate || result.summary.detectedReportDate;
   const hourGaps = result.hourGapDetails ?? result.gapDetails.filter((gap) => gap.gapMinutes >= 60);
@@ -348,5 +348,8 @@ export async function buildKnockAnalysisWorkbook(input: KnockAnalysisWorkbookInp
   }
 
   const raw = await workbook.xlsx.writeBuffer();
-  return raw instanceof Uint8Array ? new Uint8Array(raw) : new Uint8Array(raw as ArrayBuffer);
+  const view = raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBuffer);
+  const copy = new ArrayBuffer(view.byteLength);
+  new Uint8Array(copy).set(view);
+  return copy;
 }
