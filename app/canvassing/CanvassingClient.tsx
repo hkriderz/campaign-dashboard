@@ -498,13 +498,13 @@ function reportCsv(result: CanvassingReportResult, title: string, reportDate?: s
   return rows.join("\r\n");
 }
 
-function safeCsvFileName(title: string): string {
+function safeDownloadFileName(title: string, extension: "csv" | "xlsx"): string {
   const cleaned = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-  return `${cleaned || "knock-analysis-report"}.csv`;
+  return `${cleaned || "knock-analysis-report"}.${extension}`;
 }
 
 function canvasserLastNameSortKey(name: string): string {
@@ -1489,24 +1489,40 @@ export default function CanvassingClient() {
     }
   }
 
-  function downloadReportCsv() {
+  async function downloadReportWorkbook() {
     setError("");
     setMessage("");
     if (!currentResult) {
-      setError("Run or open a report before downloading CSV.");
+      setError("Run or open a report before downloading.");
       return;
     }
 
-    const csv = reportCsv(currentResult, currentReportTitle, currentReportDate);
-    const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = safeCsvFileName(currentReportTitle);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+    try {
+      const { buildKnockAnalysisWorkbook } = await import("@/lib/canvassing/knock-analysis-export");
+      const bytes = await buildKnockAnalysisWorkbook({
+        result: currentResult,
+        title: currentReportTitle,
+        reportDate: currentReportDate,
+        reportMode,
+        shiftSettings,
+        customGapMinutes,
+        excludedLeads,
+        shiftStats,
+      });
+      const blob = new Blob([bytes], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = safeDownloadFileName(currentReportTitle, "xlsx");
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to build the workbook.");
+    }
   }
 
   async function copyReportCsv() {
@@ -1872,11 +1888,11 @@ export default function CanvassingClient() {
             </button>
             <button
               type="button"
-              onClick={downloadReportCsv}
+              onClick={() => void downloadReportWorkbook()}
               disabled={!currentResult}
               className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm transition-all hover:bg-gray-50 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60 disabled:cursor-not-allowed disabled:opacity-60 disabled:active:scale-100 dark:border-white/10 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-white/5"
             >
-              Download report CSV
+              Download report
             </button>
             <button
               type="button"
