@@ -8,8 +8,9 @@ import {
   type DoorknockSummaryFlag,
   type DoorknockSummaryFlagKind,
   type DoorknockSummarySettings,
+  type DoorknockSurveyGroup,
 } from "./types";
-import { answerMatches, canonical, fixedNonContactThreshold, isHostileNonContactLabel } from "./helpers";
+import { answerMatches, canonical, flagCountThreshold, isHostileNonContactLabel, shortDispositionLabel } from "./helpers";
 import { normalizeDoorknockSettings, parseDoorknockCsvReport } from "./parser";
 
 type UploadFileInput = {
@@ -31,8 +32,13 @@ function flagBucket(): Record<DoorknockSummaryFlagKind, DoorknockSummaryFlag[]> 
   };
 }
 
+function groupHasStrongSupport(group: DoorknockSurveyGroup): boolean {
+  return group.columns.some((column) => answerMatches(column.answer, ["strong support"]));
+}
+
+/** First question that actually records Strong Support, skipping lit and household groups. */
 function firstSurveyGroup(campaign: DoorknockCampaignReport) {
-  return campaign.surveyGroups[0] ?? null;
+  return campaign.surveyGroups.find(groupHasStrongSupport) ?? null;
 }
 
 function selectedSurveyGroups(campaign: DoorknockCampaignReport, settings: DoorknockSummarySettings) {
@@ -171,12 +177,10 @@ function buildNonContactFlags(campaign: DoorknockCampaignReport, settings: Doork
     if (ignored.some((needle) => label.includes(needle))) continue;
 
     const hostileColumn = isHostileNonContactLabel(col.label);
-    const fixedThreshold = fixedNonContactThreshold(col.label);
+    const shortLabel = shortDispositionLabel(col.label);
     const values = campaign.rows.map((row) => row.nonContacts[col.key] ?? 0);
     const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-    const threshold =
-      fixedThreshold ?? Math.max(settings.nonContactMinCount, average * settings.nonContactOutlierMultiplier);
-    const usesFixedThreshold = fixedThreshold !== null;
+    const threshold = flagCountThreshold(col.label, settings.flagCountThresholds);
 
     for (const row of campaign.rows) {
       const value = row.nonContacts[col.key] ?? 0;
@@ -187,16 +191,14 @@ function buildNonContactFlags(campaign: DoorknockCampaignReport, settings: Doork
         campaignId: campaign.campaignId,
         campaignName: campaign.campaignName,
         canvasserName: row.canvasserName,
-        message: usesFixedThreshold
-          ? `${row.canvasserName} - ${value} ${col.label} (${campaign.campaignName})`
-          : `${row.canvasserName} - ${value} ${col.label} (${campaign.campaignName}, avg ${average.toFixed(1)})`,
+        message: `${row.canvasserName} - ${value} ${shortLabel} (${campaign.campaignName})`,
         metrics: {
           value,
-          column: col.label,
+          column: shortLabel,
+          sourceHeader: col.sourceHeader || col.label,
           average: Number(average.toFixed(2)),
-          threshold: Number(threshold.toFixed(2)),
+          threshold,
           hostile: hostileColumn ? 1 : 0,
-          fixedThreshold: usesFixedThreshold ? 1 : 0,
         },
       });
     }

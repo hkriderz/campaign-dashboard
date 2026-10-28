@@ -9,8 +9,62 @@ export type NameParts = {
   full: string;
 };
 
+/**
+ * Collapse a doubled canvasser name.
+ * "John Smith, John Smith" and "Smith, John Smith" become "John Smith".
+ * "John Smith John Smith" becomes "John Smith".
+ * "Davila, Dilan" stays unchanged.
+ */
+export function cleanCanvasserName(raw: string): string {
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  if (!trimmed) return "";
+
+  const comma = trimmed.indexOf(",");
+  if (comma >= 0) {
+    const last = trimmed.slice(0, comma).trim();
+    const first = trimmed.slice(comma + 1).trim();
+    if (!first) return last;
+    if (first.toLowerCase() === last.toLowerCase()) return first;
+    if (first.toLowerCase().endsWith(` ${last.toLowerCase()}`)) {
+      const stripped = first.slice(0, first.length - last.length).trim();
+      return stripped ? `${stripped} ${last}` : first;
+    }
+    return trimmed;
+  }
+
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length >= 2 && tokens.length % 2 === 0) {
+    const half = tokens.length / 2;
+    const left = tokens.slice(0, half).join(" ");
+    const right = tokens.slice(half).join(" ");
+    if (left.toLowerCase() === right.toLowerCase()) return left;
+  }
+  return trimmed;
+}
+
+/** Same person regardless of comma placement or first/last order. */
+export function canvasserIdentityKey(name: string): string {
+  return cleanCanvasserName(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+export function preferredCanvasserName(names: string[]): string {
+  const cleaned = names.map((name) => cleanCanvasserName(name)).filter(Boolean);
+  if (!cleaned.length) return "";
+  const withoutComma = cleaned.find((name) => !name.includes(","));
+  if (withoutComma && cleaned.some((name) => name.includes(","))) return withoutComma;
+  return cleaned[0]!;
+}
+
 export function splitDisplayName(fullName: string): NameParts {
-  const trimmed = fullName.trim().replace(/\s+/g, " ");
+  const original = fullName.trim().replace(/\s+/g, " ");
+  const trimmed = cleanCanvasserName(original);
   if (!trimmed) return { first: "", last: "", full: "" };
 
   const commaIndex = trimmed.indexOf(",");

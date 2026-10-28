@@ -57,6 +57,28 @@ test("mergeRollupsForQuestionGroup sums synthesized across EN/ES names", () => {
   assert.equal(ss?.synthesized, 3);
 });
 
+test("mergeRollupsForQuestionGroup can keep script Final Result options unconsolidated", () => {
+  const rollups = new Map([
+    [
+      "3. Final Result",
+      [
+        { label: "A. Voting Challenger Nithya Raman", count: 4, synthesized: 1 },
+        { label: "A. Voting Challenger Nithya Raman", count: 1, synthesized: 1 },
+        { label: "D. Undecided", count: 95 },
+        { label: "B. Not Voting for Either candidate", count: 12 },
+      ],
+    ],
+  ]);
+  const lines = mergeRollupsForQuestionGroup(rollups, ["3. Final Result"], "faizahTraci", {
+    consolidate: false,
+  });
+  assert.equal(lines.some((line) => line.label === "Strong support"), false);
+  assert.equal(lines.find((line) => line.label === "A. Voting Challenger Nithya Raman")?.count, 5);
+  assert.equal(lines.find((line) => line.label === "A. Voting Challenger Nithya Raman")?.synthesized, 2);
+  assert.equal(lines.find((line) => line.label === "D. Undecided")?.count, 95);
+  assert.equal(lines.find((line) => line.label === "B. Not Voting for Either candidate")?.count, 12);
+});
+
 test("mergeRollupsForQuestionGroup keeps donate Yes/No and does not invent Faizah", () => {
   const rollups = new Map([
     ["Would you like to donate?", [{ label: "A. Yes", count: 4 }, { label: "B. No", count: 2 }]],

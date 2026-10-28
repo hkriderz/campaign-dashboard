@@ -34,7 +34,7 @@ import {
   tagDailyCallerHasWorkBeyondLoggedHours,
   fetchAllPhoneBankRawCallsByCampaignDay,
 } from "@/lib/queries/phonebanking";
-import { candidateTermsForTag, listSynthesizedFinalResults } from "@/lib/strong-support-from-survey";
+import { applyScriptOptionSurveyedToDailyCaller, candidateTermsForTag, finalResultUsesScriptOptions, listSynthesizedFinalResults } from "@/lib/strong-support-from-survey";
 import {
   addOutcomeTallies,
   tallySupportOutcomesByCampaign,
@@ -241,7 +241,7 @@ export async function buildAllCampaignsDayDashboard(
       const wideHeaderFieldMap = loadWideHeaderFieldMap(tag.id);
       return {
         tag,
-        daily,
+        daily: applyScriptOptionSurveyedToDailyCaller(daily, fill, resolveSurveyScriptProfile(tag)),
         questions,
         csv,
         wideExtraColumnOrder,
@@ -668,11 +668,14 @@ export async function buildAllCampaignsDayDashboard(
       (h) =>
         isoDateInRange(h.callDate, startDate, endDate) && aggregateSliceKeys.has(dailyCallerSliceKey(h))
     );
+    const showRawFinalResult =
+      tagUsesVerbatimFinalResultAggregate(tr.tag) ||
+      finalResultUsesScriptOptions(tr.fill, profile);
     if (synthHits.length > 0) {
       finalResult = [
         ...finalResult,
         ...synthHits.map((h) => ({
-          label: tagUsesVerbatimFinalResultAggregate(tr.tag) ? h.rawAnswer : h.displayLabel,
+          label: showRawFinalResult ? h.rawAnswer : h.displayLabel,
           count: 1,
           synthesized: 1,
         })),
@@ -681,7 +684,7 @@ export async function buildAllCampaignsDayDashboard(
     if (polling.length > 0) {
       polling = consolidateSurveyAnswerLines(polling, profile);
     }
-    if (finalResult.length > 0 && !tagUsesVerbatimFinalResultAggregate(tr.tag)) {
+    if (finalResult.length > 0 && !showRawFinalResult) {
       finalResult = consolidateSurveyAnswerLines(finalResult, profile);
     }
     if (polling.length) pollingGroups.push(polling);
@@ -693,7 +696,7 @@ export async function buildAllCampaignsDayDashboard(
         profile,
         terms: candidateTermsForTag(tr.tag),
         extraLines: synthHits.map((h) => ({
-          label: tagUsesVerbatimFinalResultAggregate(tr.tag) ? h.rawAnswer : h.displayLabel,
+          label: showRawFinalResult ? h.rawAnswer : h.displayLabel,
           count: 1,
           synthesized: 1,
         })),

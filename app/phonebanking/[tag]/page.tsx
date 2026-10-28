@@ -70,14 +70,16 @@ import {
   type PhonebankerQuestionResponseStat,
 } from "@/lib/types";
 import { normalizeName, parseTimeToSec, secToTime, sumRows } from "@/lib/csv-parser";
-import { rollupPollingAndFinalAnswers } from "@/lib/daily-aggregate-survey-rollup";
+import { mergeAggregateAnswerLines, rollupPollingAndFinalAnswers } from "@/lib/daily-aggregate-survey-rollup";
 import { tallySupportOutcomesByCampaign } from "@/lib/daily-aggregate-outcome-tally";
 import { aggregateScopeRowsFromQuestionSlices } from "@/lib/daily-aggregate-question-rollups";
 import { aggregateFilledFinalResults } from "@/lib/final-result-fill-aggregate";
 import { consolidateSurveyAnswerLines } from "@/lib/survey-answer-consolidation";
 import {
   candidateTermsForTag,
+  finalResultUsesScriptOptions,
   listSynthesizedFinalResults,
+  applyScriptOptionSurveyedToDailyCaller,
 } from "@/lib/strong-support-from-survey";
 import {
   applySynthesizedFinalResultsToQuestionRows,
@@ -358,6 +360,13 @@ export default async function TagPage({ params, searchParams }: Props) {
     bqQuestionStats = core[2];
     if (needsCallSurveyFill) {
       bqCallSurveyForFill = await fetchTagCallSurveyRowsForFinalFill(tagId);
+      if (bqCallSurveyForFill.length > 0) {
+        bqDailyCaller = applyScriptOptionSurveyedToDailyCaller(
+          bqDailyCaller,
+          bqCallSurveyForFill,
+          surveyScriptProfile
+        );
+      }
     }
     phoneBanks = phoneBanks.filter((p) =>
       campaignBelongsInDailyAggregate(p.campaignName, pageMembership)
@@ -810,17 +819,19 @@ export default async function TagPage({ params, searchParams }: Props) {
   const scopedSynthHits = synthesizedFrHits.filter((h) =>
     aggregateSliceKeys.has(dailyCallerSliceKey(h))
   );
+  const showRawFinalResult =
+    verbatimFinalResult || finalResultUsesScriptOptions(bqCallSurveyForFill, surveyScriptProfile);
   if (finalResultFromCallFill) {
     bqFinalResultBreakdown = applySynthesizedHitsToAnswerLines(
       bqFinalResultBreakdown,
       scopedSynthHits,
-      { addCounts: false, verbatim: verbatimFinalResult, profile: surveyScriptProfile }
+      { addCounts: false, verbatim: showRawFinalResult, profile: surveyScriptProfile }
     );
   } else if (scopedSynthHits.length > 0) {
     bqFinalResultBreakdown = [
       ...bqFinalResultBreakdown,
       ...scopedSynthHits.map((h) => ({
-        label: verbatimFinalResult ? h.rawAnswer : h.displayLabel,
+        label: showRawFinalResult ? h.rawAnswer : h.displayLabel,
         count: 1,
         synthesized: 1,
       })),
@@ -834,7 +845,9 @@ export default async function TagPage({ params, searchParams }: Props) {
   if (bqPollingBreakdown.length > 0) {
     bqPollingBreakdown = consolidateSurveyAnswerLines(bqPollingBreakdown, surveyScriptProfile);
   }
-  if (bqFinalResultBreakdown.length > 0 && !verbatimFinalResult) {
+  if (bqFinalResultBreakdown.length > 0 && showRawFinalResult) {
+    bqFinalResultBreakdown = mergeAggregateAnswerLines([bqFinalResultBreakdown]);
+  } else if (bqFinalResultBreakdown.length > 0) {
     bqFinalResultBreakdown = consolidateSurveyAnswerLines(bqFinalResultBreakdown, surveyScriptProfile);
   }
   const outcomeTally = tallySupportOutcomesByCampaign(bqQuestionStats, {
@@ -842,7 +855,7 @@ export default async function TagPage({ params, searchParams }: Props) {
     profile: surveyScriptProfile,
     terms: candidateTermsForTag(tag),
     extraLines: scopedSynthHits.map((h) => ({
-      label: verbatimFinalResult ? h.rawAnswer : h.displayLabel,
+      label: showRawFinalResult ? h.rawAnswer : h.displayLabel,
       count: 1,
       synthesized: 1,
     })),
@@ -992,7 +1005,7 @@ export default async function TagPage({ params, searchParams }: Props) {
           bqFinalResultBreakdown={bqFinalResultBreakdown}
           finalResultFromCallFill={finalResultFromCallFill}
           aggregateLexicon={aggregateLexicon}
-          finalResultUsesScriptOptionLabels={verbatimFinalResult}
+          finalResultUsesScriptOptionLabels={showRawFinalResult}
           aggregateScopeRows={aggregateScopeRows}
           surveyScriptProfile={surveyScriptProfile}
           outcomeTally={outcomeTally}
@@ -1054,7 +1067,7 @@ export default async function TagPage({ params, searchParams }: Props) {
             callerMetricsBySlice={callerMetricsBySlice}
             surveyScriptProfile={surveyScriptProfile}
             finalResultBucketsFootnoteLead={aggregateLexicon.finalResultBucketsFootnoteLead}
-            verbatimFinalResultLabels={verbatimFinalResult}
+            verbatimFinalResultLabels={showRawFinalResult}
             syntheticPivotAllowlistByQuestion={syntheticPivotAllowlistByQuestion}
             widePivotHeaderOrderHint={wideRefHeaders.length > 0 ? wideRefHeaders : undefined}
           />

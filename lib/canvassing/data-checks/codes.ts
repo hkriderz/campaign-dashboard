@@ -46,6 +46,37 @@ export function labelForPendingCode(code: string): string {
   return ANSWER_LABELS[pendingCodeKey(trimmed)] ?? trimmed;
 }
 
+export function isNonContactGroupLabel(label: string): boolean {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "").startsWith("noncontact");
+}
+
+const SURVEY_START_CODES = new Set(["SS", "LS", "VRN", "DRN"]);
+
+/**
+ * Pending Approval group headers are often one column early. The non-contact
+ * span is every flag column up to the first question header. A question header
+ * sitting on a canvass code still belongs to the non-contact column under it.
+ * Codes in that span stay non-contact even when they are not in CANVASS_CODES.
+ */
+export function splitLeadingNonContact(
+  cells: PendingFlagCell[],
+  groupAt: (columnIndex: number) => string
+): { nonContact: PendingFlagCell[]; rest: PendingFlagCell[] } {
+  let end = cells.length;
+  for (let i = 0; i < cells.length; i++) {
+    const group = groupAt(cells[i]!.index) ?? "";
+    if (!group || isNonContactGroupLabel(group)) continue;
+    const onCanvassCode = CANVASS_CODES.has(pendingCodeKey(cells[i]!.code));
+    end = onCanvassCode ? i + 1 : i;
+    break;
+  }
+  if (end === cells.length) {
+    const start = cells.findIndex((cell) => SURVEY_START_CODES.has(pendingCodeKey(cell.code)));
+    end = start < 0 ? cells.length : start;
+  }
+  return { nonContact: cells.slice(0, end), rest: cells.slice(end) };
+}
+
 /**
  * Group flag columns by code family. Pending Approval group headers are often
  * shifted one column early, so question titles are applied later in header order.

@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
+import { defaultFlagCountThreshold, FLAG_DISPOSITIONS } from "@/lib/canvassing/doorknocks-results/helpers";
 import type { DoorknockCampaignReport, DoorknockCanvasserRow, DoorknockSummarySettings } from "@/lib/canvassing/doorknocks-results/types";
 import type { DataCheckFlag } from "@/lib/canvassing/data-checks/types";
 import {
@@ -248,6 +249,10 @@ function summaryFlagRegularText(flag: DataCheckFlag): string {
 }
 
 function summaryFlagDetailText(flag: DataCheckFlag): string {
+  if (flag.kind === "non_contact_outlier") {
+    const header = typeof flag.metrics.sourceHeader === "string" ? flag.metrics.sourceHeader : "";
+    return [flag.campaignName, header].filter(Boolean).join(" — ");
+  }
   if (typeof flag.metrics.contactRatePct === "number") {
     return "";
   }
@@ -690,16 +695,37 @@ function SettingsPanel({
         <label className="block">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Survey scope</span>
           <select value={settings.surveyQuestionScope} onChange={(e) => setSettings((current) => ({ ...current, surveyQuestionScope: e.target.value === "all" ? "all" : "first" }))} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950">
-            <option value="first">First survey question</option>
+            <option value="first">First Strong Support question</option>
             <option value="all">All survey questions</option>
           </select>
-          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Which survey question(s) feed the support-struggle flags. Lean Support counts only on the first question.</span>
+          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Support flags use the first question with a Strong Support answer. Lit and household questions are skipped. Lean Support counts only on that question.</span>
         </label>
-        <label className="block">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Non-contact outlier multiplier</span>
-          <input type="number" step="0.1" value={settings.nonContactOutlierMultiplier} onChange={(e) => updateNumber("nonContactOutlierMultiplier", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />
-          <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Flag non-contact totals at or above team average × this value (min 5). Hostile/DNC always at 1+; Gated at 25+; Language Barrier at 10+.</span>
-        </label>
+        <details className="block md:col-span-2 rounded-xl border border-gray-200 p-3 dark:border-white/10">
+          <summary className="cursor-pointer text-sm font-medium text-gray-700 dark:text-gray-200">Flag count minimums</summary>
+          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">Hostile, moved, and deceased start at 1. Every other disposition starts at 50. Not Home stays ignored unless you remove it below.</p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {FLAG_DISPOSITIONS.map((label) => (
+              <label key={label} className="block">
+                <span className="text-sm text-gray-700 dark:text-gray-200">{label}</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={(settings.flagCountThresholds ?? {})[label.toLowerCase()] ?? defaultFlagCountThreshold(label)}
+                  onChange={(event) =>
+                    setSettings((current) => ({
+                      ...current,
+                      flagCountThresholds: {
+                        ...(current.flagCountThresholds ?? {}),
+                        [label.toLowerCase()]: Number(event.target.value),
+                      },
+                    }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950"
+                />
+              </label>
+            ))}
+          </div>
+        </details>
         <label className="block md:col-span-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Support answer labels</span>
           <input value={settings.supportAnswerLabels.join(", ")} onChange={(e) => updateCsvList("supportAnswerLabels", e.target.value)} className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm dark:border-white/10 dark:bg-gray-950" />

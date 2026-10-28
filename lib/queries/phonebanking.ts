@@ -40,6 +40,7 @@ import {
 } from "../snapshot-merge";
 import {
   applyCallLevelStrongSupportToDailyCaller,
+  applyScriptOptionSurveyedToDailyCaller,
   candidateTermsForTag,
   overlayStrongSupportCountsFromQuestionStats,
 } from "../strong-support-from-survey";
@@ -1674,6 +1675,7 @@ async function persistTagDialerWindow(
       resolveSurveyScriptProfile(tag),
       candidateTermsForTag(tag)
     );
+    daily = applyScriptOptionSurveyedToDailyCaller(daily, fill, resolveSurveyScriptProfile(tag));
   }
   if (fill.length > 0) {
     const { stampFillIdentities } = await import("./qc-recontact");

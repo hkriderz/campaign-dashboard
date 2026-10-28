@@ -75,7 +75,8 @@ export function aggregateScopeRowsFromQuestionSlices(
 export function mergeRollupsForQuestionGroup(
   rollups: ReadonlyMap<string, AggregateAnswerLine[]>,
   questionNames: readonly string[],
-  profile?: SurveyScriptProfile
+  profile?: SurveyScriptProfile,
+  options?: { consolidate?: boolean }
 ): AggregateAnswerLine[] {
   const byGroupKey = new Map<string, { count: number; synthesized: number; displayLabel: string }>();
   for (const qn of questionNames) {
@@ -97,7 +98,9 @@ export function mergeRollupsForQuestionGroup(
     const formatted = formatAggregateAnswerLineLabel(displayLabel, profile);
     addAnswerLineAcc(byDisplayLabel, formatted, count, synthesized);
   }
-  return consolidateSurveyAnswerLines(sortAnswerLineMap(byDisplayLabel), profile ?? "faizahTraci");
+  const sorted = sortAnswerLineMap(byDisplayLabel);
+  if (options?.consolidate === false) return sorted;
+  return consolidateSurveyAnswerLines(sorted, profile ?? "faizahTraci");
 }
 
 /**

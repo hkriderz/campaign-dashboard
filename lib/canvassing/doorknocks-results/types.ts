@@ -75,6 +75,8 @@ export type DoorknockSummarySettings = {
   nonContactOutlierMultiplier: number;
   nonContactMinCount: number;
   ignoredNonContactLabels: string[];
+  /** Minimum count per short disposition label, keyed in lowercase. */
+  flagCountThresholds: Record<string, number>;
 };
 
 export type DoorknockSummaryFlagKind =
@@ -139,4 +141,5 @@ export const DEFAULT_DOORKNOCK_SUMMARY_SETTINGS: DoorknockSummarySettings = {
   nonContactOutlierMultiplier: 2,
   nonContactMinCount: 5,
   ignoredNonContactLabels: ["not home"],
+  flagCountThresholds: {},
 };

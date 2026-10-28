@@ -3,11 +3,9 @@ import assert from "node:assert/strict";
 import {
   answerMatches,
   fixedNonContactThreshold,
-  GATED_FLAG_MIN,
   isGatedNonContactLabel,
   isHostileNonContactLabel,
   isLanguageBarrierNonContactLabel,
-  LANGUAGE_BARRIER_FLAG_MIN,
 } from "./helpers";
 import { summarizeDoorknockCampaigns } from "./analyzer";
 import { DEFAULT_DOORKNOCK_SUMMARY_SETTINGS, type DoorknockCampaignReport } from "./types";
@@ -32,13 +30,14 @@ test("isHostileNonContactLabel detects hostile/DNC bilingual headers", () => {
 test("fixed thresholds for gated and language barrier", () => {
   assert.equal(isGatedNonContactLabel("GATED"), true);
   assert.equal(isLanguageBarrierNonContactLabel("LANGUAGE BARRIER"), true);
-  assert.equal(fixedNonContactThreshold("GATED"), GATED_FLAG_MIN);
-  assert.equal(fixedNonContactThreshold("LANGUAGE BARRIER"), LANGUAGE_BARRIER_FLAG_MIN);
+  assert.equal(fixedNonContactThreshold("GATED"), 50);
+  assert.equal(fixedNonContactThreshold("LANGUAGE BARRIER"), 50);
   assert.equal(fixedNonContactThreshold("HOSTILE/DO NOT CONTACT/HOSTIL"), 1);
-  assert.equal(fixedNonContactThreshold("MOVED"), null);
+  assert.equal(fixedNonContactThreshold("MOVED"), 1);
+  assert.equal(fixedNonContactThreshold("DECEASED"), 1);
 });
 
-test("summarize flags gated at 25+ and language barrier at 10+", () => {
+test("summarize flags gated and language barrier at the default count of 50", () => {
   const campaign: DoorknockCampaignReport = {
     id: "nc-thresh",
     campaignId: "test",
@@ -77,7 +76,7 @@ test("summarize flags gated at 25+ and language barrier at 10+", () => {
         contacts: 10,
         contactRate: 0.1,
         surveyAnswers: {},
-        nonContacts: { "nc:gated": 25, "nc:lang": 5 },
+        nonContacts: { "nc:gated": 50, "nc:lang": 5 },
       },
       {
         canvasserName: "Mid Lang",
@@ -85,7 +84,7 @@ test("summarize flags gated at 25+ and language barrier at 10+", () => {
         contacts: 10,
         contactRate: 0.1,
         surveyAnswers: {},
-        nonContacts: { "nc:gated": 10, "nc:lang": 10 },
+        nonContacts: { "nc:gated": 10, "nc:lang": 50 },
       },
       {
         canvasserName: "Below Both",
@@ -93,7 +92,7 @@ test("summarize flags gated at 25+ and language barrier at 10+", () => {
         contacts: 10,
         contactRate: 0.1,
         surveyAnswers: {},
-        nonContacts: { "nc:gated": 24, "nc:lang": 9 },
+        nonContacts: { "nc:gated": 49, "nc:lang": 49 },
       },
     ],
     totals: {
@@ -106,9 +105,9 @@ test("summarize flags gated at 25+ and language barrier at 10+", () => {
   };
 
   const summary = summarizeDoorknockCampaigns([campaign], DEFAULT_DOORKNOCK_SUMMARY_SETTINGS);
-  const gated = summary.flags.non_contact_outlier.filter((f) => String(f.metrics.column) === "GATED");
+  const gated = summary.flags.non_contact_outlier.filter((f) => String(f.metrics.column) === "Gated");
   const lang = summary.flags.non_contact_outlier.filter(
-    (f) => String(f.metrics.column) === "LANGUAGE BARRIER"
+    (f) => String(f.metrics.column) === "Language barrier"
   );
   assert.equal(gated.length, 1);
   assert.equal(gated[0]?.canvasserName, "High Gated");
@@ -257,4 +256,70 @@ test("summarize flags bilingual survey SS and any hostile count", () => {
   assert.equal(struggle.metrics.strongSupport, 2);
   assert.equal(struggle.metrics.undecided, 10);
   assert.equal(struggle.metrics.support, 2);
+});
+
+test("support flags use the first Strong Support question, not a leading lit question", () => {
+  const campaign: DoorknockCampaignReport = {
+    id: "lit",
+    campaignId: "lit",
+    campaignName: "Nithya",
+    reportDate: "2026-10-26",
+    sourceFile: {
+      id: "src",
+      originalName: "n.csv",
+      relativePath: "n.csv",
+      sizeBytes: 1,
+      checksum: "x",
+      rowCount: 1,
+      columns: [],
+    },
+    detection: {
+      campaignId: "lit",
+      campaignName: "Nithya",
+      confidence: 1,
+      evidence: [],
+      candidateMentions: [],
+      campaignCode: null,
+    },
+    surveyGroups: [
+      {
+        question: "LIT OBSERVATION",
+        columns: [
+          { key: "qa:lit", question: "LIT OBSERVATION", answer: "SAW LIT" },
+        ],
+      },
+      {
+        question: "CAN WE COUNT ON YOU TO SUPPORT NITHYA RAMAN FOR MAYOR?",
+        columns: [
+          { key: "qa:ss", question: "CAN WE COUNT ON YOU TO SUPPORT NITHYA RAMAN FOR MAYOR?", answer: "STRONG SUPPORT" },
+          { key: "qa:u", question: "CAN WE COUNT ON YOU TO SUPPORT NITHYA RAMAN FOR MAYOR?", answer: "UNDECIDED" },
+          { key: "qa:so", question: "CAN WE COUNT ON YOU TO SUPPORT NITHYA RAMAN FOR MAYOR?", answer: "STRONG OPPOSE" },
+        ],
+      },
+    ],
+    nonContactColumns: [],
+    rows: [
+      {
+        canvasserName: "Delavigne Matthew",
+        doorsKnocked: 80,
+        contacts: 10,
+        contactRate: 0.125,
+        surveyAnswers: { "qa:lit": 9, "qa:ss": 1, "qa:u": 8, "qa:so": 1 },
+        nonContacts: {},
+      },
+    ],
+    totals: {
+      doorsKnocked: 80,
+      contacts: 10,
+      contactRate: 0.125,
+      surveyAnswers: {},
+      nonContacts: {},
+    },
+  };
+
+  const summary = summarizeDoorknockCampaigns([campaign], DEFAULT_DOORKNOCK_SUMMARY_SETTINGS);
+  const struggle = summary.flags.survey_support_struggle[0];
+  assert.ok(struggle);
+  assert.equal(struggle.metrics.strongSupport, 1);
+  assert.equal(struggle.metrics.question, "CAN WE COUNT ON YOU TO SUPPORT NITHYA RAMAN FOR MAYOR?");
 });

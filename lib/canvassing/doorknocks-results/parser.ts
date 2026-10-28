@@ -2,6 +2,8 @@ import "server-only";
 
 import crypto from "crypto";
 import path from "path";
+import { cleanCanvasserName } from "@/lib/canvassing/display-names";
+import { mergeCanvasserRows } from "./helpers";
 import {
   DEFAULT_DOORKNOCK_SUMMARY_SETTINGS,
   type DoorknockSummarySettings,
@@ -295,7 +297,7 @@ export function parseDoorknockCsvReport(input: {
     const doorsKnocked = columns.doorsIndex >= 0 ? parseNumber(cells[columns.doorsIndex]) : 0;
     const contacts = columns.contactsIndex >= 0 ? parseNumber(cells[columns.contactsIndex]) : 0;
     rows.push({
-      canvasserName: titleCaseName(rawName),
+      canvasserName: cleanCanvasserName(titleCaseName(rawName)),
       doorsKnocked,
       contacts,
       contactRate: doorsKnocked ? contacts / doorsKnocked : 0,
@@ -304,7 +306,8 @@ export function parseDoorknockCsvReport(input: {
     });
   }
 
-  rows.sort((a, b) => a.canvasserName.localeCompare(b.canvasserName));
+  const mergedRows = mergeCanvasserRows(rows).sort((a, b) => a.canvasserName.localeCompare(b.canvasserName));
+  sourceFile.rowCount = mergedRows.length;
 
   const detection = detectCampaign(input.relativePath ?? input.fileName, headers);
   const reportDate = detectReportDate(input.relativePath ?? input.fileName);
@@ -315,8 +318,8 @@ export function parseDoorknockCsvReport(input: {
     reportDate,
     sourceFile,
     detection,
-    rows,
-    totals: sumRecords(rows, columns.surveyColumns, columns.nonContactColumns),
+    rows: mergedRows,
+    totals: sumRecords(mergedRows, columns.surveyColumns, columns.nonContactColumns),
     surveyGroups: columns.surveyGroups,
     nonContactColumns: columns.nonContactColumns,
   };
@@ -354,5 +357,16 @@ export function normalizeDoorknockSettings(
       ? raw.ignoredNonContactLabels
       : defaults.ignoredNonContactLabels,
     surveyQuestionScope: raw?.surveyQuestionScope === "all" ? "all" : "first",
+    flagCountThresholds: normalizeFlagCountThresholds(raw?.flagCountThresholds),
   };
+}
+
+function normalizeFlagCountThresholds(raw: Record<string, number> | undefined): Record<string, number> {
+  const overrides: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const count = Number(value);
+    if (!key.trim() || !Number.isFinite(count)) continue;
+    overrides[key.trim().toLowerCase()] = count;
+  }
+  return overrides;
 }

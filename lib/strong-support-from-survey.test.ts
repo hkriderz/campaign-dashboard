@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import type { CallSurveyRowForFill } from "./types";
 import {
   applyCallLevelStrongSupportToDailyCaller,
+  applyScriptOptionSurveyedToDailyCaller,
   campaignHasFinalResultTab,
   candidateTermsForTag,
   countStrongSupportBySession,
   finalResultForCall,
+  finalResultUsesScriptOptions,
   formatStrongSupportCell,
   isCandidateIdSupportQuestion,
   listSynthesizedFinalResults,
@@ -428,4 +430,65 @@ test("Hang up refused stays explicit unless QC asks to replace it with polling",
   assert.equal(hits.length, 1);
   assert.equal(hits[0]?.displayLabel, "Undecided");
   assert.equal(hits[0]?.replacedRawAnswer, "Hang up refused");
+});
+
+test("matching script options fill every Final Result answer, one per call", () => {
+  const thoughts = "1. Thoughts on The Vote?";
+  const fr = "3. Final Result";
+  const voteNow = "2. Vote Right Now";
+  const answers = {
+    a: "A. Voting Challenger Nithya Raman",
+    b: "B. Not Voting for Either candidate",
+    c: "C. Write Spencer Pratt as a Protest",
+    d: "D. Undecided",
+    e: "E. Voting for Incumbent Democrat Karen Bass",
+  };
+  const rows = [
+    fillRow({ callId: "only-b", campaignId: "camp-anti", questionName: thoughts, answerValue: answers.b, surveyResultId: 1 }),
+    fillRow({ callId: "only-b", campaignId: "camp-anti", questionName: voteNow, answerValue: "F. No Plan", surveyResultId: 2 }),
+    fillRow({ callId: "changed", campaignId: "camp-anti", questionName: thoughts, answerValue: answers.d, surveyResultId: 1 }),
+    fillRow({ callId: "changed", campaignId: "camp-anti", questionName: fr, answerValue: answers.e, surveyResultId: 2 }),
+    fillRow({ callId: "fr-a", campaignId: "camp-anti", questionName: fr, answerValue: answers.a, surveyResultId: 1 }),
+    fillRow({ callId: "fr-b", campaignId: "camp-anti", questionName: fr, answerValue: answers.b, surveyResultId: 1 }),
+    fillRow({ callId: "fr-c", campaignId: "camp-anti", questionName: fr, answerValue: answers.c, surveyResultId: 1 }),
+    fillRow({ callId: "fr-d", campaignId: "camp-anti", questionName: fr, answerValue: answers.d, surveyResultId: 1 }),
+    fillRow({ callId: "only-c", campaignId: "camp-anti", questionName: thoughts, answerValue: answers.c, surveyResultId: 1 }),
+    fillRow({ callId: "only-a", campaignId: "camp-anti", questionName: thoughts, answerValue: answers.a, surveyResultId: 1 }),
+  ];
+
+  assert.equal(finalResultUsesScriptOptions(rows, "faizahTraci"), true);
+  const hits = listSynthesizedFinalResults(rows, "faizahTraci", NITHYA_TERMS);
+  const byCall = new Map(hits.map((hit) => [hit.callId, hit]));
+  assert.deepEqual([...byCall.keys()].sort(), ["only-a", "only-b", "only-c"]);
+  assert.equal(byCall.get("only-b")?.sourceQuestionName, thoughts);
+  assert.equal(byCall.get("only-b")?.rawAnswer, answers.b);
+  assert.equal(byCall.get("only-c")?.rawAnswer, answers.c);
+  assert.equal(byCall.get("only-a")?.displayLabel, answers.a);
+  assert.equal(byCall.get("only-a")?.verbatimOption, true);
+
+  const surveyed = applyScriptOptionSurveyedToDailyCaller(
+    [
+      {
+        campaignId: "camp-anti",
+        campaignName: "Nithya Republican Anti-Bass PB 10-24-26",
+        callDate: "2026-09-07",
+        phonebankerName: "Ava",
+        totalCalls: 8,
+        callsAnswered: 8,
+        talkingToCorrectPerson: 8,
+        surveyed: 99,
+        strongSupport: 0,
+        numDials: 8,
+        totalCallSeconds: 60,
+        totalDialerSeconds: 120,
+      },
+    ],
+    rows,
+    "faizahTraci"
+  );
+  assert.equal(surveyed[0]?.surveyed, 8);
+  assert.equal(
+    hits.length + rows.filter((row) => row.questionName === fr).length,
+    surveyed[0]?.surveyed
+  );
 });

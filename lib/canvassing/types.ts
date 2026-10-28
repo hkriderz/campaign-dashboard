@@ -118,6 +118,20 @@ export type CanvassingReportSummary = {
   largestGapMinutes: number;
 };
 
+export type KnockDispositionFlag = {
+  canvasserName: string;
+  label: string;
+  count: number;
+};
+
+export type KnockSupportCount = {
+  canvasserName: string;
+  strongSupport: number;
+  undecided: number;
+  strongOppose: number;
+  answered: number;
+};
+
 export type CanvassingReportResult = {
   sourceFiles: CanvassingSourceFile[];
   summary: CanvassingReportSummary;
@@ -130,6 +144,9 @@ export type CanvassingReportResult = {
   /** Gaps of 120 minutes or more. */
   outlierGapDetails: CanvassingGapDetail[];
   campaignResults: CampaignResultSummary[];
+  nonContactFlags?: KnockDispositionFlag[];
+  supportQuestion?: string | null;
+  supportCounts?: KnockSupportCount[];
   validationIssues: CanvassingValidationIssue[];
 };
 

@@ -123,6 +123,25 @@ test("shifted group headers still follow flag families", () => {
   );
 });
 
+test("an unrecognized code inside the non-contact group still flags hostile", async () => {
+  const csv = [
+    ",,,,,,,,Non-Contact Mobile,,,,,Will you support Ada Lovelace?,,,",
+    "CanvasserName,AssignmentName,TotalHouses,NonContactCount,ContactCount,GeoCheck,TimingCheck,LastSyn,NH,BZ,HOSTILE,MV,D,DECL,SS,U,SO",
+    '"Ada, Countess","10-18-26 Sample GOTV - Turf 1",40,30,10,Yes,Yes,ok,20,1,2,1,1,1,2,4,4',
+  ].join("\n");
+  const report = await analyzePendingApprovalUploads([csvFile("PendingApprovalReport (4).csv", csv)]);
+  const labels = report.campaigns[0]?.nonContactColumns.map((column) => column.label);
+  assert.deepEqual(labels, ["Not Home", "BZ", "Hostile", "Moved", "Deceased", "Declined Conversation"]);
+  assert.equal(
+    report.summary.flags.non_contact_outlier.some((flag) => String(flag.metrics.column) === "Hostile"),
+    true
+  );
+  assert.deepEqual(
+    report.campaigns[0]?.surveyGroups[0]?.columns.map((column) => column.answer),
+    ["Strong Support", "Undecided", "Strong Oppose"]
+  );
+});
+
 test("four-answer first question counts SS + LS toward the struggle rate and SS alone as strong support", async () => {
   const report = await analyzePendingApprovalUploads([csvFile("PendingApprovalReport (3).csv", FOUR_FIRST)]);
   assert.equal(report.summary.flags.survey_support_struggle.length, 0);

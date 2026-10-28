@@ -85,6 +85,9 @@ function hydrateReport(raw: Partial<SavedCanvassingReport>): SavedCanvassingRepo
     hourGapDetails,
     outlierGapDetails,
     campaignResults: raw.campaignResults ?? [],
+    nonContactFlags: raw.nonContactFlags ?? [],
+    supportQuestion: raw.supportQuestion ?? null,
+    supportCounts: raw.supportCounts ?? [],
     validationIssues: raw.validationIssues ?? [],
   };
 }

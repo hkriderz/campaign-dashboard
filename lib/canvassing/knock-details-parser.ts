@@ -5,6 +5,7 @@
 import crypto from "crypto";
 import ExcelJS from "exceljs";
 import { DateTime } from "luxon";
+import { cleanCanvasserName } from "./display-names";
 import type {
   CanvassingFileFormat,
   CanvassingFileRole,
@@ -456,7 +457,9 @@ export function buildKnockEvents(parsedFiles: CanvassingParsedFile[]): {
 
     for (const row of parsed.rows) {
       const sourceRowNumber = Number(row.__rowNumber ?? "0") || 0;
-      const canvasserName = titleCaseName(getValue(row, lookup, ["CANVASSERNAME", "Canvasser Name", "Canvasser"]));
+      const canvasserName = cleanCanvasserName(
+        titleCaseName(getValue(row, lookup, ["CANVASSERNAME", "Canvasser Name", "Canvasser"]))
+      );
       const assignmentName = getValue(row, lookup, ["ASSIGNMENTNAME", "Assignment Name", "Assignment"]);
       const voter = getValue(row, lookup, ["VOTER", "Voter", "Voter Name"]);
       const primaryId = getValue(row, lookup, ["PRIMARYID", "Primary ID", "PrimaryId"]);

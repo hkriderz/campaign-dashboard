@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildDisplayNameMap, splitDisplayName } from "./display-names";
+import { buildDisplayNameMap, cleanCanvasserName, splitDisplayName } from "./display-names";
 
 test("splitDisplayName handles First Last and Last, First", () => {
   assert.deepEqual(splitDisplayName("Ashia Anderson"), {
@@ -13,6 +13,18 @@ test("splitDisplayName handles First Last and Last, First", () => {
     last: "Anderson",
     full: "Anderson, Ashia",
   });
+});
+
+test("cleanCanvasserName collapses a repeated surname and a doubled full name", () => {
+  assert.equal(cleanCanvasserName("Smith, John Smith"), "John Smith");
+  assert.equal(cleanCanvasserName("John Smith, John Smith"), "John Smith");
+  assert.equal(cleanCanvasserName("John Smith John Smith"), "John Smith");
+  assert.equal(cleanCanvasserName("Davila, Dilan"), "Davila, Dilan");
+  const map = buildDisplayNameMap(["Smith, John Smith"]);
+  assert.equal(map.get("Smith, John Smith"), "John S.");
+  const collided = buildDisplayNameMap(["Smith, John Smith", "Smyth, John"]);
+  assert.equal(collided.get("Smith, John Smith"), "John Smith");
+  assert.equal(collided.get("Smyth, John"), "John Smyth");
 });
 
 test("buildDisplayNameMap abbreviates until collision", () => {

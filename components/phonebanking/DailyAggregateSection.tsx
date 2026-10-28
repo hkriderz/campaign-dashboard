@@ -425,7 +425,10 @@ export default function DailyAggregateSection({
         aggregateScopeRows,
         surveyScriptProfile
       );
-      const lines = mergeRollupsForQuestionGroup(rollupsByQuestion, names, surveyScriptProfile);
+      const isFrQuestion = names.some((n) => isFinalResultPivotQuestion(n));
+      const lines = mergeRollupsForQuestionGroup(rollupsByQuestion, names, surveyScriptProfile, {
+        consolidate: !(isFrQuestion && finalResultUsesScriptOptionLabels),
+      });
       const traci =
         names.length > 0
           ? names.some((n) => isTraciViolationQuestionName(n))
@@ -444,7 +447,6 @@ export default function DailyAggregateSection({
           </div>
         );
       }
-      const isFrQuestion = names.some((n) => isFinalResultPivotQuestion(n));
       return (
         <div className={slotCellClass(traci)}>
           <AnswerBreakdownList

@@ -59,9 +59,9 @@ const SESSION_STATE_KEY = "canvassing.knockAnalysis.v4";
 const CUSTOM_GAP_MIN_MINUTES = 11;
 const CUSTOM_GAP_MAX_MINUTES = 180;
 
-type ResultsTab = "pivot" | "gaps" | "shift" | "gapLengths" | "gapDetails" | "bigGapDetails";
+type ResultsTab = "pivot" | "gaps" | "shift" | "gapLengths" | "gapDetails" | "bigGapDetails" | "dispositions";
 
-const RESULTS_TABS: ResultsTab[] = ["pivot", "gaps", "shift", "gapLengths", "gapDetails", "bigGapDetails"];
+const RESULTS_TABS: ResultsTab[] = ["pivot", "gaps", "shift", "gapLengths", "gapDetails", "bigGapDetails", "dispositions"];
 
 function isResultsTab(value: unknown): value is ResultsTab {
   return typeof value === "string" && RESULTS_TABS.includes(value as ResultsTab);
@@ -1190,6 +1190,9 @@ function ReportResults({
         <button type="button" onClick={() => onTabChange("pivot")} className={tabClass("pivot")}>
           Pivot
         </button>
+        <button type="button" onClick={() => onTabChange("dispositions")} className={tabClass("dispositions")}>
+          Dispositions
+        </button>
       </div>
 
       {activeTab === "shift" && reportMode === "lunch" ? (
@@ -1277,6 +1280,45 @@ function ReportResults({
       ) : null}
 
       {activeTab === "pivot" ? <CanvasserStatsTable stats={result.canvasserStats} onCopyText={onCopyText} /> : null}
+
+      {activeTab === "dispositions" ? (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Non-contact flags</h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Counts from rows whose question is Non-Contact Mobile. Hostile, moved, and deceased flag at 1. Other dispositions flag at 50.
+            </p>
+            {(result.nonContactFlags ?? []).length ? (
+              <ul className="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                {(result.nonContactFlags ?? []).map((flag) => (
+                  <li key={`${flag.canvasserName}-${flag.label}`} className="rounded-xl bg-gray-50 p-3 dark:bg-white/5">
+                    {flag.canvasserName} - {flag.count} {flag.label}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">No non-contact flags for this report.</p>
+            )}
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">First support question</h2>
+            {result.supportQuestion ? (
+              <>
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{result.supportQuestion}</p>
+                <ul className="mt-3 space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                  {(result.supportCounts ?? []).map((row) => (
+                    <li key={row.canvasserName} className="rounded-xl bg-gray-50 p-3 dark:bg-white/5">
+                      {row.canvasserName} - {row.strongSupport} SS, {row.undecided} U, {row.strongOppose} SO
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="mt-3 text-sm text-gray-500 dark:text-gray-400">No Strong Support question was found in this report.</p>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {result.campaignResults.length ? (
         <div className="space-y-4">

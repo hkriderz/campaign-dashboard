@@ -20,6 +20,11 @@ import {
   normalizeSurveyTextForMatching,
   questionLooksLikeDisclaimer,
 } from "./survey-i18n/rules";
+import {
+  canonicalScriptOption,
+  matchFinalResultSourceQuestion,
+  type ScriptOptionFinalResultMatch,
+} from "./final-result-question-match";
 import type {
   CallSurveyRowForFill,
   CampaignTag,
@@ -335,6 +340,11 @@ export type SynthesizedFinalResultHit = {
   reason: typeof SYNTHESIS_REASON_MISSING_FR;
   /** Set when a non-support Final Result such as Hang up refused was replaced. */
   replacedRawAnswer?: string;
+  /**
+   * The answer is a script option copied from the question that matches Final Result.
+   * Keep this label as written instead of folding it into Strong support / Undecided / Oppose.
+   */
+  verbatimOption?: boolean;
 };
 
 export type FinalResultCallOutcome = {
@@ -344,11 +354,17 @@ export type FinalResultCallOutcome = {
   sourceQuestionName: string | null;
   sourceAnswerValue: string | null;
   replacedRawAnswer?: string | null;
+  verbatimOption?: boolean;
 };
 
 export type FinalResultForCallOptions = {
   /** QC tags: Hang up refused and other non-support Final Results are filled from polling, then ID. */
   replaceNonSupport?: boolean;
+  /**
+   * When Final Result and an earlier question share script options that are not all
+   * Strong support / Undecided / Oppose, copy the matching raw option.
+   */
+  scriptOptionSource?: ScriptOptionFinalResultMatch;
 };
 
 const FR_NONE: FinalResultCallOutcome = {
@@ -358,6 +374,42 @@ const FR_NONE: FinalResultCallOutcome = {
   sourceQuestionName: null,
   sourceAnswerValue: null,
 };
+
+/**
+ * Use the matched script question only when its shared options are not already the
+ * three support buckets. Faizah-style Strong support / Undecided / Oppose stays on that path.
+ */
+export function scriptOptionFinalResultMatch(
+  rows: readonly { questionName: string; answerValue: string }[],
+  profile: SurveyScriptProfile
+): ScriptOptionFinalResultMatch | null {
+  const match = matchFinalResultSourceQuestion(rows);
+  if (!match) return null;
+  const outsideBuckets = [...match.options.values()].some(
+    (label) => !classifiedAnswerIsFinalResultBucket(label, profile)
+  );
+  return outsideBuckets ? match : null;
+}
+
+export function finalResultUsesScriptOptions(
+  rows: readonly { questionName: string; answerValue: string }[],
+  profile: SurveyScriptProfile
+): boolean {
+  return scriptOptionFinalResultMatch(rows, profile) != null;
+}
+
+function scriptOptionFillFromRows(
+  rows: readonly { questionName: string; answerValue: string }[],
+  match: ScriptOptionFinalResultMatch
+): { label: string; raw: string } | null {
+  const source = rows.find(
+    (row) => row.questionName === match.sourceQuestionName && isSubstantiveAnswer(row.answerValue)
+  );
+  if (!source) return null;
+  const label = canonicalScriptOption(source.answerValue, match.options);
+  if (!label) return null;
+  return { label, raw: source.answerValue.trim() };
+}
 
 /**
  * Explicit Final Result wins. When the campaign has an FR tab and this call has none,
@@ -389,6 +441,19 @@ export function finalResultForCall(
     };
   }
   if (!options?.replaceNonSupport && callHasSubstantiveFinalResult(collapsed)) return FR_NONE;
+  if (options?.scriptOptionSource && !replacingNonSupport) {
+    const scriptFill = scriptOptionFillFromRows(collapsed, options.scriptOptionSource);
+    if (scriptFill) {
+      return {
+        kind: "synthesized",
+        displayLabel: scriptFill.label,
+        rawAnswer: scriptFill.label,
+        sourceQuestionName: options.scriptOptionSource.sourceQuestionName,
+        sourceAnswerValue: scriptFill.raw,
+        verbatimOption: true,
+      };
+    }
+  }
   const filled = qcSupportFillFromRows(collapsed, profile, terms, {
     preferPolling: Boolean(options?.replaceNonSupport),
   });
@@ -466,6 +531,11 @@ export function listSynthesizedFinalResults(
   for (const [, campaignRows] of byCampaign) {
     const hasFr = campaignHasFinalResultTab(campaignRows);
     if (!hasFr) continue;
+    const scriptOptionSource = scriptOptionFinalResultMatch(campaignRows, profile);
+    const callOptions: FinalResultForCallOptions = {
+      ...options,
+      ...(scriptOptionSource ? { scriptOptionSource } : {}),
+    };
     const byCall = new Map<string, CallSurveyRowForFill[]>();
     for (const r of campaignRows) {
       const list = byCall.get(r.callId) ?? [];
@@ -473,7 +543,7 @@ export function listSynthesizedFinalResults(
       byCall.set(r.callId, list);
     }
     for (const [callId, callRows] of byCall) {
-      const outcome = finalResultForCall(callRows, profile, terms, true, options);
+      const outcome = finalResultForCall(callRows, profile, terms, true, callOptions);
       if (outcome.kind !== "synthesized") continue;
       if (!outcome.displayLabel || !outcome.rawAnswer || !outcome.sourceQuestionName) continue;
       const head = callRows[0]!;
@@ -489,6 +559,7 @@ export function listSynthesizedFinalResults(
         sourceAnswerValue: outcome.sourceAnswerValue ?? outcome.rawAnswer,
         reason: SYNTHESIS_REASON_MISSING_FR,
         ...(outcome.replacedRawAnswer ? { replacedRawAnswer: outcome.replacedRawAnswer } : {}),
+        ...(outcome.verbatimOption ? { verbatimOption: true } : {}),
       });
     }
   }
@@ -564,6 +635,55 @@ export function applyCallLevelStrongSupportToDailyCaller(
       strongSupport: counts.total.get(k) ?? 0,
       strongSupportSynthesized: counts.synthesized.get(k) ?? 0,
     };
+  });
+}
+
+/**
+ * For a script whose Final Result options are copied from one matching question,
+ * surveyed is the number of calls with exactly one of those answers.
+ */
+export function applyScriptOptionSurveyedToDailyCaller(
+  dailyRows: readonly TagDailyCallerStat[],
+  fillRows: readonly CallSurveyRowForFill[],
+  profile: SurveyScriptProfile
+): TagDailyCallerStat[] {
+  const byCampaign = new Map<string, CallSurveyRowForFill[]>();
+  for (const row of fillRows) {
+    const list = byCampaign.get(row.campaignId) ?? [];
+    list.push(row);
+    byCampaign.set(row.campaignId, list);
+  }
+
+  const counts = new Map<string, number>();
+  const scriptCampaigns = new Set<string>();
+  for (const [campaignId, campaignRows] of byCampaign) {
+    const match = scriptOptionFinalResultMatch(campaignRows, profile);
+    if (!match) continue;
+    scriptCampaigns.add(campaignId);
+    const byCall = new Map<string, CallSurveyRowForFill[]>();
+    for (const row of campaignRows) {
+      const list = byCall.get(row.callId) ?? [];
+      list.push(row);
+      byCall.set(row.callId, list);
+    }
+    for (const callRows of byCall.values()) {
+      const collapsed = latestRowPerQuestion(callRows);
+      const hasExplicit = collapsed.some(
+        (row) => isFinalResultQuestionName(row.questionName) && isSubstantiveAnswer(row.answerValue)
+      );
+      const filled = hasExplicit ? null : scriptOptionFillFromRows(collapsed, match);
+      if (!hasExplicit && !filled) continue;
+      const head = callRows[0]!;
+      const key = sessionStrongSupportKey(head.campaignId, head.callDate, head.phonebankerName);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  if (scriptCampaigns.size === 0) return [...dailyRows];
+
+  return dailyRows.map((row) => {
+    if (!scriptCampaigns.has(row.campaignId)) return row;
+    const key = sessionStrongSupportKey(row.campaignId, row.callDate, row.phonebankerName);
+    return { ...row, surveyed: counts.get(key) ?? 0 };
   });
 }
 

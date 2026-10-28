@@ -9,7 +9,9 @@ import type {
   DoorknockSurveyAnswerColumn,
   DoorknockSurveyGroup,
 } from "@/lib/canvassing/doorknocks-results/types";
-import { labelForPendingCode, segmentPendingFlagColumns } from "./codes";
+import { cleanCanvasserName } from "@/lib/canvassing/display-names";
+import { mergeCanvasserRows } from "@/lib/canvassing/doorknocks-results/helpers";
+import { isNonContactGroupLabel, labelForPendingCode, segmentPendingFlagColumns, splitLeadingNonContact } from "./codes";
 
 const TOTAL_LABELS = new Set(["canvassers", "total", "totals", "grand total"]);
 
@@ -204,12 +206,15 @@ export function parsePendingApprovalCsv(input: {
   const flagCells = codeRow
     .map((rawCode, index) => ({ index, code: rawCode.trim() }))
     .filter((cell) => cell.code && !IDENTITY_HEADERS.has(canonical(cell.code)));
-  const segments = segmentPendingFlagColumns(flagCells);
-  const questionSegments = segments.filter((segment) => segment.kind === "question");
-  const canvassSegment = segments.find((segment) => segment.kind === "canvass");
-  const firstLabelIsCanvass = groupLabels[0] ? canonical(groupLabels[0]).startsWith("noncontact") : false;
-  const questionLabels = groupLabels.slice(firstLabelIsCanvass ? 1 : 0);
-  const canvassLabel = firstLabelIsCanvass ? groupLabels[0]! : "Canvass results";
+  const split = splitLeadingNonContact(flagCells, (columnIndex) => groups[columnIndex] ?? "");
+  const restSegments = segmentPendingFlagColumns(split.rest);
+  const nonContactCells = [
+    ...split.nonContact,
+    ...restSegments.filter((segment) => segment.kind === "canvass").flatMap((segment) => segment.codes),
+  ];
+  const questionSegments = restSegments.filter((segment) => segment.kind === "question");
+  const questionLabels = groupLabels.filter((label) => !isNonContactGroupLabel(label));
+  const canvassLabel = groupLabels.find((label) => isNonContactGroupLabel(label)) ?? "Canvass results";
 
   if (questionLabels.length !== questionSegments.length) {
     issues.push(
@@ -217,14 +222,12 @@ export function parsePendingApprovalCsv(input: {
     );
   }
 
-  if (canvassSegment) {
-    for (const cell of canvassSegment.codes) {
-      nonContactColumns.push({
-        key: `nc:${cell.index}`,
-        label: labelForPendingCode(cell.code),
-        sourceHeader: `${canvassLabel} | ${cell.code}`,
-      });
-    }
+  for (const cell of nonContactCells) {
+    nonContactColumns.push({
+      key: `nc:${cell.index}`,
+      label: labelForPendingCode(cell.code),
+      sourceHeader: `${canvassLabel} | ${cell.code}`,
+    });
   }
 
   questionSegments.forEach((segment, segmentIndex) => {
@@ -269,7 +272,7 @@ export function parsePendingApprovalCsv(input: {
     const doorsKnocked = doorsIndex >= 0 ? parseNumber(cells[doorsIndex]) : 0;
     const contacts = contactsIndex >= 0 ? parseNumber(cells[contactsIndex]) : 0;
     rows.push({
-      canvasserName: titleCaseName(rawName),
+      canvasserName: cleanCanvasserName(titleCaseName(rawName)),
       doorsKnocked,
       contacts,
       contactRate: doorsKnocked ? contacts / doorsKnocked : 0,
@@ -280,7 +283,7 @@ export function parsePendingApprovalCsv(input: {
       ...(lastSyncIndex >= 0 ? { lastSync: cells[lastSyncIndex]?.trim() ?? "" } : {}),
     });
   }
-  rows.sort((a, b) => a.canvasserName.localeCompare(b.canvasserName));
+  const mergedRows = mergeCanvasserRows(rows).sort((a, b) => a.canvasserName.localeCompare(b.canvasserName));
 
   const sourcePath = input.relativePath ?? input.fileName;
   const prefixStats = mostCommon(assignmentPrefixes);
@@ -319,7 +322,7 @@ export function parsePendingApprovalCsv(input: {
     relativePath: sourcePath,
     sizeBytes: input.buffer.byteLength,
     checksum: digest,
-    rowCount: rows.length,
+    rowCount: mergedRows.length,
     columns: codeRow.map((cell, index) => cell.trim() || groups[index] || `Column ${index + 1}`),
   };
 
@@ -327,7 +330,7 @@ export function parsePendingApprovalCsv(input: {
   const nonContacts = Object.fromEntries(nonContactColumns.map((column) => [column.key, 0]));
   let doorsKnocked = 0;
   let contacts = 0;
-  for (const row of rows) {
+  for (const row of mergedRows) {
     doorsKnocked += row.doorsKnocked;
     contacts += row.contacts;
     for (const column of surveyColumns) surveyAnswers[column.key] += row.surveyAnswers[column.key] ?? 0;
@@ -344,7 +347,7 @@ export function parsePendingApprovalCsv(input: {
       reportDate,
       sourceFile,
       detection,
-      rows,
+      rows: mergedRows,
       totals: {
         doorsKnocked,
         contacts,

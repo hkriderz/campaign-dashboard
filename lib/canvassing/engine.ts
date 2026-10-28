@@ -12,6 +12,8 @@ import {
   parseDateTime,
   titleCaseName,
 } from "./knock-details-parser";
+import { canvasserIdentityKey, cleanCanvasserName, preferredCanvasserName } from "./display-names";
+import { buildKnockDispositionFlags, buildKnockSupportCounts, firstKnockSupportQuestion, isLikelyContactKnock } from "./knock-dispositions";
 import type {
   CampaignResultCanvasser,
   CampaignResultSummary,
@@ -31,13 +33,6 @@ const OUTLIER_GAP_MINUTES = 120;
 // Re-export parse helpers so existing API consumers keep working.
 export { parseCanvassingUploadFile, parseDateTime };
 
-function isLikelyContactResponse(response: string): boolean {
-  const normalized = response.trim().toLowerCase();
-  if (!normalized) return false;
-  return !/(not home|no answer|answering machine|voicemail|wrong number|moved|deceased|refused|declined|dnc|do not contact|language)/i.test(
-    normalized
-  );
-}
 
 function roundMinutes(value: number): number {
   return Math.round(value * 10) / 10;
@@ -70,10 +65,15 @@ function buildGapAnalysis(events: CanvassingKnockEvent[]): {
   outlierGapDetails: CanvassingGapDetail[];
 } {
   const byCanvasser = new Map<string, CanvassingKnockEvent[]>();
+  const namesByKey = new Map<string, string[]>();
   for (const event of events) {
-    const group = byCanvasser.get(event.canvasserName) ?? [];
+    const key = canvasserIdentityKey(event.canvasserName) || event.canvasserName;
+    const group = byCanvasser.get(key) ?? [];
     group.push(event);
-    byCanvasser.set(event.canvasserName, group);
+    byCanvasser.set(key, group);
+    const names = namesByKey.get(key) ?? [];
+    names.push(event.canvasserName);
+    namesByKey.set(key, names);
   }
 
   const canvasserStats: CanvasserGapStats[] = [];
@@ -82,7 +82,8 @@ function buildGapAnalysis(events: CanvassingKnockEvent[]): {
   const hourGapDetails: CanvassingGapDetail[] = [];
   const outlierGapDetails: CanvassingGapDetail[] = [];
 
-  for (const [canvasserName, group] of byCanvasser.entries()) {
+  for (const [key, group] of byCanvasser.entries()) {
+    const canvasserName = preferredCanvasserName(namesByKey.get(key) ?? []) || key;
     const sorted = [...group].sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
     const positiveGaps: number[] = [];
     const contactEndingGaps: number[] = [];
@@ -104,7 +105,7 @@ function buildGapAnalysis(events: CanvassingKnockEvent[]): {
       if (!Number.isFinite(gapMinutes) || gapMinutes <= 0) continue;
 
       positiveGaps.push(gapMinutes);
-      if (isLikelyContactResponse(next.response)) contactEndingGaps.push(gapMinutes);
+      if (isLikelyContactKnock(next.question, next.response)) contactEndingGaps.push(gapMinutes);
       if (gapMinutes > largestGapMinutes) {
         largestGapMinutes = gapMinutes;
         largestGapStartAt = current.occurredAt;
@@ -221,13 +222,15 @@ function buildCampaignResults(parsedFiles: CanvassingParsedFile[]): {
     const totals: Record<string, number> = Object.fromEntries(resultColumns.map((column) => [column, 0]));
 
     for (const row of parsed.rows) {
-      const canvasserName = titleCaseName(row[canvasserColumn]?.trim() ?? "");
-      if (!canvasserName || canvasserName === "TOTAL") continue;
+      const canvasserName = cleanCanvasserName(titleCaseName(row[canvasserColumn]?.trim() ?? ""));
+      if (!canvasserName || canvasserName.toUpperCase() === "TOTAL") continue;
+      const personKey = canvasserIdentityKey(canvasserName) || canvasserName;
 
-      const current = byCanvasser.get(canvasserName) ?? {
+      const current = byCanvasser.get(personKey) ?? {
         canvasserName,
         totals: Object.fromEntries(resultColumns.map((column) => [column, 0])),
       };
+      current.canvasserName = preferredCanvasserName([current.canvasserName, canvasserName]);
 
       for (const column of resultColumns) {
         const value = parseNumber(row[column] ?? "") ?? 0;
@@ -235,7 +238,7 @@ function buildCampaignResults(parsedFiles: CanvassingParsedFile[]): {
         totals[column] += value;
       }
 
-      byCanvasser.set(canvasserName, current);
+      byCanvasser.set(personKey, current);
     }
 
     campaignResults.push({
@@ -281,6 +284,9 @@ export function analyzeCanvassingParsedFiles(parsedFiles: CanvassingParsedFile[]
   const knock = buildKnockEvents(parsedFiles);
   validationIssues.push(...knock.issues);
   const gaps = buildGapAnalysis(knock.events);
+  const supportQuestion = firstKnockSupportQuestion(knock.events);
+  const supportCounts = buildKnockSupportCounts(knock.events, supportQuestion);
+  const nonContactFlags = buildKnockDispositionFlags(knock.events);
   const campaign = buildCampaignResults(parsedFiles);
   validationIssues.push(...campaign.issues);
 
@@ -313,6 +319,9 @@ export function analyzeCanvassingParsedFiles(parsedFiles: CanvassingParsedFile[]
     hourGapDetails: gaps.hourGapDetails,
     outlierGapDetails: gaps.outlierGapDetails,
     campaignResults: campaign.campaignResults,
+    nonContactFlags,
+    supportQuestion,
+    supportCounts,
     validationIssues,
   };
 }
