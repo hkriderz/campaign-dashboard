@@ -1,5 +1,5 @@
 /**
- * Parse PDI flag exports of Lit Observation answers into knock-index rows.
+ * Parse PDI flag exports of Lit Observation / flyer-receipt answers into knock-index rows.
  * Expected columns (case-insensitive): PDIID, FLAGENTRYDATE, RESPONSECODE /
  * RESPONSEDESCRIPTION, CANVASSERNAME, SURVEYQUESTIONSHORTTEXT, MOBILEPROJECTASSIGMENT.
  */
@@ -8,8 +8,11 @@ import type { QcCanvassKnockIndexRow } from "../qc-recontact/types";
 import { canonical } from "./doorknocks-results/helpers";
 import { parseCsvTable, tableToRecords } from "./knock-details-parser";
 import {
+  classifyFlyerAnswer,
   classifyLitObservation,
+  isFlyerReceiptQuestion,
   isLitObservationQuestion,
+  type FlyerAnswer,
   type LitObservation,
 } from "./lit-qc";
 
@@ -21,13 +24,16 @@ export type LitFlagsParseIssue = {
 export type LitFlagsParseResult = {
   rows: Omit<QcCanvassKnockIndexRow, "reportId">[];
   litRows: number;
-  skippedNotLit: number;
+  flyerRows: number;
+  skippedOther: number;
   skippedNoPrimaryId: number;
   skippedUnclassified: number;
   issues: LitFlagsParseIssue[];
 };
 
 const REQUIRED_HEADERS = ["PDIID", "FLAGENTRYDATE", "CANVASSERNAME"] as const;
+const LIT_QUESTION = "Lit Observation";
+const FLYER_QUESTION = "Did you receive our flyer?";
 
 function headerMap(columns: string[]): Map<string, string> {
   const map = new Map<string, string>();
@@ -58,22 +64,46 @@ export function classifyLitFlagAnswer(responseDescription: string, responseCode:
   return classifyLitObservation(responseDescription) ?? classifyLitFlagCode(responseCode) ?? classifyLitObservation(responseCode);
 }
 
+export function classifyFlyerFlagCode(code: string): FlyerAnswer | null {
+  const value = canonical(code);
+  if (!value) return null;
+  if (value === "gf" || value === "got flyer" || value === "got a flyer") return "got";
+  if (value === "dgf" || value === "didnt get flyer" || value === "didn t get flyer") return "didnt";
+  if (value === "und" || value === "undecided") return "undecided";
+  return null;
+}
+
+export function classifyFlyerFlagAnswer(responseDescription: string, responseCode: string): FlyerAnswer | null {
+  return classifyFlyerAnswer(responseDescription) ?? classifyFlyerFlagCode(responseCode) ?? classifyFlyerAnswer(responseCode);
+}
+
 function stableLitResponse(lit: LitObservation, description: string): string {
   const trimmed = description.trim();
-  // Keep the export wording when Lit QC can classify it; otherwise use a stable label.
   if (trimmed && classifyLitObservation(trimmed) === lit) return trimmed;
   if (lit === "saw") return "Saw Lit";
   if (lit === "didnt") return "Didn't See Lit";
   return "HH has USA Flag";
 }
 
-function isLitFlagRow(question: string, code: string, description: string): boolean {
-  if (question && isLitObservationQuestion(question)) return true;
-  if (classifyLitFlagAnswer(description, code)) {
-    // Accept code/description-only rows when the short-text column is blank.
-    if (!question) return true;
+function stableFlyerResponse(flyer: FlyerAnswer, description: string): string {
+  const trimmed = description.trim();
+  if (trimmed && classifyFlyerAnswer(trimmed) === flyer) return trimmed;
+  if (flyer === "got") return "Got a Flyer";
+  if (flyer === "didnt") return "Didn't Get Flyer";
+  return "Undecided";
+}
+
+type FlagKind = "lit" | "flyer";
+
+function detectFlagKind(question: string, code: string, description: string): FlagKind | null {
+  if (question && isLitObservationQuestion(question)) return "lit";
+  if (question && isFlyerReceiptQuestion(question)) return "flyer";
+  // Blank short-text: classify from code/description (lit first when both could match).
+  if (!question) {
+    if (classifyLitFlagAnswer(description, code)) return "lit";
+    if (classifyFlyerFlagAnswer(description, code)) return "flyer";
   }
-  return false;
+  return null;
 }
 
 export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.csv"): LitFlagsParseResult {
@@ -96,7 +126,8 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
   const rows: Omit<QcCanvassKnockIndexRow, "reportId">[] = [];
   const issues: LitFlagsParseIssue[] = [];
   let litRows = 0;
-  let skippedNotLit = 0;
+  let flyerRows = 0;
+  let skippedOther = 0;
   let skippedNoPrimaryId = 0;
   let skippedUnclassified = 0;
   const seen = new Set<string>();
@@ -106,9 +137,10 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
     const question = cell(record, headers, "SURVEYQUESTIONSHORTTEXT");
     const code = cell(record, headers, "RESPONSECODE");
     const description = cell(record, headers, "RESPONSEDESCRIPTION");
+    const kind = detectFlagKind(question, code, description);
 
-    if (!isLitFlagRow(question, code, description)) {
-      skippedNotLit += 1;
+    if (!kind) {
+      skippedOther += 1;
       continue;
     }
 
@@ -116,16 +148,6 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
     if (!normalizeRecontactPersonId(primaryId)) {
       skippedNoPrimaryId += 1;
       issues.push({ rowNumber, message: "Missing or invalid PDIID." });
-      continue;
-    }
-
-    const lit = classifyLitFlagAnswer(description, code);
-    if (!lit) {
-      skippedUnclassified += 1;
-      issues.push({
-        rowNumber,
-        message: `Unrecognized lit answer (code="${code}", description="${description}").`,
-      });
       continue;
     }
 
@@ -144,23 +166,53 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
     const assignmentName =
       cell(record, headers, "MOBILEPROJECTASSIGMENT") ||
       cell(record, headers, "MOBILEPROJECTASSIGNMENT");
-    const response = stableLitResponse(lit, description);
+
+    let storedQuestion = "";
+    let response = "";
+    if (kind === "lit") {
+      const lit = classifyLitFlagAnswer(description, code);
+      if (!lit) {
+        skippedUnclassified += 1;
+        issues.push({
+          rowNumber,
+          message: `Unrecognized lit answer (code="${code}", description="${description}").`,
+        });
+        continue;
+      }
+      storedQuestion = LIT_QUESTION;
+      response = stableLitResponse(lit, description);
+    } else {
+      const flyer = classifyFlyerFlagAnswer(description, code);
+      if (!flyer) {
+        skippedUnclassified += 1;
+        issues.push({
+          rowNumber,
+          message: `Unrecognized flyer answer (code="${code}", description="${description}").`,
+        });
+        continue;
+      }
+      storedQuestion = question && isFlyerReceiptQuestion(question) ? question : FLYER_QUESTION;
+      response = stableFlyerResponse(flyer, description);
+    }
+
     const dedupeKey = [
       normalizeRecontactPersonId(primaryId),
       occurredAt,
-      "Lit Observation",
+      kind === "lit" ? LIT_QUESTION : "flyer-receipt",
       response,
     ].join("|");
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
-    litRows += 1;
+    if (kind === "lit") litRows += 1;
+    else flyerRows += 1;
+
     rows.push({
       primaryId,
       canvasserName,
       assignmentName,
       occurredAt,
-      question: "Lit Observation",
+      question: storedQuestion,
       response,
       sourceFileName,
     });
@@ -169,7 +221,8 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
   return {
     rows,
     litRows,
-    skippedNotLit,
+    flyerRows,
+    skippedOther,
     skippedNoPrimaryId,
     skippedUnclassified,
     issues: issues.slice(0, 50),

@@ -12,6 +12,13 @@ import { isKnockNonContactQuestion } from "./knock-dispositions";
 
 export const LIT_QC_UNMATCHED = "Unmatched";
 const LA_TIME_ZONE = "America/Los_Angeles";
+/**
+ * Flyer + lit flag rows for the same voter/QC canvasser often land ~1 minute apart.
+ * Merge those answers onto one visit within this window.
+ */
+export const LIT_QC_VISIT_MERGE_MS = 2 * 60 * 1000;
+/** Cluster visits from the same QC canvasser into one household when stamps fall within this window. */
+export const LIT_QC_HOUSEHOLD_GROUP_MS = 60 * 1000;
 
 export type LitObservation = "saw" | "didnt" | "usaFlag";
 export type FlyerAnswer = "got" | "didnt" | "undecided";
@@ -48,6 +55,11 @@ export type LitQcHousehold = {
   project: string;
   projectDate: string;
   voters: LitQcVoter[];
+  /**
+   * True when this door combines multiple voters and/or flag timestamps posted within a minute
+   * (same-time / near-simultaneous flags). UI shows a small grouped indicator.
+   */
+  sameDoorGroup: boolean;
 };
 
 export type LitQcCanvasserRow = {
@@ -97,6 +109,8 @@ type VoterVisit = {
   qcKey: string;
   assignmentName: string;
   occurredAt: string;
+  /** Original flag timestamps merged into this visit (flyer + lit often differ by seconds). */
+  flagTimes: string[];
   lit: LitObservation | null;
   litConflict: boolean;
   flyer: FlyerAnswer | null;
@@ -369,8 +383,68 @@ export function latestPrior(
   return [...named].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt))[0] ?? null;
 }
 
+function occurredAtMs(value: string): number {
+  const ms = Date.parse(value.trim());
+  return Number.isFinite(ms) ? ms : Number.NaN;
+}
+
+function timestampsWithinWindow(a: string, b: string, windowMs: number): boolean {
+  if (a.trim() === b.trim()) return true;
+  const aMs = occurredAtMs(a);
+  const bMs = occurredAtMs(b);
+  if (!Number.isFinite(aMs) || !Number.isFinite(bMs)) return false;
+  return Math.abs(aMs - bMs) <= windowMs;
+}
+
+function timestampsWithinMergeWindow(a: string, b: string): boolean {
+  return timestampsWithinWindow(a, b, LIT_QC_VISIT_MERGE_MS);
+}
+
+function uniqueSortedFlagTimes(times: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of times) {
+    const stamp = raw.trim();
+    if (!stamp || seen.has(stamp)) continue;
+    seen.add(stamp);
+    out.push(stamp);
+  }
+  return out.sort((a, b) => {
+    const aMs = occurredAtMs(a);
+    const bMs = occurredAtMs(b);
+    if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
+    return a.localeCompare(b);
+  });
+}
+
+function pushFlagTime(visit: VoterVisit, occurredAt: string): void {
+  const stamp = occurredAt.trim();
+  if (!stamp) return;
+  if (!visit.flagTimes.includes(stamp)) visit.flagTimes.push(stamp);
+}
+
+function earlierOccurredAt(a: string, b: string): string {
+  const aMs = occurredAtMs(a);
+  const bMs = occurredAtMs(b);
+  if (Number.isFinite(aMs) && Number.isFinite(bMs)) return aMs <= bMs ? a : b;
+  return a && b ? (a < b ? a : b) : a || b;
+}
+
+function findMergeableVisit(
+  visits: readonly VoterVisit[],
+  primaryId: string,
+  qcKey: string,
+  occurredAt: string
+): VoterVisit | null {
+  for (const visit of visits) {
+    if (visit.primaryId !== primaryId || visit.qcKey !== qcKey) continue;
+    if (timestampsWithinMergeWindow(visit.occurredAt, occurredAt)) return visit;
+  }
+  return null;
+}
+
 function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorHit[]>): VoterVisit[] {
-  const visits = new Map<string, VoterVisit>();
+  const visits: VoterVisit[] = [];
   for (const row of rows) {
     const litQuestion = isLitObservationQuestion(row.question);
     const flyerQuestion = isFlyerReceiptQuestion(row.question);
@@ -381,25 +455,38 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
     const qcCanvasser = row.canvasserName.trim();
     const qcKey = canvasserIdentityKey(qcCanvasser) || qcCanvasser.toLowerCase();
     const assignmentName = row.assignmentName.trim();
-    const key = `${primaryId}\0${qcKey}\0${occurredAt}`;
-    const visit = visits.get(key) ?? {
-      primaryId,
-      voterName: "",
-      qcCanvasser,
-      qcKey,
-      assignmentName,
-      occurredAt,
-      lit: null,
-      litConflict: false,
-      flyer: null,
-      prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
-    };
+    const visit =
+      findMergeableVisit(visits, primaryId, qcKey, occurredAt) ??
+      (() => {
+        const created: VoterVisit = {
+          primaryId,
+          voterName: "",
+          qcCanvasser,
+          qcKey,
+          assignmentName,
+          occurredAt,
+          flagTimes: occurredAt ? [occurredAt] : [],
+          lit: null,
+          litConflict: false,
+          flyer: null,
+          prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
+        };
+        visits.push(created);
+        return created;
+      })();
     const voterName = (row.voterName ?? "").trim();
     if (voterName && !visit.voterName) visit.voterName = voterName;
-    if (qcCanvasser && !visit.qcCanvasser) visit.qcCanvasser = qcCanvasser;
+    if (qcCanvasser) {
+      visit.qcCanvasser = preferredCanvasserName([visit.qcCanvasser, qcCanvasser]) || visit.qcCanvasser || qcCanvasser;
+    }
     if (assignmentName && !visit.assignmentName) visit.assignmentName = assignmentName;
+    pushFlagTime(visit, occurredAt);
+    // Keep the earlier stamp so flyer/lit rows a minute apart share one door time.
+    if (occurredAt && visit.occurredAt !== occurredAt) {
+      visit.occurredAt = earlierOccurredAt(visit.occurredAt, occurredAt);
+    }
     if (!visit.prior) {
-      visit.prior = latestPrior(priors.get(primaryId), occurredAt, visit.assignmentName || assignmentName);
+      visit.prior = latestPrior(priors.get(primaryId), visit.occurredAt, visit.assignmentName || assignmentName);
     }
     if (litQuestion) {
       const lit = classifyLitObservation(row.response);
@@ -410,9 +497,8 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
       const flyer = classifyFlyerAnswer(row.response);
       if (flyer) visit.flyer = flyer;
     }
-    visits.set(key, visit);
   }
-  return [...visits.values()];
+  return visits;
 }
 
 function householdLit(visits: readonly VoterVisit[]): { lit: LitObservation | null; litDisagreement: boolean } {
@@ -458,21 +544,58 @@ function ownerOf(visits: readonly VoterVisit[]): { key: string; name: string; pr
   return best;
 }
 
-function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey: string; household: LitQcHousehold }> {
-  const groups = new Map<string, VoterVisit[]>();
+function clusterDoorVisits(visits: readonly VoterVisit[]): VoterVisit[][] {
+  const byQc = new Map<string, VoterVisit[]>();
   for (const visit of visits) {
-    const door = visit.occurredAt ? `${visit.qcKey}\0${visit.occurredAt}` : `${visit.qcKey}\0${visit.primaryId}`;
-    const list = groups.get(door) ?? [];
+    const list = byQc.get(visit.qcKey) ?? [];
     list.push(visit);
-    groups.set(door, list);
+    byQc.set(visit.qcKey, list);
   }
 
+  const clusters: VoterVisit[][] = [];
+  for (const group of byQc.values()) {
+    const sorted = [...group].sort((a, b) => {
+      const aMs = occurredAtMs(a.occurredAt);
+      const bMs = occurredAtMs(b.occurredAt);
+      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
+      return a.occurredAt.localeCompare(b.occurredAt) || a.primaryId.localeCompare(b.primaryId);
+    });
+    let current: VoterVisit[] = [];
+    let currentEndMs = Number.NaN;
+    for (const visit of sorted) {
+      const visitMs = occurredAtMs(visit.occurredAt);
+      const joins =
+        !current.length ||
+        (Number.isFinite(currentEndMs) &&
+          Number.isFinite(visitMs) &&
+          visitMs - currentEndMs <= LIT_QC_HOUSEHOLD_GROUP_MS) ||
+        current.some((member) => timestampsWithinWindow(member.occurredAt, visit.occurredAt, LIT_QC_HOUSEHOLD_GROUP_MS));
+      if (!joins) {
+        clusters.push(current);
+        current = [];
+        currentEndMs = Number.NaN;
+      }
+      current.push(visit);
+      if (Number.isFinite(visitMs)) {
+        currentEndMs = Number.isFinite(currentEndMs) ? Math.max(currentEndMs, visitMs) : visitMs;
+      }
+    }
+    if (current.length) clusters.push(current);
+  }
+  return clusters;
+}
+
+function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey: string; household: LitQcHousehold }> {
+  // Same-PDI flyer/lit within 2 minutes merge in buildVisits. Doors with stamps within 1 minute
+  // (same time or near-simultaneous) cluster here as one household.
   const households = new Map<string, { ownerKey: string; household: LitQcHousehold }>();
-  for (const [key, doorVisits] of groups) {
+  for (const doorVisits of clusterDoorVisits(visits)) {
+    const first = doorVisits[0]!;
+    const flagTimes = uniqueSortedFlagTimes(doorVisits.flatMap((visit) => visit.flagTimes));
+    const key = `${first.qcKey}\0${first.occurredAt}\0${doorVisits.map((visit) => visit.primaryId).sort().join(",")}`;
     const owner = ownerOf(doorVisits);
     const lit = householdLit(doorVisits);
     const qcNames = doorVisits.map((visit) => visit.qcCanvasser);
-    const first = doorVisits[0]!;
     const voters = doorVisits
       .map((visit) => ({
         primaryId: visit.primaryId,
@@ -496,6 +619,7 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
         project: owner.project,
         projectDate: owner.projectDate,
         voters,
+        sameDoorGroup: voters.length > 1 || flagTimes.length > 1,
       },
     });
   }
@@ -564,6 +688,71 @@ export function litQcProjectsInDateRange(tally: LitQcTally, startDate: string, e
     }
   }
   return [...projects].sort((a, b) => a.localeCompare(b));
+}
+
+export function litQcCanvasserOptions(rows: readonly LitQcCanvasserRow[]): string[] {
+  const names = new Set<string>();
+  for (const row of rows) {
+    for (const household of row.households) {
+      const name = household.qcCanvasser.trim();
+      if (name) names.add(name);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function householdMatchesQcCanvassers(
+  household: LitQcHousehold,
+  selected: readonly string[],
+  mode: "include" | "exclude",
+  namesMatch: (left: string, right: string) => boolean
+): boolean {
+  if (!selected.length) return true;
+  const hit = selected.some((name) => namesMatch(name, household.qcCanvasser));
+  return mode === "include" ? hit : !hit;
+}
+
+function householdMatchesPdi(household: LitQcHousehold, pdiQuery: string): boolean {
+  const needle = normalizeRecontactPersonId(pdiQuery) || pdiQuery.trim().toLowerCase().replace(/\s+/g, "");
+  if (!needle) return true;
+  return household.voters.some((voter) => {
+    const id = normalizeRecontactPersonId(voter.primaryId) || voter.primaryId.trim().toLowerCase();
+    return id.includes(needle);
+  });
+}
+
+/**
+ * Client-side Lit QC filters after the date/project API response.
+ * QC canvasser matching uses the caller's name matcher (usually recontactNamesMatch).
+ */
+export function filterLitQcCanvasserRows(
+  rows: readonly LitQcCanvasserRow[],
+  options: {
+    qcCanvassers?: readonly string[];
+    qcCanvasserMode?: "include" | "exclude";
+    pdiQuery?: string;
+    namesMatch?: (left: string, right: string) => boolean;
+  }
+): LitQcCanvasserRow[] {
+  const selected = (options.qcCanvassers ?? []).map((name) => name.trim()).filter(Boolean);
+  const mode = options.qcCanvasserMode ?? "include";
+  const pdiQuery = options.pdiQuery?.trim() ?? "";
+  const namesMatch =
+    options.namesMatch ??
+    ((left, right) => canvasserIdentityKey(left) === canvasserIdentityKey(right) && Boolean(canvasserIdentityKey(left)));
+
+  return rows
+    .map((row) =>
+      rowFromHouseholds(
+        row.canvasserName,
+        row.households.filter(
+          (household) =>
+            householdMatchesQcCanvassers(household, selected, mode, namesMatch) &&
+            householdMatchesPdi(household, pdiQuery)
+        )
+      )
+    )
+    .filter((row) => row.householdsChecked > 0);
 }
 
 const SUMMARY_HEADERS = [
@@ -651,6 +840,8 @@ export type LitQcDetailRow = {
   voterOriginalCanvasser: string;
   voterProject: string;
   voterProjectDate: string;
+  /** Same-time / within-a-minute household cluster (multi-voter or multi-stamp). */
+  sameDoorGroup: boolean;
 };
 
 export function defaultVisibleLitQcDetailColumnIds(): LitQcDetailColumnId[] {
@@ -726,6 +917,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
           voterOriginalCanvasser: "",
           voterProject: "",
           voterProjectDate: "",
+          sameDoorGroup: household.sameDoorGroup,
         });
         continue;
       }
@@ -744,6 +936,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
           voterOriginalCanvasser: voter.originalCanvasser,
           voterProject: voter.project,
           voterProjectDate: voter.projectDate,
+          sameDoorGroup: household.sameDoorGroup,
         });
       }
     }

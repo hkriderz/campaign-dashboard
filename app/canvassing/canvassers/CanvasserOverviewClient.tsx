@@ -10,8 +10,10 @@ import {
   buildLitQcCsv,
   buildLitQcDetailTsv,
   defaultVisibleLitQcDetailColumnIds,
+  filterLitQcCanvasserRows,
   flattenLitQcDetails,
   LIT_QC_DETAIL_COLUMNS,
+  litQcCanvasserOptions,
   litQcDetailCellValue,
   litQcDetailHeaders,
   loadLitQcDetailColumnIds,
@@ -192,6 +194,9 @@ export default function CanvasserOverviewClient() {
   const [litProjects, setLitProjects] = useState<string[]>([]);
   const [litCanvassersSelected, setLitCanvassersSelected] = useState<string[]>([]);
   const [litCanvasserMode, setLitCanvasserMode] = useState<PeopleFilterMode>("include");
+  const [litQcCanvassersSelected, setLitQcCanvassersSelected] = useState<string[]>([]);
+  const [litQcCanvasserMode, setLitQcCanvasserMode] = useState<PeopleFilterMode>("include");
+  const [litPdiSearch, setLitPdiSearch] = useState("");
   const [litCopyLabel, setLitCopyLabel] = useState("Copy table");
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
     defaultVisibleLitQcDetailColumnIds
@@ -305,17 +310,29 @@ export default function CanvasserOverviewClient() {
   const totals = useMemo(() => summarizeCanvasserOverview(visibleCanvassers), [visibleCanvassers]);
   const litRows = litPayload?.canvassers ?? [];
   const litCanvasserOptions = useMemo(() => litRows.map((row) => row.canvasserName), [litRows]);
-  const visibleLitCanvassers = useMemo(
-    () =>
-      filterNamedRows(
-        litRows,
-        litCanvassersSelected,
-        litCanvasserMode,
-        (row) => row.canvasserName,
-        recontactNamesMatch
-      ),
-    [litRows, litCanvassersSelected, litCanvasserMode]
-  );
+  const litQcCanvasserFilterOptions = useMemo(() => litQcCanvasserOptions(litRows), [litRows]);
+  const visibleLitCanvassers = useMemo(() => {
+    const byOriginal = filterNamedRows(
+      litRows,
+      litCanvassersSelected,
+      litCanvasserMode,
+      (row) => row.canvasserName,
+      recontactNamesMatch
+    );
+    return filterLitQcCanvasserRows(byOriginal, {
+      qcCanvassers: litQcCanvassersSelected,
+      qcCanvasserMode: litQcCanvasserMode,
+      pdiQuery: litPdiSearch,
+      namesMatch: recontactNamesMatch,
+    });
+  }, [
+    litRows,
+    litCanvassersSelected,
+    litCanvasserMode,
+    litQcCanvassersSelected,
+    litQcCanvasserMode,
+    litPdiSearch,
+  ]);
   const litTotals = useMemo(() => summarizeLitQc(visibleLitCanvassers), [visibleLitCanvassers]);
   const litVoterTotal = useMemo(
     () => visibleLitCanvassers.reduce((sum, row) => sum + row.votersChecked, 0),
@@ -392,23 +409,31 @@ export default function CanvasserOverviewClient() {
       const body = (await res.json()) as ApiResponse<{
         importMeta: { rowsAdded: number; rowsSkippedDup: number; fileNames: string[] };
         litRows: number;
-        skippedNotLit: number;
+        flyerRows: number;
+        skippedOther: number;
         skippedNoPrimaryId: number;
         skippedUnclassified: number;
       }>;
       if (!res.ok || !body.ok || !body.data) {
         throw new Error(body.error || `Import failed (${res.status})`);
       }
-      const { importMeta, litRows: parsedLit, skippedNotLit, skippedNoPrimaryId, skippedUnclassified } =
-        body.data;
+      const {
+        importMeta,
+        litRows: parsedLit,
+        flyerRows: parsedFlyer,
+        skippedOther,
+        skippedNoPrimaryId,
+        skippedUnclassified,
+      } = body.data;
       const parts = [
-        `Imported ${formatNumber(importMeta.rowsAdded)} new lit flag row${importMeta.rowsAdded === 1 ? "" : "s"}`,
+        `Imported ${formatNumber(importMeta.rowsAdded)} new flag row${importMeta.rowsAdded === 1 ? "" : "s"}`,
+        `(${formatNumber(parsedLit)} lit · ${formatNumber(parsedFlyer)} flyer)`,
         `from ${importMeta.fileNames.join(", ") || "upload"}`,
       ];
       if (importMeta.rowsSkippedDup) parts.push(`(${formatNumber(importMeta.rowsSkippedDup)} already in index)`);
-      if (skippedNotLit || skippedNoPrimaryId || skippedUnclassified) {
+      if (skippedOther || skippedNoPrimaryId || skippedUnclassified) {
         parts.push(
-          `· skipped ${formatNumber(skippedNotLit + skippedNoPrimaryId + skippedUnclassified)} of ${formatNumber(parsedLit + skippedNotLit + skippedNoPrimaryId + skippedUnclassified)} rows`
+          `· skipped ${formatNumber(skippedOther + skippedNoPrimaryId + skippedUnclassified)} other/invalid rows`
         );
       }
       setLitFlagsMessage(parts.join(" "));
@@ -496,7 +521,7 @@ export default function CanvasserOverviewClient() {
                 onSelectedChange={setLitProjects}
               />
               <CheckboxFilterMenu
-                label="Canvassers"
+                label="Original canvassers"
                 options={litCanvasserOptions}
                 selected={litCanvassersSelected}
                 onSelectedChange={setLitCanvassersSelected}
@@ -505,6 +530,26 @@ export default function CanvasserOverviewClient() {
                 groups={canvasserGroups.groups}
                 onGroupsChange={canvasserGroups.setGroups}
               />
+              <CheckboxFilterMenu
+                label="QC canvassers"
+                options={litQcCanvasserFilterOptions}
+                selected={litQcCanvassersSelected}
+                onSelectedChange={setLitQcCanvassersSelected}
+                mode={litQcCanvasserMode}
+                onModeChange={setLitQcCanvasserMode}
+                groups={canvasserGroups.groups}
+                onGroupsChange={canvasserGroups.setGroups}
+              />
+              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--section-muted)]">
+                <span className="whitespace-nowrap">PDI</span>
+                <input
+                  type="search"
+                  value={litPdiSearch}
+                  onChange={(event) => setLitPdiSearch(event.target.value)}
+                  placeholder="Search PDI…"
+                  className="border border-[var(--section-rule)] bg-transparent px-2 py-1 text-xs text-[var(--section-ink)] placeholder:text-[var(--section-muted)] min-w-[9rem]"
+                />
+              </label>
               <input
                 ref={litFlagsInputRef}
                 type="file"
@@ -849,7 +894,21 @@ function LitDetailTable({
                 id === "projectDate" || id === "voterProjectDate" || id === "qcTime" ? "tabular-nums" : "";
               return (
                 <td key={id} className={`px-2.5 py-1.5 ${mono} ${nums}`}>
-                  {text}
+                  {id === "qcTime" ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span>{text || "—"}</span>
+                      {detail.sameDoorGroup ? (
+                        <span
+                          className="border border-[var(--section-rule)] px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--section-muted)]"
+                          title="Flags posted at the same time or within a minute are grouped as one household"
+                        >
+                          Grouped
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : (
+                    text
+                  )}
                 </td>
               );
             })}
@@ -910,7 +969,7 @@ function LitQcSection({
       <div className="dash-card space-y-2">
         <p className="text-sm text-[var(--section-ink)]">No lit observation flags in the knock index yet.</p>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Import a PDI lit observation flags CSV (per-PDI answers: Didn&apos;t See Lit, Saw Lit, USA Flag). Also keep
+          Import a PDI flags CSV with Lit Observation and/or &quot;Did you receive our flyer?&quot; answers. Also keep
           Knock Analysis reports for the earlier not-home / lit-drop walks so households can match to the original
           canvasser.
         </p>

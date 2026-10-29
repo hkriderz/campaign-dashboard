@@ -7,12 +7,15 @@ import {
   classifyFlyerAnswer,
   classifyLitObservation,
   filterLitQc,
+  filterLitQcCanvasserRows,
   flattenLitQcDetails,
   isFlyerReceiptQuestion,
   knockOccurredBefore,
+  litQcCanvasserOptions,
   priorDatesFromAssignment,
 } from "./lit-qc";
 import type { LitQcSourceRow } from "./lit-qc";
+import { recontactNamesMatch } from "../qc-recontact/names";
 
 function row(partial: Partial<LitQcSourceRow> & Pick<LitQcSourceRow, "question" | "response">): LitQcSourceRow {
   return {
@@ -92,6 +95,7 @@ test("two voters at one timestamp are one household under the canvasser who left
   assert.equal(canvasser.householdsChecked, 1);
   assert.equal(canvasser.votersChecked, 2);
   assert.equal(canvasser.households[0]!.voters.length, 2);
+  assert.equal(canvasser.households[0]!.sameDoorGroup, true);
   assert.equal(canvasser.households[0]!.qcCanvasser, "Quinn, Casey");
   assert.equal(canvasser.sawLit, 1);
   assert.equal(canvasser.gotFlyer, 1);
@@ -362,4 +366,57 @@ test("QC date and original project filters keep the door being QC'd that day", (
 
   const byOriginalDropDay = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20" });
   assert.equal(byOriginalDropDay.canvassers.length, 0);
+});
+
+test("flyer and lit one minute apart with Last, First vs First Last QC names merge into one door", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Meza, Max",
+      assignmentName: "10-18-26 Nithya Latino East LA GOTV - 101826NL-208",
+      occurredAt: "2026-10-23T20:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA12721125",
+      voterName: "NORMA MONTERROSO",
+    }),
+    row({
+      canvasserName: "Castro, Kenny",
+      assignmentName: "Nithya NH Lit QC for 10-23-26 - abc",
+      occurredAt: "2026-10-24T14:47:00.000-07:00",
+      question: "Did you receive our flyer yesterday?",
+      response: "Got a Flyer",
+      primaryId: "CA12721125",
+      voterName: "NORMA MONTERROSO",
+    }),
+    row({
+      canvasserName: "Kenny Castro",
+      assignmentName: "Nithya NH Lit QC for 10-23-26 - abc",
+      occurredAt: "2026-10-24T14:48:00.000-07:00",
+      question: "Lit Observation",
+      response: "Didn't See Lit",
+      primaryId: "CA12721125",
+    }),
+  ]);
+
+  assert.equal(tally.canvassers.length, 1);
+  const canvasser = tally.canvassers[0]!;
+  assert.equal(canvasser.canvasserName, "Meza, Max");
+  assert.equal(canvasser.householdsChecked, 1);
+  assert.equal(canvasser.votersChecked, 1);
+  const household = canvasser.households[0]!;
+  assert.equal(household.lit, "didnt");
+  assert.equal(household.voters[0]?.flyer, "got");
+  assert.equal(household.qcCanvasser, "Kenny Castro");
+  assert.equal(household.sameDoorGroup, true);
+  assert.ok(litQcCanvasserOptions(tally.canvassers).includes("Kenny Castro"));
+
+  const byQc = filterLitQcCanvasserRows(tally.canvassers, {
+    qcCanvassers: ["Castro, Kenny"],
+    namesMatch: recontactNamesMatch,
+  });
+  assert.equal(byQc.length, 1);
+
+  const byPdi = filterLitQcCanvasserRows(tally.canvassers, { pdiQuery: "12721125" });
+  assert.equal(byPdi.length, 1);
+  assert.equal(filterLitQcCanvasserRows(tally.canvassers, { pdiQuery: "NOPE" }).length, 0);
 });

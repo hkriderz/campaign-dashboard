@@ -24,7 +24,8 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export type LitFlagsImportPayload = {
   importMeta: KnockIndexImportMeta;
   litRows: number;
-  skippedNotLit: number;
+  flyerRows: number;
+  skippedOther: number;
   skippedNoPrimaryId: number;
   skippedUnclassified: number;
   issues: Array<{ rowNumber: number; message: string }>;
@@ -67,7 +68,8 @@ export const POST = withCredentialContext(async (req) => {
 
     const allRows: QcCanvassKnockIndexRow[] = [];
     let litRows = 0;
-    let skippedNotLit = 0;
+    let flyerRows = 0;
+    let skippedOther = 0;
     let skippedNoPrimaryId = 0;
     let skippedUnclassified = 0;
     const issues: Array<{ rowNumber: number; message: string }> = [];
@@ -98,7 +100,8 @@ export const POST = withCredentialContext(async (req) => {
       const text = Buffer.from(await file.arrayBuffer()).toString("utf-8");
       const parsed = parseLitFlagsCsv(text, file.name);
       litRows += parsed.litRows;
-      skippedNotLit += parsed.skippedNotLit;
+      flyerRows += parsed.flyerRows;
+      skippedOther += parsed.skippedOther;
       skippedNoPrimaryId += parsed.skippedNoPrimaryId;
       skippedUnclassified += parsed.skippedUnclassified;
       issues.push(...parsed.issues);
@@ -110,9 +113,9 @@ export const POST = withCredentialContext(async (req) => {
       return NextResponse.json(
         {
           ok: false,
-          error: "No Lit Observation flag rows found in the upload.",
+          error: "No Lit Observation or flyer flag rows found in the upload.",
           code: 400,
-          data: { litRows, skippedNotLit, skippedNoPrimaryId, skippedUnclassified, issues: issues.slice(0, 50) },
+          data: { litRows, flyerRows, skippedOther, skippedNoPrimaryId, skippedUnclassified, issues: issues.slice(0, 50) },
         },
         { status: 400 }
       );
@@ -127,7 +130,8 @@ export const POST = withCredentialContext(async (req) => {
     const data: LitFlagsImportPayload = {
       importMeta: result.importMeta,
       litRows,
-      skippedNotLit,
+      flyerRows,
+      skippedOther,
       skippedNoPrimaryId,
       skippedUnclassified,
       issues: issues.slice(0, 50),
