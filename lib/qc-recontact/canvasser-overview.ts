@@ -3,6 +3,7 @@
  * Definitions are locked to the Detailed Canvasser View sheet (Dilan Davila sample).
  */
 import { assignmentCampaignPrefix } from "../canvassing/data-checks/parser";
+import { canvasserIdentityKey, preferredCanvasserName } from "../canvassing/display-names";
 import { escapeCsvCell } from "../pivot-csv-export";
 import type { SurveyScriptProfile } from "../types";
 import { familyFromResultLabel } from "../unique-ids/classify";
@@ -57,6 +58,8 @@ export type CanvasserOverviewDetail = {
 };
 
 export type CanvasserOverviewRow = {
+  /** Stable expand/key id (identity key of the original canvasser). */
+  rowId: string;
   canvasserName: string;
   surveyed: number;
   originallyStrongSupport: number;
@@ -247,6 +250,7 @@ export function summarizeCanvasserOverview(rows: readonly CanvasserOverviewRow[]
     emptyFamilyBlock()
   );
   return {
+    rowId: "total",
     canvasserName: "Total",
     surveyed,
     originallyStrongSupport,
@@ -408,7 +412,8 @@ export function canvasserQcPhonebankOptions(rows: readonly CanvasserOverviewRow[
 
 export function canvasserOverviewRowFromDetails(
   canvasserName: string,
-  details: readonly CanvasserOverviewDetail[]
+  details: readonly CanvasserOverviewDetail[],
+  rowId = canvasserIdentityKey(canvasserName) || canvasserName.toLowerCase() || canvasserName
 ): CanvasserOverviewRow {
   const sorted = [...details].sort((a, b) => {
     const byDate = a.callDate.localeCompare(b.callDate);
@@ -441,8 +446,11 @@ export function canvasserOverviewRowFromDetails(
   }
 
   const surveyed = sorted.length;
+  const displayName =
+    preferredCanvasserName(sorted.map((detail) => detail.canvasserName)) || canvasserName;
   return {
-    canvasserName,
+    rowId: rowId || displayName,
+    canvasserName: displayName,
     surveyed,
     originallyStrongSupport,
     recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
@@ -472,7 +480,7 @@ function filterCanvasserRows(
   for (const row of rows) {
     const details = row.details.filter((detail) => matches(detail, wanted));
     if (!details.length) continue;
-    next.push(canvasserOverviewRowFromDetails(row.canvasserName, details));
+    next.push(canvasserOverviewRowFromDetails(row.canvasserName, details, row.rowId));
   }
   next.sort((a, b) => b.surveyed - a.surveyed || a.canvasserName.localeCompare(b.canvasserName));
   return next;
@@ -502,19 +510,26 @@ export function tallyCanvasserOverview(
   pairs: readonly QcRecontactPair[],
   profile: SurveyScriptProfile = "faizahTraci"
 ): CanvasserOverviewTally {
-  const byName = new Map<string, CanvasserOverviewDetail[]>();
+  const byKey = new Map<string, CanvasserOverviewDetail[]>();
 
   for (const pair of selectCanvasserOverviewPairs(pairs, profile)) {
     const prior = latestCanvassPrior(pair);
     if (!prior || !isRecordedSupportLabel(prior.resultLabel, profile)) continue;
     const detail = detailFromPair(pair, prior, profile);
-    const list = byName.get(detail.canvasserName) ?? [];
+    const key =
+      canvasserIdentityKey(detail.canvasserName) || detail.canvasserName.trim().toLowerCase();
+    if (!key) continue;
+    const list = byKey.get(key) ?? [];
     list.push(detail);
-    byName.set(detail.canvasserName, list);
+    byKey.set(key, list);
   }
 
-  const canvassers: CanvasserOverviewRow[] = [...byName.entries()].map(([canvasserName, details]) =>
-    canvasserOverviewRowFromDetails(canvasserName, details)
+  const canvassers: CanvasserOverviewRow[] = [...byKey.entries()].map(([rowId, details]) =>
+    canvasserOverviewRowFromDetails(
+      preferredCanvasserName(details.map((detail) => detail.canvasserName)) || details[0]!.canvasserName,
+      details,
+      rowId
+    )
   );
 
   canvassers.sort(
@@ -554,6 +569,18 @@ function detailDataRow(
 
 function csvLine(values: readonly (string | number)[]): string {
   return values.map((value) => escapeCsvCell(value)).join(",");
+}
+
+/** Summary rows only (including Total), for clipboard paste into a spreadsheet. */
+export function buildCanvasserOverviewSummaryTsv(rows: readonly CanvasserOverviewRow[]): string {
+  const totals = summarizeCanvasserOverview(rows);
+  const summaryRows = totals ? [totals, ...rows] : [...rows];
+  const lines = [
+    SUMMARY_GROUP_HEADERS.join("\t"),
+    SUMMARY_COLUMN_HEADERS.join("\t"),
+    ...summaryRows.map((row) => summaryDataRow(row).join("\t")),
+  ];
+  return `${lines.join("\n")}\n`;
 }
 
 /** Summary block, then every canvasser’s voter rows. Detail columns follow `visibleDetailColumnIds`. */

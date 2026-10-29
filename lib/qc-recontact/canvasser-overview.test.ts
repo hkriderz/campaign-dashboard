@@ -220,12 +220,30 @@ function pairFrom(
   };
 }
 
+test("comma and first-last spellings of the same canvasser collapse to one row", () => {
+  const first = DILAN[0];
+  const second = DILAN[1];
+  assert.ok(first);
+  assert.ok(second);
+  const tally = tallyCanvasserOverview([
+    pairFrom(first, { canvasser: "Emmanuel Cabrera" }),
+    pairFrom(second, { canvasser: "Cabrera, Emmanuel" }),
+  ]);
+  assert.equal(tally.canvassers.length, 1);
+  const row = tally.canvassers[0];
+  assert.ok(row);
+  assert.equal(row.surveyed, 2);
+  assert.equal(row.canvasserName, "Emmanuel Cabrera");
+  assert.equal(row.rowId, "cabrera emmanuel");
+});
+
 test("Dilan Davila summary matches the Detailed Canvasser View sheet", () => {
   const tally = tallyCanvasserOverview(DILAN.map((voter) => pairFrom(voter)));
   assert.equal(tally.canvassers.length, 1);
   const row = tally.canvassers[0];
   assert.ok(row);
   assert.equal(row.canvasserName, "Dilan Davila");
+  assert.ok(row.rowId);
   assert.equal(row.surveyed, 9);
   assert.equal(row.originallyStrongSupport, 7);
   assert.equal(formatOverviewPercent(row.recallContactRate), "88.89%");
@@ -363,6 +381,7 @@ function overviewRow(
   }
 ): CanvasserOverviewRow {
   return {
+    rowId: partial.canvasserName.toLowerCase(),
     canvasserName: partial.canvasserName,
     surveyed: partial.surveyed,
     originallyStrongSupport: partial.originallyStrongSupport,

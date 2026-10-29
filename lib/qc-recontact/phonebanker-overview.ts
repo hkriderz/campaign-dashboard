@@ -60,6 +60,8 @@ export type PhonebankerOverviewDetail = {
 };
 
 export type PhonebankerOverviewRow = {
+  /** Stable expand/key id (canonical phonebanker key). */
+  rowId: string;
   phonebankerName: string;
   surveyed: number;
   originallyStrongSupport: number;
@@ -181,6 +183,7 @@ export function summarizePhonebankerOverview(
     emptyFamilyBlock()
   );
   return {
+    rowId: "total",
     phonebankerName: "Total",
     surveyed,
     originallyStrongSupport,
@@ -273,7 +276,8 @@ function detailFromPair(
 }
 
 export function phonebankerOverviewRowFromDetails(
-  details: readonly PhonebankerOverviewDetail[]
+  details: readonly PhonebankerOverviewDetail[],
+  rowId?: string
 ): PhonebankerOverviewRow {
   const sorted = [...details].sort((a, b) => {
     const byDate = a.callDate.localeCompare(b.callDate);
@@ -306,8 +310,15 @@ export function phonebankerOverviewRowFromDetails(
   }
 
   const surveyed = sorted.length;
+  const phonebankerName = sorted[0]?.phonebankerName ?? "";
+  const stableId =
+    rowId ||
+    canonicalizePhonebankerKey(phonebankerName) ||
+    phonebankerName.trim().toLowerCase() ||
+    phonebankerName;
   return {
-    phonebankerName: sorted[0]?.phonebankerName ?? "",
+    rowId: stableId,
+    phonebankerName,
     surveyed,
     originallyStrongSupport,
     recallContactRate: recallContactRateFromCounts(contactedYes, contactedUnsure, contactedNo),
@@ -339,7 +350,7 @@ export function filterPhonebankerOverviewByPhoneBanks(
       (detail) => wanted.has(detail.sourceList.trim()) || wanted.has(detail.qcCampaignName.trim())
     );
     if (!details.length) continue;
-    next.push(phonebankerOverviewRowFromDetails(details));
+    next.push(phonebankerOverviewRowFromDetails(details, row.rowId));
   }
   next.sort((a, b) => b.surveyed - a.surveyed || a.phonebankerName.localeCompare(b.phonebankerName));
   return next;
@@ -362,8 +373,8 @@ export function tallyPhonebankerOverview(
     byKey.set(key, list);
   }
 
-  const phonebankers: PhonebankerOverviewRow[] = [...byKey.values()].map((details) =>
-    phonebankerOverviewRowFromDetails(details)
+  const phonebankers: PhonebankerOverviewRow[] = [...byKey.entries()].map(([rowId, details]) =>
+    phonebankerOverviewRowFromDetails(details, rowId)
   );
 
   phonebankers.sort(
@@ -403,6 +414,18 @@ function detailDataRow(
 
 function csvLine(values: readonly (string | number)[]): string {
   return values.map((value) => escapeCsvCell(value)).join(",");
+}
+
+/** Summary rows only (including Total), for clipboard paste into a spreadsheet. */
+export function buildPhonebankerOverviewSummaryTsv(rows: readonly PhonebankerOverviewRow[]): string {
+  const totals = summarizePhonebankerOverview(rows);
+  const summaryRows = totals ? [totals, ...rows] : [...rows];
+  const lines = [
+    SUMMARY_GROUP_HEADERS.join("\t"),
+    SUMMARY_COLUMN_HEADERS.join("\t"),
+    ...summaryRows.map((row) => summaryDataRow(row).join("\t")),
+  ];
+  return `${lines.join("\n")}\n`;
 }
 
 export function buildPhonebankerOverviewCsv(

@@ -22,8 +22,10 @@ type Props = {
   visibleIds: readonly OverviewDetailColumnId[];
   onToggle: (id: OverviewDetailColumnId, on: boolean) => void;
   onDownloadCsv: () => void;
-  onCopyTable: () => void;
-  copyLabel?: string;
+  onCopySummary: () => void;
+  onCopyDetails: () => void;
+  copySummaryLabel?: string;
+  copyDetailsLabel?: string;
   csvDisabled?: boolean;
 };
 
@@ -100,14 +102,16 @@ export function ColumnChecklist<T extends string>({
 }
 
 /**
- * Columns checklist + Download CSV + Copy table for overview detail dropdowns.
+ * Columns checklist + Download CSV + Copy summary / Copy details for overview tables.
  */
 export default function OverviewDetailColumnControls({
   visibleIds,
   onToggle,
   onDownloadCsv,
-  onCopyTable,
-  copyLabel = "Copy table",
+  onCopySummary,
+  onCopyDetails,
+  copySummaryLabel = "Copy summary",
+  copyDetailsLabel = "Copy details",
   csvDisabled = false,
 }: Props) {
   return (
@@ -121,14 +125,17 @@ export default function OverviewDetailColumnControls({
       <button type="button" className={chipClass(false)} disabled={csvDisabled} onClick={onDownloadCsv}>
         Download CSV
       </button>
-      <button type="button" className={chipClass(false)} disabled={csvDisabled} onClick={onCopyTable}>
-        {copyLabel}
+      <button type="button" className={chipClass(false)} disabled={csvDisabled} onClick={onCopySummary}>
+        {copySummaryLabel}
+      </button>
+      <button type="button" className={chipClass(false)} disabled={csvDisabled} onClick={onCopyDetails}>
+        {copyDetailsLabel}
       </button>
     </div>
   );
 }
 
-function chipClass(active: boolean): string {
+export function chipClass(active: boolean): string {
   return [
     "border px-2.5 py-1 text-xs font-medium disabled:opacity-50",
     active

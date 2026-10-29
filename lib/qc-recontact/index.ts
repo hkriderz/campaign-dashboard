@@ -60,6 +60,7 @@ export {
 } from "./export";
 export {
   buildCanvasserOverviewCsv,
+  buildCanvasserOverviewSummaryTsv,
   canvasserOverviewDateBounds,
   canvasserOverviewExportFilename,
   classifyContactedAnswer,
@@ -72,6 +73,11 @@ export {
   splitVoterName,
   tallyCanvasserOverview,
 } from "./canvasser-overview";
+export {
+  DEFAULT_PERCENT_COLOR_SCALE,
+  percentColorScaleClass,
+  resolvePercentBandTone,
+} from "./percent-color-scale";
 export type {
   CanvasserFamilyBlock,
   CanvasserOverviewCandidate,
@@ -83,6 +89,7 @@ export type {
 } from "./canvasser-overview";
 export {
   buildPhonebankerOverviewCsv,
+  buildPhonebankerOverviewSummaryTsv,
   phonebankerOverviewExportFilename,
   selectPhonebankerOverviewPairs,
   summarizePhonebankerOverview,

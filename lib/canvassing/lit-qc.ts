@@ -13,7 +13,7 @@ import { isKnockNonContactQuestion } from "./knock-dispositions";
 export const LIT_QC_UNMATCHED = "Unmatched";
 const LA_TIME_ZONE = "America/Los_Angeles";
 
-export type LitObservation = "saw" | "didnt" | "usaFlag";
+export type LitObservation = "saw" | "didnt";
 export type FlyerAnswer = "got" | "didnt" | "undecided";
 
 export type LitQcSourceRow = {
@@ -33,6 +33,8 @@ export type LitQcVoter = {
   originalCanvasser: string;
   /** Short disposition the original canvasser marked that day (usually Not Home). */
   originalMark: string;
+  /** ISO timestamp of the original lit-drop / not-home knock. */
+  originalAt: string;
   project: string;
   projectDate: string;
 };
@@ -53,18 +55,19 @@ export type LitQcHousehold = {
 };
 
 export type LitQcCanvasserRow = {
+  /** Stable expand/key id (identity key of the original canvasser). */
+  rowId: string;
   canvasserName: string;
   householdsChecked: number;
   votersChecked: number;
   sawLit: number;
   didntSeeLit: number;
-  usaFlag: number;
-  /** Saw lit ÷ (saw + didn't see + USA flag). Null when no household answered. */
+  /** Saw lit ÷ (saw + didn't see). Null when no household answered. */
   sawLitRate: number | null;
   gotFlyer: number;
-  didntGetFlyer: number;
   flyerUndecided: number;
-  /** Got flyer ÷ (got + didn't get). Undecided stays out. Null when nobody answered definitely. */
+  didntGetFlyer: number;
+  /** Got flyer ÷ (got + undecided + didn't get). Null when nobody answered. */
   receivedRate: number | null;
   households: LitQcHousehold[];
 };
@@ -121,11 +124,11 @@ export function isFlyerReceiptQuestion(question: string): boolean {
 export function classifyLitObservation(response: string): LitObservation | null {
   const value = canonical(response);
   if (!value) return null;
+  // USA Flag is intentionally blank for Lit QC (not saw / not didn't see).
+  if (value === "nhuf" || value === "usa flag" || value.includes("usa flag")) return null;
   // PDI flag RESPONSECODE values (and short labels) from lit observation exports.
   if (value === "nhnl") return "didnt";
   if (value === "nhyl") return "saw";
-  if (value === "nhuf" || value === "usa flag") return "usaFlag";
-  if (value.includes("usa flag")) return "usaFlag";
   if (value.includes("didn t see") || value.includes("didnt see") || value.includes("no hay volante")) return "didnt";
   if (value.includes("saw lit") || value.includes("hay volante")) return "saw";
   return null;
@@ -144,8 +147,7 @@ export function litObservationLabel(lit: LitObservation | null, disagreement: bo
   if (disagreement) return "Lit answers disagree";
   if (lit === "saw") return "Saw lit";
   if (lit === "didnt") return "Didn't see lit";
-  if (lit === "usaFlag") return "USA flag";
-  // Blank when the QC visit only answered the flyer question.
+  // Blank when the QC visit only answered the flyer question (or USA flag / no lit).
   return "";
 }
 
@@ -155,15 +157,14 @@ export const LIT_QC_FLYER_FILTER_BLANK = "No flyer answer";
 export const LIT_QC_LIT_FILTER_OPTIONS = [
   "Saw lit",
   "Didn't see lit",
-  "USA flag",
   "Lit answers disagree",
   LIT_QC_LIT_FILTER_BLANK,
 ] as const;
 
 export const LIT_QC_FLYER_FILTER_OPTIONS = [
   "Got flyer",
-  "Didn't get flyer",
   "Undecided",
+  "Didn't get flyer",
   LIT_QC_FLYER_FILTER_BLANK,
 ] as const;
 
@@ -276,10 +277,13 @@ export function priorDatesFromAssignment(assignmentName: string, referenceYear?:
   return dates;
 }
 
-function rowFromHouseholds(canvasserName: string, households: LitQcHousehold[]): LitQcCanvasserRow {
+function rowFromHouseholds(
+  canvasserName: string,
+  households: LitQcHousehold[],
+  rowId = canvasserIdentityKey(canvasserName) || canvasserName.toLowerCase() || canvasserName
+): LitQcCanvasserRow {
   let sawLit = 0;
   let didntSeeLit = 0;
-  let usaFlag = 0;
   let votersChecked = 0;
   let gotFlyer = 0;
   let didntGetFlyer = 0;
@@ -289,7 +293,6 @@ function rowFromHouseholds(canvasserName: string, households: LitQcHousehold[]):
     if (!household.litDisagreement) {
       if (household.lit === "saw") sawLit += 1;
       else if (household.lit === "didnt") didntSeeLit += 1;
-      else if (household.lit === "usaFlag") usaFlag += 1;
     }
     for (const voter of household.voters) {
       votersChecked += 1;
@@ -300,17 +303,17 @@ function rowFromHouseholds(canvasserName: string, households: LitQcHousehold[]):
   }
 
   return {
+    rowId: rowId || canvasserName,
     canvasserName,
     householdsChecked: households.length,
     votersChecked,
     sawLit,
     didntSeeLit,
-    usaFlag,
-    sawLitRate: rate(sawLit, sawLit + didntSeeLit + usaFlag),
+    sawLitRate: rate(sawLit, sawLit + didntSeeLit),
     gotFlyer,
-    didntGetFlyer,
     flyerUndecided,
-    receivedRate: rate(gotFlyer, gotFlyer + didntGetFlyer),
+    didntGetFlyer,
+    receivedRate: rate(gotFlyer, gotFlyer + flyerUndecided + didntGetFlyer),
     households,
   };
 }
@@ -328,8 +331,8 @@ function tallyMeta(rows: readonly LitQcSourceRow[], canvassers: LitQcCanvasserRo
   const projects = new Set<string>();
   for (const canvasser of canvassers) {
     for (const household of canvasser.households) {
-      // Date picker bounds are the QC walk day, not the original lit-drop day.
-      const day = household.qcDate || household.projectDate;
+      // Date picker bounds are the original lit-drop day (QC day only if unmatched).
+      const day = household.projectDate || household.qcDate;
       if (day) dates.push(day);
       if (household.project) projects.add(household.project);
     }
@@ -367,36 +370,70 @@ function indexPriors(rows: readonly LitQcSourceRow[]): Map<string, PriorHit[]> {
   return byId;
 }
 
+function priorDay(prior: PriorHit): string {
+  return prior.projectDate || laDate(prior.occurredAt);
+}
+
+function pickPreferredPrior(
+  candidates: readonly PriorHit[],
+  qcCanvasserName: string
+): PriorHit | null {
+  if (!candidates.length) return null;
+  const sorted = [...candidates].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt));
+  const qcKey = canvasserIdentityKey(qcCanvasserName);
+  if (!qcKey) return sorted[0] ?? null;
+  const otherPerson = sorted.find((prior) => {
+    const key = canvasserIdentityKey(prior.canvasserName);
+    return Boolean(key) && key !== qcKey;
+  });
+  return otherPerson ?? sorted[0] ?? null;
+}
+
 /**
  * Latest not-home / lit-drop before the QC knock.
- * Falls back to NH on calendar days named in the QC assignment when timestamps
- * are missing or mixed formats made a same-universe prior look "after" the QC.
+ * Prefers a prior on a previous calendar day by someone other than the QC canvasser
+ * (avoids mistaken same-day NH by the same person). Falls back to earlier timestamps,
+ * then to NH on calendar days named in the QC assignment.
  */
 export function latestPrior(
   priors: readonly PriorHit[] | undefined,
   beforeAt: string,
-  assignmentName = ""
+  assignmentName = "",
+  qcCanvasserName = ""
 ): PriorHit | null {
   if (!priors?.length) return null;
-  const earlier = priors.filter((prior) => knockOccurredBefore(prior.occurredAt, beforeAt));
-  if (earlier.length) {
-    return [...earlier].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt))[0] ?? null;
-  }
-
   const qcDay = laDate(beforeAt);
+
+  const earlier = priors.filter((prior) => knockOccurredBefore(prior.occurredAt, beforeAt));
+  const previousDay = earlier.filter((prior) => {
+    const day = priorDay(prior);
+    return Boolean(qcDay && day && day < qcDay);
+  });
+  const previousDayPick = pickPreferredPrior(previousDay, qcCanvasserName);
+  if (previousDayPick) return previousDayPick;
+
+  const earlierPick = pickPreferredPrior(earlier, qcCanvasserName);
+  if (earlierPick) return earlierPick;
+
   const qcYear = qcDay ? Number(qcDay.slice(0, 4)) : undefined;
   const namedDays = priorDatesFromAssignment(assignmentName, qcYear);
   if (!namedDays.length) return null;
   const named = priors.filter((prior) => {
-    const day = prior.projectDate || laDate(prior.occurredAt);
+    const day = priorDay(prior);
     if (!day || !namedDays.includes(day)) return false;
-    // A prior on an earlier named calendar day is always before the QC visit.
+    // Prefer named days that are strictly before the QC calendar day.
     if (qcDay && day < qcDay) return true;
     // Same calendar day still needs a real earlier timestamp.
     return knockOccurredBefore(prior.occurredAt, beforeAt);
   });
-  if (!named.length) return null;
-  return [...named].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt))[0] ?? null;
+  const namedPreviousDay = named.filter((prior) => {
+    const day = priorDay(prior);
+    return Boolean(qcDay && day && day < qcDay);
+  });
+  return (
+    pickPreferredPrior(namedPreviousDay, qcCanvasserName) ??
+    pickPreferredPrior(named, qcCanvasserName)
+  );
 }
 
 function occurredAtMs(value: string): number {
@@ -474,7 +511,7 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
         lit: null,
         litConflict: false,
         flyer: null,
-        prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
+        prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName, qcCanvasser),
       };
       visitsByDay.set(dayKey, visit);
     }
@@ -486,9 +523,13 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
     }
     if (assignmentName && !visit.assignmentName) visit.assignmentName = assignmentName;
     pushFlagTime(visit, occurredAt);
-    if (!visit.prior) {
-      visit.prior = latestPrior(priors.get(primaryId), occurredAt || visit.occurredAt, visit.assignmentName || assignmentName);
-    }
+    // Re-resolve prior after QC name settles so same-person same-day NH is deprioritized.
+    visit.prior = latestPrior(
+      priors.get(primaryId),
+      visit.occurredAt || occurredAt,
+      visit.assignmentName || assignmentName,
+      visit.qcCanvasser
+    );
     if (litQuestion) {
       const lit = classifyLitObservation(row.response);
       // One lit flag per PDI per day — first wins unless a later row disagrees.
@@ -574,6 +615,7 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
         flyer: visit.flyer,
         originalCanvasser: visit.prior?.canvasserName ?? "",
         originalMark: visit.prior ? originalMarkLabel(visit.prior.response) : "",
+        originalAt: visit.prior?.occurredAt ?? "",
         project: visit.prior?.project ?? "",
         projectDate: visit.prior?.projectDate ?? "",
       }))
@@ -617,7 +659,7 @@ export function buildLitQc(rows: readonly LitQcSourceRow[]): LitQcTally {
       const households = [...bucket.households].sort(
         (a, b) => a.qcAt.localeCompare(b.qcAt) || a.project.localeCompare(b.project) || a.key.localeCompare(b.key)
       );
-      return rowFromHouseholds(name, households);
+      return rowFromHouseholds(name, households, key === LIT_QC_UNMATCHED ? LIT_QC_UNMATCHED : key);
     })
     .sort((a, b) => {
       if (a.canvasserName === LIT_QC_UNMATCHED) return 1;
@@ -629,8 +671,8 @@ export function buildLitQc(rows: readonly LitQcSourceRow[]): LitQcTally {
 }
 
 function householdInFilter(household: LitQcHousehold, filter: LitQcFilter): boolean {
-  // Filter by QC project day so picking a day shows original canvassers being QC'd that day.
-  const day = household.qcDate || household.projectDate;
+  // Filter by the day the lit was left (original project day). Unmatched doors fall back to QC day.
+  const day = household.projectDate || household.qcDate;
   const start = filter.startDate?.trim() ?? "";
   const end = filter.endDate?.trim() ?? "";
   if (start && (!day || day < start)) return false;
@@ -642,7 +684,13 @@ function householdInFilter(household: LitQcHousehold, filter: LitQcFilter): bool
 
 export function filterLitQc(tally: LitQcTally, filter: LitQcFilter): LitQcTally {
   const canvassers = tally.canvassers
-    .map((row) => rowFromHouseholds(row.canvasserName, row.households.filter((household) => householdInFilter(household, filter))))
+    .map((row) =>
+      rowFromHouseholds(
+        row.canvasserName,
+        row.households.filter((household) => householdInFilter(household, filter)),
+        row.rowId
+      )
+    )
     .filter((row) => row.householdsChecked > 0);
   return {
     ...tally,
@@ -763,7 +811,8 @@ export function filterLitQcCanvasserRows(
             householdMatchesPdi(household, pdiQuery) &&
             householdMatchesLitObservations(household, litObservations) &&
             householdMatchesFlyerAnswers(household, flyerAnswers)
-        )
+        ),
+        row.rowId
       )
     )
     .filter((row) => row.householdsChecked > 0);
@@ -775,17 +824,17 @@ const SUMMARY_HEADERS = [
   "Voters",
   "Saw lit",
   "Didn't see lit",
-  "USA flag",
   "Saw lit %",
   "Got flyer",
-  "Didn't get flyer",
   "Undecided",
+  "Didn't get flyer",
   "Received %",
 ] as const;
 
 export type LitQcDetailColumnId =
   | "canvasserName"
   | "originalMark"
+  | "originalTime"
   | "litObservation"
   | "qcCanvasser"
   | "qcTime"
@@ -807,6 +856,7 @@ export type LitQcDetailColumnDef = {
 export const LIT_QC_DETAIL_COLUMNS: readonly LitQcDetailColumnDef[] = [
   { id: "canvasserName", label: "Original canvasser", header: "Original canvasser" },
   { id: "originalMark", label: "Original mark", header: "Original mark" },
+  { id: "originalTime", label: "Original time", header: "Original time" },
   { id: "litObservation", label: "Lit observation", header: "Lit observation" },
   { id: "qcCanvasser", label: "QC canvasser", header: "QC canvasser" },
   { id: "qcTime", label: "QC time", header: "QC time" },
@@ -824,12 +874,13 @@ export const ALL_LIT_QC_DETAIL_COLUMN_IDS: readonly LitQcDetailColumnId[] = LIT_
   (column) => column.id
 );
 
-export const LIT_QC_DETAIL_COLS_STORAGE_KEY = "campaign-dashboard:lit-qc-detail-cols:v2";
+export const LIT_QC_DETAIL_COLS_STORAGE_KEY = "campaign-dashboard:lit-qc-detail-cols:v3";
 
 /** Default: hide the per-voter prior columns unless the door priors disagree. */
 export const DEFAULT_LIT_QC_DETAIL_COLUMN_IDS: readonly LitQcDetailColumnId[] = [
   "canvasserName",
   "originalMark",
+  "originalTime",
   "litObservation",
   "qcCanvasser",
   "qcTime",
@@ -843,6 +894,7 @@ export const DEFAULT_LIT_QC_DETAIL_COLUMN_IDS: readonly LitQcDetailColumnId[] = 
 export type LitQcDetailRow = {
   canvasserName: string;
   originalMark: string;
+  originalTime: string;
   litObservation: string;
   qcCanvasser: string;
   qcTime: string;
@@ -922,6 +974,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
         details.push({
           canvasserName: row.canvasserName,
           originalMark: "",
+          originalTime: "",
           litObservation: lit,
           qcCanvasser: household.qcCanvasser,
           qcTime: household.qcAt,
@@ -942,6 +995,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
         details.push({
           canvasserName: row.canvasserName,
           originalMark: voter.originalMark,
+          originalTime: voter.originalAt,
           litObservation: lit,
           qcCanvasser: household.qcCanvasser,
           qcTime: household.qcAt,
@@ -973,6 +1027,8 @@ export function litQcDetailCellValue(detail: LitQcDetailRow, id: LitQcDetailColu
       return detail.canvasserName;
     case "originalMark":
       return detail.originalMark;
+    case "originalTime":
+      return detail.originalTime;
     case "litObservation":
       return detail.litObservation;
     case "qcCanvasser":
@@ -1011,13 +1067,20 @@ function summaryCells(row: LitQcCanvasserRow): string[] {
     String(row.votersChecked),
     String(row.sawLit),
     String(row.didntSeeLit),
-    String(row.usaFlag),
     formatOverviewPercent(row.sawLitRate),
     String(row.gotFlyer),
-    String(row.didntGetFlyer),
     String(row.flyerUndecided),
+    String(row.didntGetFlyer),
     formatOverviewPercent(row.receivedRate),
   ];
+}
+
+export function buildLitQcSummaryTsv(rows: readonly LitQcCanvasserRow[]): string {
+  const lines = [SUMMARY_HEADERS.join("\t")];
+  const total = summarizeLitQc(rows);
+  if (total) lines.push(summaryCells(total).join("\t"));
+  for (const row of rows) lines.push(summaryCells(row).join("\t"));
+  return `${lines.join("\n")}\n`;
 }
 
 export function buildLitQcCsv(

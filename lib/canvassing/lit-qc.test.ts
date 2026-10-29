@@ -28,10 +28,10 @@ function row(partial: Partial<LitQcSourceRow> & Pick<LitQcSourceRow, "question" 
   };
 }
 
-test("lit and flyer answers use the doorknocks labels, including USA flag", () => {
+test("lit and flyer answers use the doorknocks labels; USA flag is blank", () => {
   assert.equal(classifyLitObservation("DIDN'T SEE LIT: NO HAY VOLANTE"), "didnt");
   assert.equal(classifyLitObservation("SAW LIT: SÍHAY VOLANTE"), "saw");
-  assert.equal(classifyLitObservation("HH HAS USA FLAG"), "usaFlag");
+  assert.equal(classifyLitObservation("HH HAS USA FLAG"), null);
   assert.equal(classifyFlyerAnswer("GOT A FLYER/RECIBÍ UN FOLLETO"), "got");
   assert.equal(classifyFlyerAnswer("DIDN'T GET FLYER/NO RECIBÍ EL FOLLETO."), "didnt");
   assert.equal(classifyFlyerAnswer("UNDECIDED"), "undecided");
@@ -100,7 +100,10 @@ test("two voters at one timestamp are one household under the canvasser who left
   assert.equal(canvasser.sawLit, 1);
   assert.equal(canvasser.gotFlyer, 1);
   assert.equal(canvasser.didntGetFlyer, 1);
+  assert.equal(canvasser.flyerUndecided, 0);
+  // got ÷ (got + undecided + didn't get)
   assert.equal(canvasser.receivedRate, 0.5);
+  assert.ok(canvasser.rowId);
 });
 
 test("a QC visit with no earlier not-home stays unmatched", () => {
@@ -115,7 +118,7 @@ test("a QC visit with no earlier not-home stays unmatched", () => {
   assert.equal(tally.canvassers[0]?.didntSeeLit, 1);
 });
 
-test("USA flag counts in the saw-lit denominator and a disagreeing door is left out", () => {
+test("USA flag is blank lit; disagreeing door is left out of saw-lit rate", () => {
   const tally = buildLitQc([
     row({
       canvasserName: "Original, Pat",
@@ -176,14 +179,84 @@ test("USA flag counts in the saw-lit denominator and a disagreeing door is left 
   ]);
 
   const canvasser = tally.canvassers[0]!;
-  assert.equal(canvasser.usaFlag, 1);
   assert.equal(canvasser.sawLit, 1);
   assert.equal(canvasser.didntSeeLit, 0);
   assert.equal(canvasser.householdsChecked, 3);
-  assert.equal(canvasser.sawLitRate, 0.5);
+  // USA-flag door has blank lit; only the saw door counts in the rate → 1/1.
+  assert.equal(canvasser.sawLitRate, 1);
+  const blank = canvasser.households.find((household) => household.lit === null && !household.litDisagreement);
+  assert.ok(blank);
   const mixed = canvasser.households.find((household) => household.litDisagreement);
   assert.ok(mixed);
   assert.equal(mixed.voters.length, 2);
+});
+
+test("received % includes undecided in the denominator", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk",
+      occurredAt: "2026-10-25T16:00:00.000Z",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "a",
+    }),
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk",
+      occurredAt: "2026-10-25T16:00:00.000Z",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "b",
+    }),
+    row({
+      question: "DID YOU RECEIVE OUR FLYER YESTERDAY?",
+      response: "GOT A FLYER",
+      occurredAt: "2026-10-27T19:00:00.000Z",
+      primaryId: "a",
+    }),
+    row({
+      question: "DID YOU RECEIVE OUR FLYER YESTERDAY?",
+      response: "UNDECIDED",
+      occurredAt: "2026-10-27T19:05:00.000Z",
+      primaryId: "b",
+    }),
+  ]);
+  assert.equal(tally.canvassers[0]?.gotFlyer, 1);
+  assert.equal(tally.canvassers[0]?.flyerUndecided, 1);
+  assert.equal(tally.canvassers[0]?.receivedRate, 0.5);
+});
+
+test("previous-day NH by a different person beats same-day NH by the QC canvasser", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk A",
+      occurredAt: "2026-10-23T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "p1",
+    }),
+    row({
+      canvasserName: "Quinn, Casey",
+      assignmentName: "Mistaken same-day NH",
+      occurredAt: "2026-10-24T10:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "p1",
+    }),
+    row({
+      canvasserName: "Quinn, Casey",
+      assignmentName: "Nithya NH Lit QC for 10-23-26 - abc",
+      occurredAt: "2026-10-24T14:00:00.000-07:00",
+      question: "Lit Observation",
+      response: "Saw Lit",
+      primaryId: "p1",
+    }),
+  ]);
+  assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalCanvasser, "Original, Pat");
+  assert.equal(tally.canvassers[0]?.households[0]?.projectDate, "2026-10-23");
 });
 
 test("detail rows and copy TSV use the selected columns", () => {
@@ -325,7 +398,7 @@ test("assignment-named prior days recover a not-home on that calendar day", () =
   assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Lit Drop");
 });
 
-test("QC date and original project filters keep the door being QC'd that day", () => {
+test("date range and project filters use the original lit-drop day", () => {
   const tally = buildLitQc([
     row({
       canvasserName: "Original, Pat",
@@ -357,15 +430,19 @@ test("QC date and original project filters keep the door being QC'd that day", (
     }),
   ]);
 
-  // Date range is the QC walk day (10-27), not the original lit-drop day (10-20).
-  const filtered = filterLitQc(tally, { startDate: "2026-10-27", endDate: "2026-10-27", projects: ["Keep"] });
+  // Date range is the original lit-drop day (10-20), not the QC walk day (10-27).
+  const filtered = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20", projects: ["Keep"] });
   assert.equal(filtered.canvassers.length, 1);
   assert.equal(filtered.canvassers[0]!.householdsChecked, 1);
   assert.equal(filtered.canvassers[0]!.households[0]!.project, "Keep");
-  assert.equal(filtered.canvassers[0]!.households[0]!.qcDate, "2026-10-27");
+  assert.equal(filtered.canvassers[0]!.households[0]!.projectDate, "2026-10-20");
+  assert.equal(filtered.canvassers[0]!.households[0]!.voters[0]!.originalAt, "2026-10-20T16:00:00.000Z");
 
-  const byOriginalDropDay = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20" });
-  assert.equal(byOriginalDropDay.canvassers.length, 0);
+  const byQcWalkDay = filterLitQc(tally, { startDate: "2026-10-27", endDate: "2026-10-27" });
+  assert.equal(byQcWalkDay.canvassers.length, 0);
+
+  const details = flattenLitQcDetails(filtered.canvassers);
+  assert.equal(details[0]!.originalTime, "2026-10-20T16:00:00.000Z");
 });
 
 test("one lit and one flyer per PDI per QC day merge even a minute apart", () => {
@@ -480,5 +557,5 @@ test("same PDI on two QC days stays two visits; same-time PDIs are one household
   assert.equal(sameTime!.litDisagreement, true);
   const laterDay = canvasser!.households.find((household) => household.voters.length === 1);
   assert.ok(laterDay);
-  assert.equal(laterDay!.lit, "usaFlag");
+  assert.equal(laterDay!.lit, null);
 });

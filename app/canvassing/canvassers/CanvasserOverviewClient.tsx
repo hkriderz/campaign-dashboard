@@ -4,11 +4,16 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Link from "next/link";
 import { DateTime } from "luxon";
 import OverviewDetailColumnControls, {
+  chipClass as toolbarChipClass,
   ColumnChecklist,
 } from "@/components/canvassing/OverviewDetailColumnControls";
+import PercentColorScaleMenu, {
+  usePercentColorScale,
+} from "@/components/canvassing/PercentColorScaleMenu";
 import {
   buildLitQcCsv,
   buildLitQcDetailTsv,
+  buildLitQcSummaryTsv,
   defaultVisibleLitQcDetailColumnIds,
   filterLitQcCanvasserRows,
   flattenLitQcDetails,
@@ -32,19 +37,20 @@ import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
 import {
   buildCanvasserOverviewCsv,
+  buildCanvasserOverviewSummaryTsv,
   canvasserOverviewExportFilename,
   canvasserProjectOptions,
   canvasserQcPhonebankOptions,
   filterCanvasserOverviewByProjects,
   filterCanvasserOverviewByQcPhonebanks,
   formatOverviewPercent,
-  overviewPercentBandClass,
   summarizeCanvasserOverview,
   type CanvasserFamilyBlock,
   type CanvasserOverviewDetail,
   type CanvasserOverviewPayload,
   type CanvasserOverviewRow,
 } from "@/lib/qc-recontact/canvasser-overview";
+import { percentColorScaleClass } from "@/lib/qc-recontact/percent-color-scale";
 import { recontactNamesMatch } from "@/lib/qc-recontact/names";
 import {
   filterNamedRows,
@@ -176,7 +182,7 @@ export default function CanvasserOverviewClient() {
   const [payload, setPayload] = useState<CanvasserOverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openName, setOpenName] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [detailColumns, setDetailColumns] = useState<OverviewDetailColumnId[]>(
     defaultVisibleOverviewDetailColumnIds
   );
@@ -186,7 +192,8 @@ export default function CanvasserOverviewClient() {
   const [canvassersSelected, setCanvassersSelected] = useState<string[]>([]);
   const [canvasserMode, setCanvasserMode] = useState<PeopleFilterMode>("include");
   const canvasserGroups = useActorGroups("canvasser");
-  const [copyLabel, setCopyLabel] = useState("Copy table");
+  const [copySummaryLabel, setCopySummaryLabel] = useState("Copy summary");
+  const [copyDetailsLabel, setCopyDetailsLabel] = useState("Copy details");
   const [mode, setMode] = useState<"recall" | "lit">("recall");
   const [litStartDate, setLitStartDate] = useState("");
   const [litEndDate, setLitEndDate] = useState("");
@@ -201,10 +208,12 @@ export default function CanvasserOverviewClient() {
   const [litObservationsSelected, setLitObservationsSelected] = useState<string[]>([]);
   const [litFlyerAnswersSelected, setLitFlyerAnswersSelected] = useState<string[]>([]);
   const [litPdiSearch, setLitPdiSearch] = useState("");
-  const [litCopyLabel, setLitCopyLabel] = useState("Copy table");
+  const [litCopySummaryLabel, setLitCopySummaryLabel] = useState("Copy summary");
+  const [litCopyDetailsLabel, setLitCopyDetailsLabel] = useState("Copy details");
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
     defaultVisibleLitQcDetailColumnIds
   );
+  const percentColorScale = usePercentColorScale();
   const [litFlagsImporting, setLitFlagsImporting] = useState(false);
   const [litFlagsMessage, setLitFlagsMessage] = useState<string | null>(null);
   const litFlagsInputRef = useRef<HTMLInputElement>(null);
@@ -353,7 +362,22 @@ export default function CanvasserOverviewClient() {
     setTagId(id);
     setStartDate("");
     setEndDate("");
-    setOpenName(null);
+    setOpenId(null);
+  }
+
+  async function flashCopyLabel(
+    setLabel: (value: string) => void,
+    idle: string,
+    work: () => Promise<void>
+  ) {
+    try {
+      await work();
+      setLabel("Copied");
+      window.setTimeout(() => setLabel(idle), 1600);
+    } catch {
+      setLabel("Copy failed");
+      window.setTimeout(() => setLabel(idle), 1600);
+    }
   }
 
   function setColumns(next: OverviewDetailColumnId[]) {
@@ -367,18 +391,19 @@ export default function CanvasserOverviewClient() {
     downloadCsvFile(csv, canvasserOverviewExportFilename(payload.tagId, startDate, endDate));
   }
 
-  async function copyTable() {
+  async function copySummary() {
+    if (!visibleCanvassers.length) return;
+    await flashCopyLabel(setCopySummaryLabel, "Copy summary", async () => {
+      await navigator.clipboard.writeText(buildCanvasserOverviewSummaryTsv(visibleCanvassers));
+    });
+  }
+
+  async function copyDetails() {
     if (!visibleCanvassers.length) return;
     const details = visibleCanvassers.flatMap((row) => row.details);
-    const tsv = buildOverviewDetailTsv(details, detailColumns, "canvasser");
-    try {
-      await navigator.clipboard.writeText(tsv);
-      setCopyLabel("Copied");
-      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
-    } catch {
-      setCopyLabel("Copy failed");
-      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
-    }
+    await flashCopyLabel(setCopyDetailsLabel, "Copy details", async () => {
+      await navigator.clipboard.writeText(buildOverviewDetailTsv(details, detailColumns, "canvasser"));
+    });
   }
 
   function setLitColumns(next: LitQcDetailColumnId[]) {
@@ -393,16 +418,18 @@ export default function CanvasserOverviewClient() {
     downloadCsvFile(csv, `lit-qc-${range}.csv`);
   }
 
-  async function copyLitTable() {
+  async function copyLitSummary() {
     if (!visibleLitCanvassers.length) return;
-    try {
+    await flashCopyLabel(setLitCopySummaryLabel, "Copy summary", async () => {
+      await navigator.clipboard.writeText(buildLitQcSummaryTsv(visibleLitCanvassers));
+    });
+  }
+
+  async function copyLitDetails() {
+    if (!visibleLitCanvassers.length) return;
+    await flashCopyLabel(setLitCopyDetailsLabel, "Copy details", async () => {
       await navigator.clipboard.writeText(buildLitQcDetailTsv(visibleLitCanvassers, litDetailColumns));
-      setLitCopyLabel("Copied");
-      window.setTimeout(() => setLitCopyLabel("Copy table"), 1600);
-    } catch {
-      setLitCopyLabel("Copy failed");
-      window.setTimeout(() => setLitCopyLabel("Copy table"), 1600);
-    }
+    });
   }
 
   async function importLitFlags(fileList: FileList | null) {
@@ -472,7 +499,7 @@ export default function CanvasserOverviewClient() {
             aria-pressed={mode === "recall"}
             onClick={() => {
               setMode("recall");
-              setOpenName(null);
+              setOpenId(null);
             }}
           >
             Recall
@@ -483,7 +510,7 @@ export default function CanvasserOverviewClient() {
             aria-pressed={mode === "lit"}
             onClick={() => {
               setMode("lit");
-              setOpenName(null);
+              setOpenId(null);
             }}
           >
             Lit QC
@@ -491,7 +518,7 @@ export default function CanvasserOverviewClient() {
         </div>
         <p className="section-hero__lede">
           {mode === "lit"
-            ? "Later door checks of lit left at not-homes, grouped by the canvasser who left it. Import PDI lit observation flag exports for per-PDI answers. Saw lit % counts USA flag as an answer. Each canvasser expands to households, with the voters at that door listed underneath."
+            ? "Later door checks of lit left at not-homes, grouped by the canvasser who left it. Import PDI lit observation flag exports for per-PDI answers. USA flag is treated as blank lit. Received % includes undecided. Each canvasser expands to households, with the voters at that door listed underneath."
             : "QC calls that reached the voter, grouped by the canvasser who originally ID’d them. Recall contact is Yes ÷ (Yes+Unsure+No) on “Were you contacted?” — calls with no answer (e.g. GOTV scripts) do not dilute the rate. Strong support rates use only the voters that canvasser originally marked strong support."}
         </p>
       </div>
@@ -508,12 +535,12 @@ export default function CanvasserOverviewClient() {
               setStartDate(range.startDate);
               setEndDate(range.endDate);
             }
-            setOpenName(null);
+            setOpenId(null);
           }}
           label={mode === "lit" ? "QC project date" : "QC call date"}
           helpText={
             mode === "lit"
-              ? "Clear to include every lit QC day in the knock index. Dates are the day of the lit QC walk — picking a day shows original canvassers whose prior lit drops were checked that day."
+              ? "Clear to include every lit-drop day in the knock index. Dates are when the lit was left — picking a day shows QC checks of those original drops."
               : "Clear to include every saved QC day. Dates are the QC call date."
           }
           minDate={(mode === "lit" ? litPayload?.minDate : payload?.minDate) || undefined}
@@ -648,15 +675,18 @@ export default function CanvasserOverviewClient() {
           rows={visibleLitCanvassers}
           totals={litTotals}
           voterTotal={litVoterTotal}
-          openName={openName}
-          onToggle={(name) => setOpenName((current) => (current === name ? null : name))}
+          openId={openId}
+          onToggle={(id) => setOpenId((current) => (current === id ? null : id))}
           detailColumns={litDetailColumns}
           onToggleColumn={(id, on) => setLitColumns(toggleLitQcDetailColumn(litDetailColumns, id, on))}
           onDownloadCsv={downloadLitCsv}
-          onCopyTable={() => void copyLitTable()}
-          copyLabel={litCopyLabel}
+          onCopySummary={() => void copyLitSummary()}
+          onCopyDetails={() => void copyLitDetails()}
+          copySummaryLabel={litCopySummaryLabel}
+          copyDetailsLabel={litCopyDetailsLabel}
           onImportFlags={() => litFlagsInputRef.current?.click()}
           flagsImporting={litFlagsImporting}
+          percentBandClass={(rate) => percentColorScaleClass(rate, percentColorScale)}
         />
       ) : error ? (
         <div className="border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
@@ -704,12 +734,15 @@ export default function CanvasserOverviewClient() {
                 />
                 Has Notes
               </label>
+              <PercentColorScaleMenu />
               <OverviewDetailColumnControls
                 visibleIds={detailColumns}
                 onToggle={(id, on) => setColumns(toggleOverviewDetailColumn(detailColumns, id, on))}
                 onDownloadCsv={downloadCsv}
-                onCopyTable={() => void copyTable()}
-                copyLabel={copyLabel}
+                onCopySummary={() => void copySummary()}
+                onCopyDetails={() => void copyDetails()}
+                copySummaryLabel={copySummaryLabel}
+                copyDetailsLabel={copyDetailsLabel}
                 csvDisabled={!visibleCanvassers.length}
               />
             </div>
@@ -766,15 +799,21 @@ export default function CanvasserOverviewClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {totals ? <OverviewTotalRow row={totals} /> : null}
+                  {totals ? (
+                    <OverviewTotalRow
+                      row={totals}
+                      percentBandClass={(rate) => percentColorScaleClass(rate, percentColorScale)}
+                    />
+                  ) : null}
                   {visibleCanvassers.map((row) => (
                     <CanvasserRows
-                      key={row.canvasserName}
+                      key={row.rowId}
                       row={row}
-                      open={openName === row.canvasserName}
-                      onToggle={() => setOpenName((current) => (current === row.canvasserName ? null : row.canvasserName))}
+                      open={openId === row.rowId}
+                      onToggle={() => setOpenId((current) => (current === row.rowId ? null : row.rowId))}
                       detailColumns={detailColumns}
                       summaryColSpan={21}
+                      percentBandClass={(rate) => percentColorScaleClass(rate, percentColorScale)}
                     />
                   ))}
                 </tbody>
@@ -787,23 +826,35 @@ export default function CanvasserOverviewClient() {
   );
 }
 
-function PercentCell({ rate }: { rate: number | null }) {
+function PercentCell({
+  rate,
+  percentBandClass,
+}: {
+  rate: number | null;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
-    <td className={`px-2.5 py-1.5 text-right tabular-nums ${overviewPercentBandClass(rate)}`}>
+    <td className={`px-2.5 py-1.5 text-right tabular-nums ${percentBandClass(rate)}`}>
       {formatOverviewPercent(rate)}
     </td>
   );
 }
 
-function OverviewTotalRow({ row }: { row: CanvasserOverviewRow }) {
+function OverviewTotalRow({
+  row,
+  percentBandClass,
+}: {
+  row: CanvasserOverviewRow;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
     <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
       <td className="px-2.5 py-1.5">Total</td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
-      <PercentCell rate={row.recallContactRate} />
-      <PercentCell rate={row.strongSupportOnPollingRate} />
-      <PercentCell rate={row.strongSupportAfterPersuasionRate} />
+      <PercentCell rate={row.recallContactRate} percentBandClass={percentBandClass} />
+      <PercentCell rate={row.strongSupportOnPollingRate} percentBandClass={percentBandClass} />
+      <PercentCell rate={row.strongSupportAfterPersuasionRate} percentBandClass={percentBandClass} />
       <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
         {formatNumber(row.contactedYes)}
       </td>
@@ -822,12 +873,14 @@ function CanvasserRows({
   onToggle,
   detailColumns,
   summaryColSpan,
+  percentBandClass,
 }: {
   row: CanvasserOverviewRow;
   open: boolean;
   onToggle: () => void;
   detailColumns: readonly OverviewDetailColumnId[];
   summaryColSpan: number;
+  percentBandClass: (rate: number | null) => string;
 }) {
   return (
     <Fragment>
@@ -844,9 +897,9 @@ function CanvasserRows({
         </td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
-        <PercentCell rate={row.recallContactRate} />
-        <PercentCell rate={row.strongSupportOnPollingRate} />
-        <PercentCell rate={row.strongSupportAfterPersuasionRate} />
+        <PercentCell rate={row.recallContactRate} percentBandClass={percentBandClass} />
+        <PercentCell rate={row.strongSupportOnPollingRate} percentBandClass={percentBandClass} />
+        <PercentCell rate={row.strongSupportAfterPersuasionRate} percentBandClass={percentBandClass} />
         <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
           {formatNumber(row.contactedYes)}
         </td>
@@ -867,7 +920,7 @@ function CanvasserRows({
   );
 }
 
-const LIT_SUMMARY_COLUMNS = 11;
+const LIT_SUMMARY_COLUMNS = 10;
 
 function formatQcStamp(iso: string): string {
   const parsed = DateTime.fromISO(iso, { setZone: true });
@@ -957,20 +1010,26 @@ function LitDetailTable({
                 {columnIds.map((id) => {
                   let text = litQcDetailCellValue(detail, id);
                   if (id === "projectDate" || id === "voterProjectDate") text = formatShortUsDate(text) || text;
-                  if (id === "qcTime") text = formatQcStamp(text);
+                  if (id === "qcTime" || id === "originalTime") text = formatQcStamp(text);
                   if (
                     (id === "flyer" ||
                       id === "voterName" ||
                       id === "project" ||
                       id === "litObservation" ||
-                      id === "originalMark") &&
+                      id === "originalMark" ||
+                      id === "originalTime") &&
                     !text
                   ) {
                     text = "—";
                   }
                   const mono = id === "pdiId" ? "font-mono" : "";
                   const nums =
-                    id === "projectDate" || id === "voterProjectDate" || id === "qcTime" ? "tabular-nums" : "";
+                    id === "projectDate" ||
+                    id === "voterProjectDate" ||
+                    id === "qcTime" ||
+                    id === "originalTime"
+                      ? "tabular-nums"
+                      : "";
                   return (
                     <td key={id} className={`px-2.5 py-1.5 ${mono} ${nums}`}>
                       {text}
@@ -994,15 +1053,18 @@ function LitQcSection({
   rows,
   totals,
   voterTotal,
-  openName,
+  openId,
   onToggle,
   detailColumns,
   onToggleColumn,
   onDownloadCsv,
-  onCopyTable,
-  copyLabel,
+  onCopySummary,
+  onCopyDetails,
+  copySummaryLabel,
+  copyDetailsLabel,
   onImportFlags,
   flagsImporting,
+  percentBandClass,
 }: {
   error: string | null;
   loading: boolean;
@@ -1011,15 +1073,18 @@ function LitQcSection({
   rows: readonly LitQcCanvasserRow[];
   totals: LitQcCanvasserRow | null;
   voterTotal: number;
-  openName: string | null;
-  onToggle: (name: string) => void;
+  openId: string | null;
+  onToggle: (id: string) => void;
   detailColumns: readonly LitQcDetailColumnId[];
   onToggleColumn: (id: LitQcDetailColumnId, on: boolean) => void;
   onDownloadCsv: () => void;
-  onCopyTable: () => void;
-  copyLabel: string;
+  onCopySummary: () => void;
+  onCopyDetails: () => void;
+  copySummaryLabel: string;
+  copyDetailsLabel: string;
   onImportFlags: () => void;
   flagsImporting: boolean;
+  percentBandClass: (rate: number | null) => string;
 }) {
   if (error) {
     return (
@@ -1058,17 +1123,21 @@ function LitQcSection({
           <p className="text-xs text-gray-500 dark:text-gray-400">Click each canvasser name to show more details</p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <PercentColorScaleMenu />
           <ColumnChecklist
             columns={LIT_QC_DETAIL_COLUMNS}
             visibleIds={detailColumns}
             onToggle={onToggleColumn}
             menuLabel="Detail table columns"
           />
-          <button type="button" className={chipClass(false)} disabled={!rows.length} onClick={onDownloadCsv}>
+          <button type="button" className={toolbarChipClass(false)} disabled={!rows.length} onClick={onDownloadCsv}>
             Download CSV
           </button>
-          <button type="button" className={chipClass(false)} disabled={!rows.length} onClick={onCopyTable}>
-            {copyLabel}
+          <button type="button" className={toolbarChipClass(false)} disabled={!rows.length} onClick={onCopySummary}>
+            {copySummaryLabel}
+          </button>
+          <button type="button" className={toolbarChipClass(false)} disabled={!rows.length} onClick={onCopyDetails}>
+            {copyDetailsLabel}
           </button>
         </div>
       </div>
@@ -1084,11 +1153,11 @@ function LitQcSection({
                 <th rowSpan={2} className="px-2.5 py-2 text-left align-bottom">Canvasser</th>
                 <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Households</th>
                 <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Voters</th>
-                <th colSpan={4} className="px-2.5 py-2 text-center border-l border-white/20">Lit observation</th>
+                <th colSpan={3} className="px-2.5 py-2 text-center border-l border-white/20">Lit observation</th>
                 <th colSpan={4} className="px-2.5 py-2 text-center border-l border-white/20">Received flyer</th>
               </tr>
               <tr>
-                {["Saw lit", "Didn't see", "USA flag", "Saw lit %"].map((label, index) => (
+                {["Saw lit", "Didn't see", "Saw lit %"].map((label, index) => (
                   <th
                     key={label}
                     className={`px-2.5 py-1.5 text-right font-medium ${index === 0 ? "border-l border-white/20" : ""}`}
@@ -1096,7 +1165,7 @@ function LitQcSection({
                     {label}
                   </th>
                 ))}
-                {["Got flyer", "Didn't get", "Undecided", "Received %"].map((label, index) => (
+                {["Got flyer", "Undecided", "Didn't get", "Received %"].map((label, index) => (
                   <th
                     key={label}
                     className={`px-2.5 py-1.5 text-right font-medium ${index === 0 ? "border-l border-white/20" : ""}`}
@@ -1107,14 +1176,15 @@ function LitQcSection({
               </tr>
             </thead>
             <tbody>
-              {totals ? <LitTotalRow row={totals} /> : null}
+              {totals ? <LitTotalRow row={totals} percentBandClass={percentBandClass} /> : null}
               {rows.map((row) => (
                 <LitCanvasserRows
-                  key={row.canvasserName}
+                  key={row.rowId}
                   row={row}
-                  open={openName === row.canvasserName}
-                  onToggle={() => onToggle(row.canvasserName)}
+                  open={openId === row.rowId}
+                  onToggle={() => onToggle(row.rowId)}
                   detailColumns={detailColumns}
+                  percentBandClass={percentBandClass}
                 />
               ))}
             </tbody>
@@ -1125,7 +1195,13 @@ function LitQcSection({
   );
 }
 
-function LitMetricCells({ row }: { row: LitQcCanvasserRow }) {
+function LitMetricCells({
+  row,
+  percentBandClass,
+}: {
+  row: LitQcCanvasserRow;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
     <>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.householdsChecked)}</td>
@@ -1134,23 +1210,28 @@ function LitMetricCells({ row }: { row: LitQcCanvasserRow }) {
         {formatNumber(row.sawLit)}
       </td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntSeeLit)}</td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.usaFlag)}</td>
-      <PercentCell rate={row.sawLitRate} />
+      <PercentCell rate={row.sawLitRate} percentBandClass={percentBandClass} />
       <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
         {formatNumber(row.gotFlyer)}
       </td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntGetFlyer)}</td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.flyerUndecided)}</td>
-      <PercentCell rate={row.receivedRate} />
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntGetFlyer)}</td>
+      <PercentCell rate={row.receivedRate} percentBandClass={percentBandClass} />
     </>
   );
 }
 
-function LitTotalRow({ row }: { row: LitQcCanvasserRow }) {
+function LitTotalRow({
+  row,
+  percentBandClass,
+}: {
+  row: LitQcCanvasserRow;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
     <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
       <td className="px-2.5 py-1.5">Total</td>
-      <LitMetricCells row={row} />
+      <LitMetricCells row={row} percentBandClass={percentBandClass} />
     </tr>
   );
 }
@@ -1160,11 +1241,13 @@ function LitCanvasserRows({
   open,
   onToggle,
   detailColumns,
+  percentBandClass,
 }: {
   row: LitQcCanvasserRow;
   open: boolean;
   onToggle: () => void;
   detailColumns: readonly LitQcDetailColumnId[];
+  percentBandClass: (rate: number | null) => string;
 }) {
   const details = flattenLitQcDetails([row]);
   return (
@@ -1175,7 +1258,7 @@ function LitCanvasserRows({
             {row.canvasserName}
           </button>
         </td>
-        <LitMetricCells row={row} />
+        <LitMetricCells row={row} percentBandClass={percentBandClass} />
       </tr>
       {open ? (
         <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">

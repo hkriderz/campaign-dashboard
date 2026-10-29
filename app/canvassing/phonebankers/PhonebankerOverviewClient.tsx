@@ -3,10 +3,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
+import PercentColorScaleMenu, {
+  usePercentColorScale,
+} from "@/components/canvassing/PercentColorScaleMenu";
 import CheckboxFilterMenu, { useActorGroups } from "@/components/qc-recontact/CheckboxFilterMenu";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
-import { formatOverviewPercent, overviewPercentBandClass } from "@/lib/qc-recontact/canvasser-overview";
+import { formatOverviewPercent } from "@/lib/qc-recontact/canvasser-overview";
+import { percentColorScaleClass } from "@/lib/qc-recontact/percent-color-scale";
 import {
   buildOverviewDetailTsv,
   defaultVisibleOverviewDetailColumnIds,
@@ -21,6 +25,7 @@ import {
 } from "@/lib/qc-recontact/overview-detail-columns";
 import {
   buildPhonebankerOverviewCsv,
+  buildPhonebankerOverviewSummaryTsv,
   filterPhonebankerOverviewByPhoneBanks,
   phonebankerOverviewExportFilename,
   summarizePhonebankerOverview,
@@ -148,7 +153,7 @@ export default function PhonebankerOverviewClient() {
   const [payload, setPayload] = useState<PhonebankerOverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openName, setOpenName] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
   const [detailColumns, setDetailColumns] = useState<OverviewDetailColumnId[]>(
     defaultVisibleOverviewDetailColumnIds
   );
@@ -157,7 +162,9 @@ export default function PhonebankerOverviewClient() {
   const [phonebankersSelected, setPhonebankersSelected] = useState<string[]>([]);
   const [phonebankerMode, setPhonebankerMode] = useState<PeopleFilterMode>("include");
   const phonebankerGroups = useActorGroups("phonebanker");
-  const [copyLabel, setCopyLabel] = useState("Copy table");
+  const [copySummaryLabel, setCopySummaryLabel] = useState("Copy summary");
+  const [copyDetailsLabel, setCopyDetailsLabel] = useState("Copy details");
+  const percentColorScale = usePercentColorScale();
 
   useEffect(() => {
     setDetailColumns(loadOverviewDetailColumnIds(PHONEBANKER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
@@ -243,7 +250,7 @@ export default function PhonebankerOverviewClient() {
     setTagId(id);
     setStartDate("");
     setEndDate("");
-    setOpenName(null);
+    setOpenId(null);
   }
 
   function setColumns(next: OverviewDetailColumnId[]) {
@@ -257,18 +264,34 @@ export default function PhonebankerOverviewClient() {
     downloadCsvFile(csv, phonebankerOverviewExportFilename(payload.tagId, startDate, endDate));
   }
 
-  async function copyTable() {
+  async function flashCopyLabel(
+    setLabel: (value: string) => void,
+    idle: string,
+    work: () => Promise<void>
+  ) {
+    try {
+      await work();
+      setLabel("Copied");
+      window.setTimeout(() => setLabel(idle), 1600);
+    } catch {
+      setLabel("Copy failed");
+      window.setTimeout(() => setLabel(idle), 1600);
+    }
+  }
+
+  async function copySummary() {
+    if (!visiblePhonebankers.length) return;
+    await flashCopyLabel(setCopySummaryLabel, "Copy summary", async () => {
+      await navigator.clipboard.writeText(buildPhonebankerOverviewSummaryTsv(visiblePhonebankers));
+    });
+  }
+
+  async function copyDetails() {
     if (!visiblePhonebankers.length) return;
     const details = visiblePhonebankers.flatMap((row) => row.details);
-    const tsv = buildOverviewDetailTsv(details, detailColumns, "phonebanker");
-    try {
-      await navigator.clipboard.writeText(tsv);
-      setCopyLabel("Copied");
-      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
-    } catch {
-      setCopyLabel("Copy failed");
-      window.setTimeout(() => setCopyLabel("Copy table"), 1600);
-    }
+    await flashCopyLabel(setCopyDetailsLabel, "Copy details", async () => {
+      await navigator.clipboard.writeText(buildOverviewDetailTsv(details, detailColumns, "phonebanker"));
+    });
   }
 
   const selected = Boolean(tagId);
@@ -385,12 +408,15 @@ export default function PhonebankerOverviewClient() {
                 />
                 Has Notes
               </label>
+              <PercentColorScaleMenu />
               <OverviewDetailColumnControls
                 visibleIds={detailColumns}
                 onToggle={(id, on) => setColumns(toggleOverviewDetailColumn(detailColumns, id, on))}
                 onDownloadCsv={downloadCsv}
-                onCopyTable={() => void copyTable()}
-                copyLabel={copyLabel}
+                onCopySummary={() => void copySummary()}
+                onCopyDetails={() => void copyDetails()}
+                copySummaryLabel={copySummaryLabel}
+                copyDetailsLabel={copyDetailsLabel}
                 csvDisabled={!visiblePhonebankers.length}
               />
             </div>
@@ -447,15 +473,21 @@ export default function PhonebankerOverviewClient() {
                   </tr>
                 </thead>
                 <tbody>
-                  {totals ? <OverviewTotalRow row={totals} /> : null}
+                  {totals ? (
+                    <OverviewTotalRow
+                      row={totals}
+                      percentBandClass={(rate) => percentColorScaleClass(rate, percentColorScale)}
+                    />
+                  ) : null}
                   {visiblePhonebankers.map((row) => (
                     <PhonebankerRows
-                      key={row.phonebankerName}
+                      key={row.rowId}
                       row={row}
-                      open={openName === row.phonebankerName}
-                      onToggle={() => setOpenName((current) => (current === row.phonebankerName ? null : row.phonebankerName))}
+                      open={openId === row.rowId}
+                      onToggle={() => setOpenId((current) => (current === row.rowId ? null : row.rowId))}
                       detailColumns={detailColumns}
                       summaryColSpan={21}
+                      percentBandClass={(rate) => percentColorScaleClass(rate, percentColorScale)}
                     />
                   ))}
                 </tbody>
@@ -468,23 +500,35 @@ export default function PhonebankerOverviewClient() {
   );
 }
 
-function PercentCell({ rate }: { rate: number | null }) {
+function PercentCell({
+  rate,
+  percentBandClass,
+}: {
+  rate: number | null;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
-    <td className={`px-2.5 py-1.5 text-right tabular-nums ${overviewPercentBandClass(rate)}`}>
+    <td className={`px-2.5 py-1.5 text-right tabular-nums ${percentBandClass(rate)}`}>
       {formatOverviewPercent(rate)}
     </td>
   );
 }
 
-function OverviewTotalRow({ row }: { row: PhonebankerOverviewRow }) {
+function OverviewTotalRow({
+  row,
+  percentBandClass,
+}: {
+  row: PhonebankerOverviewRow;
+  percentBandClass: (rate: number | null) => string;
+}) {
   return (
     <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
       <td className="px-2.5 py-1.5">Total</td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
       <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
-      <PercentCell rate={row.recallContactRate} />
-      <PercentCell rate={row.strongSupportOnPollingRate} />
-      <PercentCell rate={row.strongSupportAfterPersuasionRate} />
+      <PercentCell rate={row.recallContactRate} percentBandClass={percentBandClass} />
+      <PercentCell rate={row.strongSupportOnPollingRate} percentBandClass={percentBandClass} />
+      <PercentCell rate={row.strongSupportAfterPersuasionRate} percentBandClass={percentBandClass} />
       <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
         {formatNumber(row.contactedYes)}
       </td>
@@ -503,12 +547,14 @@ function PhonebankerRows({
   onToggle,
   detailColumns,
   summaryColSpan,
+  percentBandClass,
 }: {
   row: PhonebankerOverviewRow;
   open: boolean;
   onToggle: () => void;
   detailColumns: readonly OverviewDetailColumnId[];
   summaryColSpan: number;
+  percentBandClass: (rate: number | null) => string;
 }) {
   return (
     <Fragment>
@@ -525,9 +571,9 @@ function PhonebankerRows({
         </td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.surveyed)}</td>
         <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.originallyStrongSupport)}</td>
-        <PercentCell rate={row.recallContactRate} />
-        <PercentCell rate={row.strongSupportOnPollingRate} />
-        <PercentCell rate={row.strongSupportAfterPersuasionRate} />
+        <PercentCell rate={row.recallContactRate} percentBandClass={percentBandClass} />
+        <PercentCell rate={row.strongSupportOnPollingRate} percentBandClass={percentBandClass} />
+        <PercentCell rate={row.strongSupportAfterPersuasionRate} percentBandClass={percentBandClass} />
         <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
           {formatNumber(row.contactedYes)}
         </td>

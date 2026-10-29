@@ -54,9 +54,10 @@ function cell(record: Record<string, string>, headers: Map<string, string>, name
 export function classifyLitFlagCode(code: string): LitObservation | null {
   const value = canonical(code);
   if (!value) return null;
+  // USA Flag is blank for Lit QC (not a saw/didn't answer).
+  if (value === "usa flag" || value === "hh has usa flag" || value === "nhuf") return null;
   if (value === "nhnl" || value === "didnt see lit" || value === "didn t see lit") return "didnt";
   if (value === "nhyl" || value === "saw lit" || value === "not home saw lit") return "saw";
-  if (value === "usa flag" || value === "hh has usa flag" || value === "nhuf") return "usaFlag";
   return null;
 }
 
@@ -81,8 +82,7 @@ function stableLitResponse(lit: LitObservation, description: string): string {
   const trimmed = description.trim();
   if (trimmed && classifyLitObservation(trimmed) === lit) return trimmed;
   if (lit === "saw") return "Saw Lit";
-  if (lit === "didnt") return "Didn't See Lit";
-  return "HH has USA Flag";
+  return "Didn't See Lit";
 }
 
 function stableFlyerResponse(flyer: FlyerAnswer, description: string): string {

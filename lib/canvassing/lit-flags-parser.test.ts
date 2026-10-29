@@ -16,16 +16,16 @@ CA12721125,1,Hari Yirga,Mobile Canvassing,2026-10-24T14:47:00.000,GF,Got a Flyer
 CA999,1,Hari Yirga,Mobile Canvassing,2026-10-24T12:00:00.000,SS,Strong Support,,Support?,Someone Else,Other project,,1,1
 `;
 
-test("classifyLitFlagCode maps NHNL / NHYL / USA Flag", () => {
+test("classifyLitFlagCode maps NHNL / NHYL; USA Flag is blank", () => {
   assert.equal(classifyLitFlagCode("NHNL"), "didnt");
   assert.equal(classifyLitFlagCode("NHYL"), "saw");
-  assert.equal(classifyLitFlagCode("USA Flag"), "usaFlag");
+  assert.equal(classifyLitFlagCode("USA Flag"), null);
 });
 
-test("classifyLitObservation accepts flag descriptions and codes", () => {
+test("classifyLitObservation accepts flag descriptions and codes; USA flag is blank", () => {
   assert.equal(classifyLitObservation("Didn't See Lit"), "didnt");
   assert.equal(classifyLitObservation("Not Home Saw Lit"), "saw");
-  assert.equal(classifyLitObservation("HH has USA Flag"), "usaFlag");
+  assert.equal(classifyLitObservation("HH has USA Flag"), null);
   assert.equal(classifyLitObservation("NHNL"), "didnt");
   assert.equal(classifyLitObservation("NHYL"), "saw");
 });
@@ -42,12 +42,13 @@ test("classifyFlyerFlagAnswer maps flyer codes and descriptions", () => {
   assert.equal(isFlyerReceiptQuestion("Did you receive our flyer yesterday?"), true);
 });
 
-test("parseLitFlagsCsv maps lit and flyer rows and skips other questions", () => {
+test("parseLitFlagsCsv maps lit and flyer rows; USA flag is skipped as unclassified", () => {
   const parsed = parseLitFlagsCsv(SAMPLE, "lit observation qc flags.csv");
-  assert.equal(parsed.litRows, 3);
+  assert.equal(parsed.litRows, 2);
   assert.equal(parsed.flyerRows, 1);
   assert.equal(parsed.skippedOther, 1);
-  assert.equal(parsed.rows.length, 4);
+  assert.equal(parsed.skippedUnclassified, 1);
+  assert.equal(parsed.rows.length, 3);
 
   const byId = new Map(parsed.rows.map((row) => [row.primaryId, row]));
   assert.equal(byId.get("CA53089227")?.canvasserName, "Curtis Forshey");
@@ -57,10 +58,7 @@ test("parseLitFlagsCsv maps lit and flyer rows and skips other questions", () =>
 
   assert.equal(byId.get("CA10834560")?.response, "Not Home Saw Lit");
   assert.equal(classifyLitObservation(byId.get("CA10834560")!.response), "saw");
-
-  assert.equal(byId.get("CA1050358")?.response, "HH has USA Flag");
-  assert.equal(classifyLitObservation(byId.get("CA1050358")!.response), "usaFlag");
-  assert.equal(byId.get("CA1050358")?.sourceFileName, "lit observation qc flags.csv");
+  assert.equal(byId.has("CA1050358"), false);
 
   assert.equal(byId.get("CA12721125")?.question, "Did you receive our flyer yesterday?");
   assert.equal(byId.get("CA12721125")?.response, "Got a Flyer");
