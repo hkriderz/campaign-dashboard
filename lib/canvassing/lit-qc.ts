@@ -17,8 +17,6 @@ const LA_TIME_ZONE = "America/Los_Angeles";
  * Merge those answers onto one visit within this window.
  */
 export const LIT_QC_VISIT_MERGE_MS = 2 * 60 * 1000;
-/** Cluster visits from the same QC canvasser into one household when stamps fall within this window. */
-export const LIT_QC_HOUSEHOLD_GROUP_MS = 60 * 1000;
 
 export type LitObservation = "saw" | "didnt" | "usaFlag";
 export type FlyerAnswer = "got" | "didnt" | "undecided";
@@ -55,10 +53,7 @@ export type LitQcHousehold = {
   project: string;
   projectDate: string;
   voters: LitQcVoter[];
-  /**
-   * True when this door combines multiple voters and/or flag timestamps posted within a minute
-   * (same-time / near-simultaneous flags). UI shows a small grouped indicator.
-   */
+  /** True when multiple voters share this exact QC timestamp (one household). */
   sameDoorGroup: boolean;
 };
 
@@ -400,23 +395,6 @@ function timestampsWithinMergeWindow(a: string, b: string): boolean {
   return timestampsWithinWindow(a, b, LIT_QC_VISIT_MERGE_MS);
 }
 
-function uniqueSortedFlagTimes(times: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const raw of times) {
-    const stamp = raw.trim();
-    if (!stamp || seen.has(stamp)) continue;
-    seen.add(stamp);
-    out.push(stamp);
-  }
-  return out.sort((a, b) => {
-    const aMs = occurredAtMs(a);
-    const bMs = occurredAtMs(b);
-    if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
-    return a.localeCompare(b);
-  });
-}
-
 function pushFlagTime(visit: VoterVisit, occurredAt: string): void {
   const stamp = occurredAt.trim();
   if (!stamp) return;
@@ -544,55 +522,20 @@ function ownerOf(visits: readonly VoterVisit[]): { key: string; name: string; pr
   return best;
 }
 
-function clusterDoorVisits(visits: readonly VoterVisit[]): VoterVisit[][] {
-  const byQc = new Map<string, VoterVisit[]>();
-  for (const visit of visits) {
-    const list = byQc.get(visit.qcKey) ?? [];
-    list.push(visit);
-    byQc.set(visit.qcKey, list);
-  }
-
-  const clusters: VoterVisit[][] = [];
-  for (const group of byQc.values()) {
-    const sorted = [...group].sort((a, b) => {
-      const aMs = occurredAtMs(a.occurredAt);
-      const bMs = occurredAtMs(b.occurredAt);
-      if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return aMs - bMs;
-      return a.occurredAt.localeCompare(b.occurredAt) || a.primaryId.localeCompare(b.primaryId);
-    });
-    let current: VoterVisit[] = [];
-    let currentEndMs = Number.NaN;
-    for (const visit of sorted) {
-      const visitMs = occurredAtMs(visit.occurredAt);
-      const joins =
-        !current.length ||
-        (Number.isFinite(currentEndMs) &&
-          Number.isFinite(visitMs) &&
-          visitMs - currentEndMs <= LIT_QC_HOUSEHOLD_GROUP_MS) ||
-        current.some((member) => timestampsWithinWindow(member.occurredAt, visit.occurredAt, LIT_QC_HOUSEHOLD_GROUP_MS));
-      if (!joins) {
-        clusters.push(current);
-        current = [];
-        currentEndMs = Number.NaN;
-      }
-      current.push(visit);
-      if (Number.isFinite(visitMs)) {
-        currentEndMs = Number.isFinite(currentEndMs) ? Math.max(currentEndMs, visitMs) : visitMs;
-      }
-    }
-    if (current.length) clusters.push(current);
-  }
-  return clusters;
-}
-
 function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey: string; household: LitQcHousehold }> {
-  // Same-PDI flyer/lit within 2 minutes merge in buildVisits. Doors with stamps within 1 minute
-  // (same time or near-simultaneous) cluster here as one household.
+  // Same-PDI flyer/lit within 2 minutes merge in buildVisits onto one occurredAt.
+  // Households are exact same QC canvasser + timestamp only (multi-voter same-second doors).
+  const groups = new Map<string, VoterVisit[]>();
+  for (const visit of visits) {
+    const door = visit.occurredAt ? `${visit.qcKey}\0${visit.occurredAt}` : `${visit.qcKey}\0${visit.primaryId}`;
+    const list = groups.get(door) ?? [];
+    list.push(visit);
+    groups.set(door, list);
+  }
+
   const households = new Map<string, { ownerKey: string; household: LitQcHousehold }>();
-  for (const doorVisits of clusterDoorVisits(visits)) {
+  for (const [key, doorVisits] of groups) {
     const first = doorVisits[0]!;
-    const flagTimes = uniqueSortedFlagTimes(doorVisits.flatMap((visit) => visit.flagTimes));
-    const key = `${first.qcKey}\0${first.occurredAt}\0${doorVisits.map((visit) => visit.primaryId).sort().join(",")}`;
     const owner = ownerOf(doorVisits);
     const lit = householdLit(doorVisits);
     const qcNames = doorVisits.map((visit) => visit.qcCanvasser);
@@ -619,7 +562,7 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
         project: owner.project,
         projectDate: owner.projectDate,
         voters,
-        sameDoorGroup: voters.length > 1 || flagTimes.length > 1,
+        sameDoorGroup: voters.length > 1,
       },
     });
   }
@@ -840,7 +783,9 @@ export type LitQcDetailRow = {
   voterOriginalCanvasser: string;
   voterProject: string;
   voterProjectDate: string;
-  /** Same-time / within-a-minute household cluster (multi-voter or multi-stamp). */
+  /** Household key for bracing multi-voter same-timestamp doors in the detail table. */
+  householdKey: string;
+  /** True when this household has more than one voter at the same QC timestamp. */
   sameDoorGroup: boolean;
 };
 
@@ -917,6 +862,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
           voterOriginalCanvasser: "",
           voterProject: "",
           voterProjectDate: "",
+          householdKey: household.key,
           sameDoorGroup: household.sameDoorGroup,
         });
         continue;
@@ -936,6 +882,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
           voterOriginalCanvasser: voter.originalCanvasser,
           voterProject: voter.project,
           voterProjectDate: voter.projectDate,
+          householdKey: household.key,
           sameDoorGroup: household.sameDoorGroup,
         });
       }

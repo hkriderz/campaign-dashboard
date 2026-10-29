@@ -407,7 +407,8 @@ test("flyer and lit one minute apart with Last, First vs First Last QC names mer
   assert.equal(household.lit, "didnt");
   assert.equal(household.voters[0]?.flyer, "got");
   assert.equal(household.qcCanvasser, "Kenny Castro");
-  assert.equal(household.sameDoorGroup, true);
+  // One voter after flyer/lit merge — brace only appears for multi-voter same-timestamp doors.
+  assert.equal(household.sameDoorGroup, false);
   assert.ok(litQcCanvasserOptions(tally.canvassers).includes("Kenny Castro"));
 
   const byQc = filterLitQcCanvasserRows(tally.canvassers, {

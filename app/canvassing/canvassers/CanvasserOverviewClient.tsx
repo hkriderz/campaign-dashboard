@@ -853,6 +853,45 @@ function formatQcStamp(iso: string): string {
   return parsed.setZone("America/Los_Angeles").toFormat("M/d/yy h:mm a");
 }
 
+function HouseholdBrace({ rows }: { rows: number }) {
+  if (rows < 2) return null;
+  // Tall enough to span the detail rows; table cells don't always stretch SVG height:100%.
+  const heightPx = Math.max(36, rows * 28);
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 14 100"
+      preserveAspectRatio="none"
+      width={12}
+      height={heightPx}
+      className="text-[var(--section-muted)]"
+    >
+      <path
+        d="M12 2 C4 2 4 18 4 28 L4 42 C4 48 2 50 0 50 C2 50 4 52 4 58 L4 72 C4 82 4 98 12 98"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
+  );
+}
+
+function groupLitDetailsByHousehold(details: readonly LitQcDetailRow[]): LitQcDetailRow[][] {
+  const groups: LitQcDetailRow[][] = [];
+  for (const detail of details) {
+    const prev = groups[groups.length - 1];
+    if (prev?.length && prev[0]!.householdKey === detail.householdKey) {
+      prev.push(detail);
+      continue;
+    }
+    groups.push([detail]);
+  }
+  return groups;
+}
+
 function LitDetailTable({
   details,
   columnIds,
@@ -861,10 +900,12 @@ function LitDetailTable({
   columnIds: readonly LitQcDetailColumnId[];
 }) {
   const headers = litQcDetailHeaders(columnIds);
+  const groups = groupLitDetailsByHousehold(details);
   return (
     <table className="border-collapse w-full text-xs min-w-max">
       <thead>
         <tr className="text-left text-gray-500 dark:text-gray-400">
+          <th className="w-3 px-1 py-1.5" aria-label="Household group" />
           {headers.map((header) => (
             <th key={header} className="px-2.5 py-1.5 font-medium">
               {header}
@@ -873,47 +914,51 @@ function LitDetailTable({
         </tr>
       </thead>
       <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-        {details.map((detail, index) => (
-          <tr key={`${detail.pdiId || "hh"}-${detail.qcTime}-${index}`}>
-            {columnIds.map((id) => {
-              let text = litQcDetailCellValue(detail, id);
-              if (id === "projectDate" || id === "voterProjectDate") text = formatShortUsDate(text) || text;
-              if (id === "qcTime") text = formatQcStamp(text);
-              if (
-                (id === "flyer" ||
-                  id === "voterName" ||
-                  id === "project" ||
-                  id === "litObservation" ||
-                  id === "originalMark") &&
-                !text
-              ) {
-                text = "—";
-              }
-              const mono = id === "pdiId" ? "font-mono" : "";
-              const nums =
-                id === "projectDate" || id === "voterProjectDate" || id === "qcTime" ? "tabular-nums" : "";
-              return (
-                <td key={id} className={`px-2.5 py-1.5 ${mono} ${nums}`}>
-                  {id === "qcTime" ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span>{text || "—"}</span>
-                      {detail.sameDoorGroup ? (
-                        <span
-                          className="border border-[var(--section-rule)] px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--section-muted)]"
-                          title="Flags posted at the same time or within a minute are grouped as one household"
-                        >
-                          Grouped
-                        </span>
-                      ) : null}
-                    </span>
-                  ) : (
-                    text
-                  )}
-                </td>
-              );
-            })}
-          </tr>
-        ))}
+        {groups.map((group) =>
+          group.map((detail, index) => {
+            const showBrace = group.length > 1 && detail.sameDoorGroup;
+            return (
+              <tr key={`${detail.householdKey}-${detail.pdiId || "hh"}-${index}`}>
+                {index === 0 ? (
+                  <td
+                    rowSpan={group.length}
+                    className="w-3 px-0.5 py-1 align-middle"
+                    title={showBrace ? "Voters flagged at the same QC timestamp" : undefined}
+                  >
+                    {showBrace ? (
+                      <div className="flex items-center justify-center">
+                        <HouseholdBrace rows={group.length} />
+                      </div>
+                    ) : null}
+                  </td>
+                ) : null}
+                {columnIds.map((id) => {
+                  let text = litQcDetailCellValue(detail, id);
+                  if (id === "projectDate" || id === "voterProjectDate") text = formatShortUsDate(text) || text;
+                  if (id === "qcTime") text = formatQcStamp(text);
+                  if (
+                    (id === "flyer" ||
+                      id === "voterName" ||
+                      id === "project" ||
+                      id === "litObservation" ||
+                      id === "originalMark") &&
+                    !text
+                  ) {
+                    text = "—";
+                  }
+                  const mono = id === "pdiId" ? "font-mono" : "";
+                  const nums =
+                    id === "projectDate" || id === "voterProjectDate" || id === "qcTime" ? "tabular-nums" : "";
+                  return (
+                    <td key={id} className={`px-2.5 py-1.5 ${mono} ${nums}`}>
+                      {text}
+                    </td>
+                  );
+                })}
+              </tr>
+            );
+          })
+        )}
       </tbody>
     </table>
   );
