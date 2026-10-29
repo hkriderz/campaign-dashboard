@@ -6,6 +6,10 @@ RUN npm ci
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
+# ca-certificates: any remaining HTTPS fetches during build (fonts are self-hosted).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1

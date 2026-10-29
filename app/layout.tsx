@@ -3,7 +3,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuthUserFromCookies } from "@/lib/auth/current";
 import { isPublicAuthPath, safeNextPath } from "@/lib/auth/public-paths";
-import { IBM_Plex_Sans, Newsreader } from "next/font/google";
+import localFont from "next/font/local";
 import {
   DEFAULT_THEME,
   THEME_INIT_SCRIPT,
@@ -13,16 +13,22 @@ import {
 import BusyIndicator from "@/components/shared/BusyIndicator";
 import "./globals.css";
 
-const plexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+/** Self-hosted so Docker/Dokploy builds never call fonts.google.com. */
+const plexSans = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-sans-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/ibm-plex-sans-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
   variable: "--font-sans-plex",
   display: "swap",
 });
 
-const newsreader = Newsreader({
-  subsets: ["latin"],
-  weight: ["400", "600"],
+const newsreader = localFont({
+  src: [
+    { path: "./fonts/newsreader-latin-400-normal.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/newsreader-latin-600-normal.woff2", weight: "600", style: "normal" },
+  ],
   variable: "--font-display",
   display: "swap",
 });
