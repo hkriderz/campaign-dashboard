@@ -239,6 +239,29 @@ test("flyer-only QC visits leave lit observation blank instead of No lit observa
   assert.equal(detail.flyer, "Got flyer");
 });
 
+test("gated counts as an earlier lit-drop prior, not only not home", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk",
+      occurredAt: "2026-10-25T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Gated/ no flyer at door/ No dejó volante",
+      primaryId: "CA-GATE",
+    }),
+    row({
+      canvasserName: "Quinn, Casey",
+      assignmentName: "Lit QC for 10-25-26",
+      occurredAt: "2026-10-26T12:00:00.000-07:00",
+      question: "Did you receive our flyer yesterday?/¿Recibió nuestro folleto ayer?",
+      response: "Didn't get Flyer",
+      primaryId: "CA-GATE",
+    }),
+  ]);
+  assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Gated");
+});
+
 test("mixed Z and offset timestamps still match an earlier not-home", () => {
   // 11:00 LA prior stored as Z, noon LA QC stored with offset — string compare says prior is later.
   assert.equal(knockOccurredBefore("2026-10-26T18:00:00.000Z", "2026-10-26T12:00:00.000-07:00"), true);

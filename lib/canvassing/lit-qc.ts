@@ -7,7 +7,7 @@ import { escapeCsvCell } from "../pivot-csv-export";
 import { formatOverviewPercent } from "../qc-recontact/canvasser-overview";
 import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 import { canvasserIdentityKey, preferredCanvasserName } from "./display-names";
-import { canonical, shortDispositionLabel } from "./doorknocks-results/helpers";
+import { canonical, isGatedNonContactLabel, shortDispositionLabel } from "./doorknocks-results/helpers";
 import { isKnockNonContactQuestion } from "./knock-dispositions";
 
 export const LIT_QC_UNMATCHED = "Unmatched";
@@ -166,11 +166,12 @@ export function laDate(occurredAt: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
 }
 
-/** Prior lit-drop / not-home marks that Lit QC should credit to the original canvasser. */
+/** Prior lit-drop marks that Lit QC should credit to the original canvasser. */
 export function isLitDropPriorResponse(response: string): boolean {
   const value = canonical(response);
   if (!value) return false;
   if (value.includes("not home") || /(^|\s)nh(\s|$)/.test(value)) return true;
+  if (isGatedNonContactLabel(response)) return true;
   if (value.includes("left flyer")) return true;
   if (value.includes("lit drop")) return true;
   if (value.includes("dejo volante") && !value.includes("no dejo") && !value.includes("no flyer")) return true;
