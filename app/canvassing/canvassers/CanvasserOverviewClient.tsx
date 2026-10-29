@@ -16,6 +16,8 @@ import {
   litQcCanvasserOptions,
   litQcDetailCellValue,
   litQcDetailHeaders,
+  litQcFlyerAnswerOptions,
+  litQcLitObservationOptions,
   loadLitQcDetailColumnIds,
   saveLitQcDetailColumnIds,
   summarizeLitQc,
@@ -196,6 +198,8 @@ export default function CanvasserOverviewClient() {
   const [litCanvasserMode, setLitCanvasserMode] = useState<PeopleFilterMode>("include");
   const [litQcCanvassersSelected, setLitQcCanvassersSelected] = useState<string[]>([]);
   const [litQcCanvasserMode, setLitQcCanvasserMode] = useState<PeopleFilterMode>("include");
+  const [litObservationsSelected, setLitObservationsSelected] = useState<string[]>([]);
+  const [litFlyerAnswersSelected, setLitFlyerAnswersSelected] = useState<string[]>([]);
   const [litPdiSearch, setLitPdiSearch] = useState("");
   const [litCopyLabel, setLitCopyLabel] = useState("Copy table");
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
@@ -311,6 +315,8 @@ export default function CanvasserOverviewClient() {
   const litRows = litPayload?.canvassers ?? [];
   const litCanvasserOptions = useMemo(() => litRows.map((row) => row.canvasserName), [litRows]);
   const litQcCanvasserFilterOptions = useMemo(() => litQcCanvasserOptions(litRows), [litRows]);
+  const litObservationFilterOptions = useMemo(() => litQcLitObservationOptions(litRows), [litRows]);
+  const litFlyerFilterOptions = useMemo(() => litQcFlyerAnswerOptions(litRows), [litRows]);
   const visibleLitCanvassers = useMemo(() => {
     const byOriginal = filterNamedRows(
       litRows,
@@ -323,6 +329,8 @@ export default function CanvasserOverviewClient() {
       qcCanvassers: litQcCanvassersSelected,
       qcCanvasserMode: litQcCanvasserMode,
       pdiQuery: litPdiSearch,
+      litObservations: litObservationsSelected,
+      flyerAnswers: litFlyerAnswersSelected,
       namesMatch: recontactNamesMatch,
     });
   }, [
@@ -332,6 +340,8 @@ export default function CanvasserOverviewClient() {
     litQcCanvassersSelected,
     litQcCanvasserMode,
     litPdiSearch,
+    litObservationsSelected,
+    litFlyerAnswersSelected,
   ]);
   const litTotals = useMemo(() => summarizeLitQc(visibleLitCanvassers), [visibleLitCanvassers]);
   const litVoterTotal = useMemo(
@@ -539,6 +549,18 @@ export default function CanvasserOverviewClient() {
                 onModeChange={setLitQcCanvasserMode}
                 groups={canvasserGroups.groups}
                 onGroupsChange={canvasserGroups.setGroups}
+              />
+              <CheckboxFilterMenu
+                label="Lit observation"
+                options={litObservationFilterOptions}
+                selected={litObservationsSelected}
+                onSelectedChange={setLitObservationsSelected}
+              />
+              <CheckboxFilterMenu
+                label="Flyer"
+                options={litFlyerFilterOptions}
+                selected={litFlyerAnswersSelected}
+                onSelectedChange={setLitFlyerAnswersSelected}
               />
               <label className="inline-flex items-center gap-1.5 text-xs text-[var(--section-muted)]">
                 <span className="whitespace-nowrap">PDI</span>

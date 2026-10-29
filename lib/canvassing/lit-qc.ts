@@ -154,6 +154,32 @@ export function litObservationLabel(lit: LitObservation | null, disagreement: bo
   return "";
 }
 
+export const LIT_QC_LIT_FILTER_BLANK = "No lit observation";
+export const LIT_QC_FLYER_FILTER_BLANK = "No flyer answer";
+
+export const LIT_QC_LIT_FILTER_OPTIONS = [
+  "Saw lit",
+  "Didn't see lit",
+  "USA flag",
+  "Lit answers disagree",
+  LIT_QC_LIT_FILTER_BLANK,
+] as const;
+
+export const LIT_QC_FLYER_FILTER_OPTIONS = [
+  "Got flyer",
+  "Didn't get flyer",
+  "Undecided",
+  LIT_QC_FLYER_FILTER_BLANK,
+] as const;
+
+export function litObservationFilterLabel(lit: LitObservation | null, disagreement: boolean): string {
+  return litObservationLabel(lit, disagreement) || LIT_QC_LIT_FILTER_BLANK;
+}
+
+export function flyerAnswerFilterLabel(flyer: FlyerAnswer | null): string {
+  return flyerAnswerLabel(flyer) || LIT_QC_FLYER_FILTER_BLANK;
+}
+
 export function originalMarkLabel(response: string): string {
   return shortDispositionLabel(response);
 }
@@ -664,6 +690,43 @@ function householdMatchesPdi(household: LitQcHousehold, pdiQuery: string): boole
   });
 }
 
+function householdMatchesLitObservations(household: LitQcHousehold, selected: readonly string[]): boolean {
+  if (!selected.length) return true;
+  return selected.includes(litObservationFilterLabel(household.lit, household.litDisagreement));
+}
+
+function householdMatchesFlyerAnswers(household: LitQcHousehold, selected: readonly string[]): boolean {
+  if (!selected.length) return true;
+  if (!household.voters.length) return selected.includes(LIT_QC_FLYER_FILTER_BLANK);
+  return household.voters.some((voter) => selected.includes(flyerAnswerFilterLabel(voter.flyer)));
+}
+
+export function litQcLitObservationOptions(rows: readonly LitQcCanvasserRow[]): string[] {
+  const present = new Set<string>();
+  for (const row of rows) {
+    for (const household of row.households) {
+      present.add(litObservationFilterLabel(household.lit, household.litDisagreement));
+    }
+  }
+  return LIT_QC_LIT_FILTER_OPTIONS.filter((option) => present.has(option));
+}
+
+export function litQcFlyerAnswerOptions(rows: readonly LitQcCanvasserRow[]): string[] {
+  const present = new Set<string>();
+  for (const row of rows) {
+    for (const household of row.households) {
+      if (!household.voters.length) {
+        present.add(LIT_QC_FLYER_FILTER_BLANK);
+        continue;
+      }
+      for (const voter of household.voters) {
+        present.add(flyerAnswerFilterLabel(voter.flyer));
+      }
+    }
+  }
+  return LIT_QC_FLYER_FILTER_OPTIONS.filter((option) => present.has(option));
+}
+
 /**
  * Client-side Lit QC filters after the date/project API response.
  * QC canvasser matching uses the caller's name matcher (usually recontactNamesMatch).
@@ -674,12 +737,16 @@ export function filterLitQcCanvasserRows(
     qcCanvassers?: readonly string[];
     qcCanvasserMode?: "include" | "exclude";
     pdiQuery?: string;
+    litObservations?: readonly string[];
+    flyerAnswers?: readonly string[];
     namesMatch?: (left: string, right: string) => boolean;
   }
 ): LitQcCanvasserRow[] {
   const selected = (options.qcCanvassers ?? []).map((name) => name.trim()).filter(Boolean);
   const mode = options.qcCanvasserMode ?? "include";
   const pdiQuery = options.pdiQuery?.trim() ?? "";
+  const litObservations = (options.litObservations ?? []).map((value) => value.trim()).filter(Boolean);
+  const flyerAnswers = (options.flyerAnswers ?? []).map((value) => value.trim()).filter(Boolean);
   const namesMatch =
     options.namesMatch ??
     ((left, right) => canvasserIdentityKey(left) === canvasserIdentityKey(right) && Boolean(canvasserIdentityKey(left)));
@@ -691,7 +758,9 @@ export function filterLitQcCanvasserRows(
         row.households.filter(
           (household) =>
             householdMatchesQcCanvassers(household, selected, mode, namesMatch) &&
-            householdMatchesPdi(household, pdiQuery)
+            householdMatchesPdi(household, pdiQuery) &&
+            householdMatchesLitObservations(household, litObservations) &&
+            householdMatchesFlyerAnswers(household, flyerAnswers)
         )
       )
     )

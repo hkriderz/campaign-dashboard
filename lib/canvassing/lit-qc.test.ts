@@ -420,4 +420,12 @@ test("flyer and lit one minute apart with Last, First vs First Last QC names mer
   const byPdi = filterLitQcCanvasserRows(tally.canvassers, { pdiQuery: "12721125" });
   assert.equal(byPdi.length, 1);
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { pdiQuery: "NOPE" }).length, 0);
+
+  assert.equal(
+    filterLitQcCanvasserRows(tally.canvassers, { litObservations: ["Didn't see lit"] }).length,
+    1
+  );
+  assert.equal(filterLitQcCanvasserRows(tally.canvassers, { litObservations: ["Saw lit"] }).length, 0);
+  assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Got flyer"] }).length, 1);
+  assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Didn't get flyer"] }).length, 0);
 });
