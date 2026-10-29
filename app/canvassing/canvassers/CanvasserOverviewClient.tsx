@@ -934,14 +934,17 @@ export default function CanvasserOverviewClient() {
 function PercentCell({
   rate,
   percentBandClass,
+  as = "td",
 }: {
   rate: number | null;
   percentBandClass: (rate: number | null) => string;
+  as?: "td" | "th";
 }) {
+  const Cell = as;
   return (
-    <td className={`px-2.5 py-1.5 text-right tabular-nums ${percentBandClass(rate)}`}>
+    <Cell className={`px-2.5 py-1.5 text-right tabular-nums ${percentBandClass(rate)}`}>
       {formatOverviewPercent(rate)}
-    </td>
+    </Cell>
   );
 }
 
@@ -1257,17 +1260,17 @@ function LitQcSection({
           No lit QC households in this date range.
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="max-h-[min(70vh,56rem)] overflow-auto">
           <table className="border-collapse w-full text-xs min-w-max">
-            <thead className="sticky top-0 z-10 bg-gray-800 text-white">
-              <tr>
+            <thead className="sticky top-0 z-20">
+              <tr className="bg-gray-800 text-white">
                 <th rowSpan={2} className="px-2.5 py-2 text-left align-bottom">Canvasser</th>
                 <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Households</th>
                 <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Voters</th>
                 <th colSpan={3} className="px-2.5 py-2 text-center border-l border-white/20">Lit observation</th>
                 <th colSpan={4} className="px-2.5 py-2 text-center border-l border-white/20">Received flyer</th>
               </tr>
-              <tr>
+              <tr className="bg-gray-800 text-white">
                 {["Saw lit", "Didn't see", "Saw lit %"].map((label, index) => (
                   <th
                     key={label}
@@ -1285,9 +1288,9 @@ function LitQcSection({
                   </th>
                 ))}
               </tr>
+              {totals ? <LitTotalRow row={totals} percentBandClass={percentBandClass} /> : null}
             </thead>
             <tbody>
-              {totals ? <LitTotalRow row={totals} percentBandClass={percentBandClass} /> : null}
               {rows.map((row) => (
                 <LitCanvasserRows
                   key={row.rowId}
@@ -1312,25 +1315,25 @@ function LitQcSection({
 function LitMetricCells({
   row,
   percentBandClass,
+  as = "td",
 }: {
   row: LitQcCanvasserRow;
   percentBandClass: (rate: number | null) => string;
+  as?: "td" | "th";
 }) {
+  const Cell = as;
+  const cellClass = as === "th" ? "px-2.5 py-1.5 text-right font-semibold tabular-nums" : "px-2.5 py-1.5 text-right tabular-nums";
   return (
     <>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.householdsChecked)}</td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.votersChecked)}</td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
-        {formatNumber(row.sawLit)}
-      </td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntSeeLit)}</td>
-      <PercentCell rate={row.sawLitRate} percentBandClass={percentBandClass} />
-      <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
-        {formatNumber(row.gotFlyer)}
-      </td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.flyerUndecided)}</td>
-      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntGetFlyer)}</td>
-      <PercentCell rate={row.receivedRate} percentBandClass={percentBandClass} />
+      <Cell className={cellClass}>{formatNumber(row.householdsChecked)}</Cell>
+      <Cell className={cellClass}>{formatNumber(row.votersChecked)}</Cell>
+      <Cell className={`${cellClass} border-l border-[var(--section-rule)]`}>{formatNumber(row.sawLit)}</Cell>
+      <Cell className={cellClass}>{formatNumber(row.didntSeeLit)}</Cell>
+      <PercentCell rate={row.sawLitRate} percentBandClass={percentBandClass} as={as} />
+      <Cell className={`${cellClass} border-l border-[var(--section-rule)]`}>{formatNumber(row.gotFlyer)}</Cell>
+      <Cell className={cellClass}>{formatNumber(row.flyerUndecided)}</Cell>
+      <Cell className={cellClass}>{formatNumber(row.didntGetFlyer)}</Cell>
+      <PercentCell rate={row.receivedRate} percentBandClass={percentBandClass} as={as} />
     </>
   );
 }
@@ -1343,9 +1346,11 @@ function LitTotalRow({
   percentBandClass: (rate: number | null) => string;
 }) {
   return (
-    <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
-      <td className="px-2.5 py-1.5">Total</td>
-      <LitMetricCells row={row} percentBandClass={percentBandClass} />
+    <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold text-[var(--section-ink)] shadow-[0_1px_0_0_rgba(0,0,0,0.08)] dark:border-gray-200 dark:bg-gray-800 dark:shadow-[0_1px_0_0_rgba(255,255,255,0.08)]">
+      <th scope="row" className="px-2.5 py-1.5 text-left font-semibold">
+        Total
+      </th>
+      <LitMetricCells row={row} percentBandClass={percentBandClass} as="th" />
     </tr>
   );
 }

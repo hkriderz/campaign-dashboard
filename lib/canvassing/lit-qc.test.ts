@@ -15,6 +15,7 @@ import {
   litQcCanvasserOptions,
   litQcSummaryCanvassers,
   priorDatesFromAssignment,
+  summarizeLitQc,
   withoutLitQcHouseholds,
 } from "./lit-qc";
 import type { LitQcSourceRow } from "./lit-qc";
@@ -530,6 +531,14 @@ test("one lit and one flyer per PDI per QC day merge even a minute apart", () =>
   assert.equal(filterLitQcCanvasserRows(summaryOnly, {})[0]?.householdsChecked, 1);
   // Detail filters stay open until households are present (summary → details fetch).
   assert.equal(filterLitQcCanvasserRows(summaryOnly, { pdiQuery: "12721125" }).length, 1);
+
+  const summaryTotal = summarizeLitQc(summaryOnly);
+  assert.ok(summaryTotal);
+  assert.equal(summaryTotal!.householdsChecked, 1);
+  assert.equal(summaryTotal!.votersChecked, 1);
+  assert.equal(summaryTotal!.didntSeeLit, 1);
+  assert.equal(summaryTotal!.gotFlyer, 1);
+  assert.deepEqual(summaryTotal!.households, []);
 });
 
 test("same PDI on two QC days stays two visits; same-time PDIs are one household", () => {

@@ -326,12 +326,34 @@ function rowFromHouseholds(
   };
 }
 
+/**
+ * Aggregate visible canvasser rows. Sums summary counts (works when households
+ * were stripped for a summary-first payload) and keeps concatenated households
+ * when details are present.
+ */
 export function summarizeLitQc(rows: readonly LitQcCanvasserRow[]): LitQcCanvasserRow | null {
   if (!rows.length) return null;
-  return rowFromHouseholds(
-    "Total",
-    rows.flatMap((row) => row.households)
-  );
+  const householdsChecked = rows.reduce((sum, row) => sum + row.householdsChecked, 0);
+  const votersChecked = rows.reduce((sum, row) => sum + row.votersChecked, 0);
+  const sawLit = rows.reduce((sum, row) => sum + row.sawLit, 0);
+  const didntSeeLit = rows.reduce((sum, row) => sum + row.didntSeeLit, 0);
+  const gotFlyer = rows.reduce((sum, row) => sum + row.gotFlyer, 0);
+  const flyerUndecided = rows.reduce((sum, row) => sum + row.flyerUndecided, 0);
+  const didntGetFlyer = rows.reduce((sum, row) => sum + row.didntGetFlyer, 0);
+  return {
+    rowId: "total",
+    canvasserName: "Total",
+    householdsChecked,
+    votersChecked,
+    sawLit,
+    didntSeeLit,
+    sawLitRate: rate(sawLit, sawLit + didntSeeLit),
+    gotFlyer,
+    flyerUndecided,
+    didntGetFlyer,
+    receivedRate: rate(gotFlyer, gotFlyer + flyerUndecided + didntGetFlyer),
+    households: rows.flatMap((row) => row.households),
+  };
 }
 
 function tallyMeta(rows: readonly LitQcSourceRow[], canvassers: LitQcCanvasserRow[]): LitQcTally {
