@@ -368,7 +368,7 @@ test("QC date and original project filters keep the door being QC'd that day", (
   assert.equal(byOriginalDropDay.canvassers.length, 0);
 });
 
-test("flyer and lit one minute apart with Last, First vs First Last QC names merge into one door", () => {
+test("one lit and one flyer per PDI per QC day merge even a minute apart", () => {
   const tally = buildLitQc([
     row({
       canvasserName: "Meza, Max",
@@ -407,7 +407,6 @@ test("flyer and lit one minute apart with Last, First vs First Last QC names mer
   assert.equal(household.lit, "didnt");
   assert.equal(household.voters[0]?.flyer, "got");
   assert.equal(household.qcCanvasser, "Kenny Castro");
-  // One voter after flyer/lit merge — brace only appears for multi-voter same-timestamp doors.
   assert.equal(household.sameDoorGroup, false);
   assert.ok(litQcCanvasserOptions(tally.canvassers).includes("Kenny Castro"));
 
@@ -428,4 +427,58 @@ test("flyer and lit one minute apart with Last, First vs First Last QC names mer
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { litObservations: ["Saw lit"] }).length, 0);
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Got flyer"] }).length, 1);
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Didn't get flyer"] }).length, 0);
+});
+
+test("same PDI on two QC days stays two visits; same-time PDIs are one household", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk",
+      occurredAt: "2026-10-23T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA1",
+    }),
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk",
+      occurredAt: "2026-10-23T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA2",
+    }),
+    row({
+      canvasserName: "QC, One",
+      occurredAt: "2026-10-24T14:00:00.000-07:00",
+      question: "Lit Observation",
+      response: "Saw Lit",
+      primaryId: "CA1",
+    }),
+    row({
+      canvasserName: "QC, One",
+      occurredAt: "2026-10-24T14:00:00.000-07:00",
+      question: "Lit Observation",
+      response: "Didn't See Lit",
+      primaryId: "CA2",
+    }),
+    row({
+      canvasserName: "QC, Two",
+      occurredAt: "2026-10-25T15:00:00.000-07:00",
+      question: "Lit Observation",
+      response: "USA Flag",
+      primaryId: "CA1",
+    }),
+  ]);
+
+  const canvasser = tally.canvassers.find((row) => row.canvasserName === "Original, Pat");
+  assert.ok(canvasser);
+  assert.equal(canvasser!.householdsChecked, 2);
+  assert.equal(canvasser!.votersChecked, 3);
+  const sameTime = canvasser!.households.find((household) => household.sameDoorGroup);
+  assert.ok(sameTime);
+  assert.equal(sameTime!.voters.length, 2);
+  assert.equal(sameTime!.litDisagreement, true);
+  const laterDay = canvasser!.households.find((household) => household.voters.length === 1);
+  assert.ok(laterDay);
+  assert.equal(laterDay!.lit, "usaFlag");
 });

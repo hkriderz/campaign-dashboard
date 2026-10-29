@@ -12,11 +12,6 @@ import { isKnockNonContactQuestion } from "./knock-dispositions";
 
 export const LIT_QC_UNMATCHED = "Unmatched";
 const LA_TIME_ZONE = "America/Los_Angeles";
-/**
- * Flyer + lit flag rows for the same voter/QC canvasser often land ~1 minute apart.
- * Merge those answers onto one visit within this window.
- */
-export const LIT_QC_VISIT_MERGE_MS = 2 * 60 * 1000;
 
 export type LitObservation = "saw" | "didnt" | "usaFlag";
 export type FlyerAnswer = "got" | "didnt" | "undecided";
@@ -409,18 +404,6 @@ function occurredAtMs(value: string): number {
   return Number.isFinite(ms) ? ms : Number.NaN;
 }
 
-function timestampsWithinWindow(a: string, b: string, windowMs: number): boolean {
-  if (a.trim() === b.trim()) return true;
-  const aMs = occurredAtMs(a);
-  const bMs = occurredAtMs(b);
-  if (!Number.isFinite(aMs) || !Number.isFinite(bMs)) return false;
-  return Math.abs(aMs - bMs) <= windowMs;
-}
-
-function timestampsWithinMergeWindow(a: string, b: string): boolean {
-  return timestampsWithinWindow(a, b, LIT_QC_VISIT_MERGE_MS);
-}
-
 function pushFlagTime(visit: VoterVisit, occurredAt: string): void {
   const stamp = occurredAt.trim();
   if (!stamp) return;
@@ -434,21 +417,39 @@ function earlierOccurredAt(a: string, b: string): string {
   return a && b ? (a < b ? a : b) : a || b;
 }
 
-function findMergeableVisit(
-  visits: readonly VoterVisit[],
-  primaryId: string,
-  qcKey: string,
-  occurredAt: string
-): VoterVisit | null {
-  for (const visit of visits) {
-    if (visit.primaryId !== primaryId || visit.qcKey !== qcKey) continue;
-    if (timestampsWithinMergeWindow(visit.occurredAt, occurredAt)) return visit;
+/** Most common exact flag timestamp for a visit; ties break to earliest. Used as the household door time. */
+function preferredDoorTimestamp(flagTimes: readonly string[], fallback: string): string {
+  const counts = new Map<string, number>();
+  for (const raw of flagTimes) {
+    const stamp = raw.trim();
+    if (!stamp) continue;
+    counts.set(stamp, (counts.get(stamp) ?? 0) + 1);
   }
-  return null;
+  if (!counts.size) return fallback.trim();
+  let best = "";
+  let bestCount = -1;
+  for (const [stamp, count] of counts) {
+    if (count > bestCount) {
+      best = stamp;
+      bestCount = count;
+      continue;
+    }
+    if (count === bestCount && earlierOccurredAt(stamp, best) === stamp) best = stamp;
+  }
+  return best || fallback.trim();
 }
 
+function visitDayKey(primaryId: string, occurredAt: string): string {
+  const day = laDate(occurredAt);
+  return `${primaryId}\0${day || occurredAt.trim()}`;
+}
+
+/**
+ * One visit per PDI per QC calendar day: at most one lit answer and one flyer answer.
+ * Households later group visits that share the exact same door timestamp.
+ */
 function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorHit[]>): VoterVisit[] {
-  const visits: VoterVisit[] = [];
+  const visitsByDay = new Map<string, VoterVisit>();
   for (const row of rows) {
     const litQuestion = isLitObservationQuestion(row.question);
     const flyerQuestion = isFlyerReceiptQuestion(row.question);
@@ -459,50 +460,52 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
     const qcCanvasser = row.canvasserName.trim();
     const qcKey = canvasserIdentityKey(qcCanvasser) || qcCanvasser.toLowerCase();
     const assignmentName = row.assignmentName.trim();
-    const visit =
-      findMergeableVisit(visits, primaryId, qcKey, occurredAt) ??
-      (() => {
-        const created: VoterVisit = {
-          primaryId,
-          voterName: "",
-          qcCanvasser,
-          qcKey,
-          assignmentName,
-          occurredAt,
-          flagTimes: occurredAt ? [occurredAt] : [],
-          lit: null,
-          litConflict: false,
-          flyer: null,
-          prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
-        };
-        visits.push(created);
-        return created;
-      })();
+    const dayKey = visitDayKey(primaryId, occurredAt);
+    let visit = visitsByDay.get(dayKey);
+    if (!visit) {
+      visit = {
+        primaryId,
+        voterName: "",
+        qcCanvasser,
+        qcKey,
+        assignmentName,
+        occurredAt,
+        flagTimes: occurredAt ? [occurredAt] : [],
+        lit: null,
+        litConflict: false,
+        flyer: null,
+        prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
+      };
+      visitsByDay.set(dayKey, visit);
+    }
     const voterName = (row.voterName ?? "").trim();
     if (voterName && !visit.voterName) visit.voterName = voterName;
     if (qcCanvasser) {
       visit.qcCanvasser = preferredCanvasserName([visit.qcCanvasser, qcCanvasser]) || visit.qcCanvasser || qcCanvasser;
+      visit.qcKey = canvasserIdentityKey(visit.qcCanvasser) || visit.qcKey || qcKey;
     }
     if (assignmentName && !visit.assignmentName) visit.assignmentName = assignmentName;
     pushFlagTime(visit, occurredAt);
-    // Keep the earlier stamp so flyer/lit rows a minute apart share one door time.
-    if (occurredAt && visit.occurredAt !== occurredAt) {
-      visit.occurredAt = earlierOccurredAt(visit.occurredAt, occurredAt);
-    }
     if (!visit.prior) {
-      visit.prior = latestPrior(priors.get(primaryId), visit.occurredAt, visit.assignmentName || assignmentName);
+      visit.prior = latestPrior(priors.get(primaryId), occurredAt || visit.occurredAt, visit.assignmentName || assignmentName);
     }
     if (litQuestion) {
       const lit = classifyLitObservation(row.response);
+      // One lit flag per PDI per day — first wins unless a later row disagrees.
       if (lit && visit.lit && visit.lit !== lit) visit.litConflict = true;
-      else if (lit) visit.lit = lit;
+      else if (lit && !visit.lit) visit.lit = lit;
     }
     if (flyerQuestion) {
       const flyer = classifyFlyerAnswer(row.response);
-      if (flyer) visit.flyer = flyer;
+      // One flyer flag per PDI per day — keep the first classified answer.
+      if (flyer && !visit.flyer) visit.flyer = flyer;
     }
   }
-  return visits;
+
+  for (const visit of visitsByDay.values()) {
+    visit.occurredAt = preferredDoorTimestamp(visit.flagTimes, visit.occurredAt);
+  }
+  return [...visitsByDay.values()];
 }
 
 function householdLit(visits: readonly VoterVisit[]): { lit: LitObservation | null; litDisagreement: boolean } {
@@ -549,8 +552,7 @@ function ownerOf(visits: readonly VoterVisit[]): { key: string; name: string; pr
 }
 
 function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey: string; household: LitQcHousehold }> {
-  // Same-PDI flyer/lit within 2 minutes merge in buildVisits onto one occurredAt.
-  // Households are exact same QC canvasser + timestamp only (multi-voter same-second doors).
+  // Visits are already one-per-PDI-per-day. Households = multiple PDIs flagged at the exact same time.
   const groups = new Map<string, VoterVisit[]>();
   for (const visit of visits) {
     const door = visit.occurredAt ? `${visit.qcKey}\0${visit.occurredAt}` : `${visit.qcKey}\0${visit.primaryId}`;
