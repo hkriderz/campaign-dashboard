@@ -121,12 +121,40 @@ export function loadKnockIndexRows(): QcCanvassKnockIndexRow[] {
   return loadKnockIndex().rows;
 }
 
+/** mtime+size stamp for derived caches (Lit QC tally, etc.). Empty when the file is missing. */
+export function knockIndexCacheStamp(): string {
+  ensureStoreDir();
+  if (!fs.existsSync(INDEX_PATH)) return "";
+  try {
+    const stat = fs.statSync(INDEX_PATH);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return "";
+  }
+}
+
+type KnockIndexWriteListener = () => void;
+const knockIndexWriteListeners = new Set<KnockIndexWriteListener>();
+
+/** Register a callback when the knock index is rewritten (clears derived caches). */
+export function onKnockIndexWrite(listener: KnockIndexWriteListener): () => void {
+  knockIndexWriteListeners.add(listener);
+  return () => knockIndexWriteListeners.delete(listener);
+}
+
 function writeKnockIndex(index: KnockIndexFile): void {
   clearKnockIndexCache();
   ensureStoreDir();
   const tmpPath = `${INDEX_PATH}.${process.pid}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(index), "utf-8");
   fs.renameSync(tmpPath, INDEX_PATH);
+  for (const listener of knockIndexWriteListeners) {
+    try {
+      listener();
+    } catch {
+      // Derived-cache listeners must not break the write path.
+    }
+  }
 }
 
 export function knockEventToIndexRow(event: CanvassingKnockEvent, reportId: string): QcCanvassKnockIndexRow | null {

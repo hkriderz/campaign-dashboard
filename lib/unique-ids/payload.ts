@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getCoreCampaignTags, resolveSurveyScriptProfile } from "../campaign-tags";
+import { filterKnockIndexRows } from "../canvassing/overview-tally";
 import { loadKnockIndex } from "../canvassing/knock-index-store";
 import {
   loadPhoneUniqueIdEvents,
@@ -14,6 +15,8 @@ import {
   emptyChannelCounts,
   emptyFamilyCounts,
   emptyTally,
+  personDetailFromTally,
+  slimUniqueIdOverviewPayload,
   tallyUniqueIdCounts,
   tallyUniqueIds,
   uniqueIdRowsToCsv,
@@ -23,6 +26,7 @@ import type {
   UniqueIdCandidateSummary,
   UniqueIdContactEvent,
   UniqueIdOverviewPayload,
+  UniqueIdPersonDetail,
 } from "./types";
 
 function candidateOptions(): Array<{ id: string; label: string }> {
@@ -50,6 +54,15 @@ function laterDay(a: string, b: string): string {
   if (!a) return b;
   if (!b) return a;
   return a >= b ? a : b;
+}
+
+function knockRowsForRange(
+  rows: ReturnType<typeof loadKnockIndex>["rows"],
+  startDate: string,
+  endDate: string
+) {
+  if (!startDate.trim() && !endDate.trim()) return rows;
+  return filterKnockIndexRows(rows, { startDate, endDate });
 }
 
 async function loadTagEvents(
@@ -96,6 +109,7 @@ export async function buildUniqueIdOverviewPayload(
 ): Promise<UniqueIdOverviewPayload> {
   const candidates = candidateOptions();
   const knockIndex = loadKnockIndex();
+  const rangedKnockRows = knockRowsForRange(knockIndex.rows, query.startDate, query.endDate);
   const tallyOpts = {
     startDate: query.startDate,
     endDate: query.endDate,
@@ -109,7 +123,7 @@ export async function buildUniqueIdOverviewPayload(
   const selected = query.tagId ? resolveUniqueIdTag(query.tagId) : undefined;
   if (query.tagId && !selected) {
     const empty = emptyTally(tallyOpts);
-    return {
+    return slimUniqueIdOverviewPayload({
       meta: {
         phoneUpdatedAt: "",
         textUpdatedAt: "",
@@ -127,13 +141,17 @@ export async function buildUniqueIdOverviewPayload(
       changes: empty.changes,
       candidateSummaries: [],
       ids: empty.ids,
-    };
+    });
   }
 
   if (selected) {
-    const loaded = await loadTagEvents(selected, { buildIfMissing: true });
+    const knockEvents = collectKnockEvents(rangedKnockRows, {
+      tag: selected,
+      profile: resolveSurveyScriptProfile(selected),
+    });
+    const loaded = await loadTagEvents(selected, { buildIfMissing: true }, knockEvents);
     const tally = tallyUniqueIds(loaded.events, tallyOpts);
-    return {
+    return slimUniqueIdOverviewPayload({
       meta: {
         phoneUpdatedAt: loaded.phoneUpdatedAt,
         textUpdatedAt: loaded.textUpdatedAt,
@@ -152,11 +170,11 @@ export async function buildUniqueIdOverviewPayload(
       changes: tally.changes,
       candidateSummaries: [summaryFromTally(selected, tally)],
       ids: tally.ids,
-    };
+    });
   }
 
   const tags = getCoreCampaignTags();
-  const knocksByTag = collectKnockEventsByTag(knockIndex.rows, tags);
+  const knocksByTag = collectKnockEventsByTag(rangedKnockRows, tags);
   const summaries: UniqueIdCandidateSummary[] = [];
   let phoneUpdatedAt = "";
   let textUpdatedAt = "";
@@ -205,7 +223,7 @@ export async function buildUniqueIdOverviewPayload(
     );
   }
 
-  return {
+  return slimUniqueIdOverviewPayload({
     meta: {
       phoneUpdatedAt,
       textUpdatedAt,
@@ -224,7 +242,33 @@ export async function buildUniqueIdOverviewPayload(
     changes: emptyChangeSummary(),
     candidateSummaries: summaries,
     ids: { total: 0, page: 1, pageSize: query.pageSize || 100, rows: [] },
-  };
+  });
+}
+
+export async function buildUniqueIdPersonDetail(
+  query: UniqueIdOverviewQuery,
+  personId: string
+): Promise<UniqueIdPersonDetail | null> {
+  const id = personId.trim();
+  if (!id) return null;
+  const tag = resolveUniqueIdTag(query.tagId);
+  if (!tag) return null;
+
+  const knockIndex = loadKnockIndex();
+  const rangedKnockRows = knockRowsForRange(knockIndex.rows, query.startDate, query.endDate);
+  const knockEvents = collectKnockEvents(rangedKnockRows, {
+    tag,
+    profile: resolveSurveyScriptProfile(tag),
+  });
+  const loaded = await loadTagEvents(tag, { buildIfMissing: true }, knockEvents);
+  const tally = tallyUniqueIds(loaded.events, {
+    startDate: query.startDate,
+    endDate: query.endDate,
+    q: id,
+    page: 1,
+    pageSize: 1,
+  });
+  return personDetailFromTally(tally, id);
 }
 
 export async function buildUniqueIdOverviewCsv(query: UniqueIdOverviewQuery): Promise<{
@@ -236,7 +280,13 @@ export async function buildUniqueIdOverviewCsv(query: UniqueIdOverviewQuery): Pr
   if (!tag) {
     return { filename: "unique-ids.csv", csv: "", error: "Select a candidate to export unique IDs." };
   }
-  const loaded = await loadTagEvents(tag, { buildIfMissing: true });
+  const knockIndex = loadKnockIndex();
+  const rangedKnockRows = knockRowsForRange(knockIndex.rows, query.startDate, query.endDate);
+  const knockEvents = collectKnockEvents(rangedKnockRows, {
+    tag,
+    profile: resolveSurveyScriptProfile(tag),
+  });
+  const loaded = await loadTagEvents(tag, { buildIfMissing: true }, knockEvents);
   const tally = tallyUniqueIds(loaded.events, {
     startDate: query.startDate,
     endDate: query.endDate,

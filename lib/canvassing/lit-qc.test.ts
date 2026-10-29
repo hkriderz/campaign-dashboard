@@ -8,11 +8,14 @@ import {
   classifyLitObservation,
   filterLitQc,
   filterLitQcCanvasserRows,
+  findLitQcCanvasser,
   flattenLitQcDetails,
   isFlyerReceiptQuestion,
   knockOccurredBefore,
   litQcCanvasserOptions,
+  litQcSummaryCanvassers,
   priorDatesFromAssignment,
+  withoutLitQcHouseholds,
 } from "./lit-qc";
 import type { LitQcSourceRow } from "./lit-qc";
 import { recontactNamesMatch } from "../qc-recontact/names";
@@ -430,7 +433,7 @@ test("date range and project filters use the original lit-drop day", () => {
     }),
   ]);
 
-  // Date range is the original lit-drop day (10-20), not the QC walk day (10-27).
+  // Lit-drop range uses the original day (10-20), not the QC walk day (10-27).
   const filtered = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20", projects: ["Keep"] });
   assert.equal(filtered.canvassers.length, 1);
   assert.equal(filtered.canvassers[0]!.householdsChecked, 1);
@@ -438,8 +441,24 @@ test("date range and project filters use the original lit-drop day", () => {
   assert.equal(filtered.canvassers[0]!.households[0]!.projectDate, "2026-10-20");
   assert.equal(filtered.canvassers[0]!.households[0]!.voters[0]!.originalAt, "2026-10-20T16:00:00.000Z");
 
-  const byQcWalkDay = filterLitQc(tally, { startDate: "2026-10-27", endDate: "2026-10-27" });
-  assert.equal(byQcWalkDay.canvassers.length, 0);
+  const byDropMisreadAsQc = filterLitQc(tally, { startDate: "2026-10-27", endDate: "2026-10-27" });
+  assert.equal(byDropMisreadAsQc.canvassers.length, 0);
+
+  const byQcWalkDay = filterLitQc(tally, { qcStartDate: "2026-10-27", qcEndDate: "2026-10-27" });
+  assert.equal(byQcWalkDay.canvassers.length, 1);
+  assert.equal(byQcWalkDay.canvassers[0]!.households[0]!.project, "Keep");
+  assert.equal(byQcWalkDay.canvassers[0]!.households[0]!.qcDate, "2026-10-27");
+
+  const both = filterLitQc(tally, {
+    startDate: "2026-10-20",
+    endDate: "2026-10-20",
+    qcStartDate: "2026-10-28",
+    qcEndDate: "2026-10-28",
+  });
+  assert.equal(both.canvassers.length, 0);
+
+  assert.equal(tally.minQcDate, "2026-10-27");
+  assert.equal(tally.maxQcDate, "2026-10-28");
 
   const details = flattenLitQcDetails(filtered.canvassers);
   assert.equal(details[0]!.originalTime, "2026-10-20T16:00:00.000Z");
@@ -558,4 +577,36 @@ test("same PDI on two QC days stays two visits; same-time PDIs are one household
   const laterDay = canvasser!.households.find((household) => household.voters.length === 1);
   assert.ok(laterDay);
   assert.equal(laterDay!.lit, null);
+});
+
+test("summary canvassers drop households; findLitQcCanvasser keeps details by rowId", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "NH Walk 10-20-26",
+      occurredAt: "2026-10-20T16:00:00.000Z",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA1",
+    }),
+    row({
+      canvasserName: "QC, One",
+      occurredAt: "2026-10-27T18:00:00.000Z",
+      question: "Lit Observation",
+      response: "Saw Lit",
+      primaryId: "CA1",
+    }),
+  ]);
+  const full = tally.canvassers[0];
+  assert.ok(full);
+  assert.ok(full!.households.length > 0);
+  const summary = litQcSummaryCanvassers(tally.canvassers)[0];
+  assert.ok(summary);
+  assert.equal(summary!.rowId, full!.rowId);
+  assert.equal(summary!.householdsChecked, full!.householdsChecked);
+  assert.deepEqual(summary!.households, []);
+  assert.deepEqual(withoutLitQcHouseholds(full!).households, []);
+  const found = findLitQcCanvasser(tally.canvassers, full!.rowId);
+  assert.equal(found?.households.length, full!.households.length);
+  assert.equal(findLitQcCanvasser(tally.canvassers, "missing"), null);
 });

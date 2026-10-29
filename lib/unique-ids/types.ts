@@ -126,3 +126,11 @@ export type UniqueIdOverviewPayload = {
   candidateSummaries: UniqueIdCandidateSummary[];
   ids: UniqueIdPagedRows;
 };
+
+/** Contact history for one person — fetched on expand, not on the overview list. */
+export type UniqueIdPersonDetail = {
+  personId: string;
+  from: UniqueIdFamily | null;
+  to: UniqueIdFamily;
+  events: UniqueIdContactEvent[];
+};

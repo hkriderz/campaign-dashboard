@@ -7,7 +7,11 @@ import {
   credentialsRequiredResponse,
   withCredentialContext,
 } from "@/lib/credentials";
-import { buildUniqueIdOverviewCsv, buildUniqueIdOverviewPayload } from "@/lib/unique-ids/payload";
+import {
+  buildUniqueIdOverviewCsv,
+  buildUniqueIdOverviewPayload,
+  buildUniqueIdPersonDetail,
+} from "@/lib/unique-ids/payload";
 import { parseUniqueIdOverviewForm, parseUniqueIdOverviewQuery } from "@/lib/unique-ids/query";
 
 export const runtime = "nodejs";
@@ -15,7 +19,19 @@ export const dynamic = "force-dynamic";
 
 export const GET = withCredentialContext(async (req) => {
   try {
-    const query = parseUniqueIdOverviewQuery(new URL(req.url));
+    const url = new URL(req.url);
+    const query = parseUniqueIdOverviewQuery(url);
+    const personId = url.searchParams.get("personId")?.trim() ?? "";
+    if (personId) {
+      const person = await buildUniqueIdPersonDetail(query, personId);
+      if (!person) {
+        return NextResponse.json(
+          { ok: false, error: "Unique ID not found in this filter.", code: 404 },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ ok: true, data: { person } });
+    }
     if (query.format === "csv") {
       const result = await buildUniqueIdOverviewCsv(query);
       if (!result.csv) {

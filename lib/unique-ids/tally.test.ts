@@ -5,7 +5,14 @@ import type { KnockIndexTallyRow } from "../canvassing/overview-tally";
 import type { QcTextContactSummary, RecontactCallSummary } from "../qc-recontact/types";
 import { familyFromKnockOutcome, familyFromResultLabel } from "./classify";
 import { collectKnockEvents, collectPhoneEvents, collectTextEvents } from "./collect";
-import { tallyUniqueIdCounts, tallyUniqueIds, uniqueIdRowsToCsv } from "./tally";
+import {
+  personDetailFromTally,
+  slimChangeSummary,
+  slimUniqueIdRow,
+  tallyUniqueIdCounts,
+  tallyUniqueIds,
+  uniqueIdRowsToCsv,
+} from "./tally";
 import type { UniqueIdContactEvent } from "./types";
 
 const nithyaTag: CampaignTag = {
@@ -407,4 +414,27 @@ test("counts-only tally matches family and change counts", () => {
   assert.equal(counts.changes.changed, full.changes.changed);
   assert.equal(counts.changes.held, full.changes.held);
   assert.deepEqual(counts.changes.people, []);
+});
+
+test("slim payload drops event trees but keeps transition personIds", () => {
+  const tally = tallyUniqueIds([
+    event({ personId: "CA1", family: "undecided", occurredOn: "2026-09-01", channel: "phone" }),
+    event({ personId: "CA1", family: "strongSupport", occurredOn: "2026-09-20", channel: "canvass" }),
+  ]);
+  const slimRow = slimUniqueIdRow(tally.ids.rows[0]!);
+  assert.equal(slimRow.personId, "CA1");
+  assert.equal(slimRow.family, "strongSupport");
+  assert.deepEqual(slimRow.events, []);
+  assert.ok(tally.ids.rows[0]!.events.length > 0);
+
+  const slimChanges = slimChangeSummary(tally.changes);
+  assert.equal(slimChanges.changed, 1);
+  assert.deepEqual(slimChanges.people, []);
+  assert.deepEqual(slimChanges.transitions[0]?.personIds, ["CA1"]);
+
+  const detail = personDetailFromTally(tally, "CA1");
+  assert.equal(detail?.personId, "CA1");
+  assert.equal(detail?.from, "undecided");
+  assert.equal(detail?.to, "strongSupport");
+  assert.equal(detail?.events.length, 2);
 });

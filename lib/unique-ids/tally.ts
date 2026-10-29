@@ -13,7 +13,9 @@ import type {
   UniqueIdContactEvent,
   UniqueIdFamily,
   UniqueIdFamilyCounts,
+  UniqueIdOverviewPayload,
   UniqueIdPagedRows,
+  UniqueIdPersonDetail,
   UniqueIdRow,
   UniqueIdTally,
   UniqueIdTallyOptions,
@@ -25,6 +27,65 @@ const MAX_PAGE_SIZE = 500;
 
 export function emptyChangeSummary(): UniqueIdChangeSummary {
   return { held: 0, changed: 0, transitions: [], people: [] };
+}
+
+/** Drop per-person event trees from list rows; keep summary fields for the table. */
+export function slimUniqueIdRow(row: UniqueIdRow): UniqueIdRow {
+  return row.events.length ? { ...row, events: [] } : row;
+}
+
+/**
+ * Keep transition counts + personIds for expand lists; drop the people event trees
+ * (fetched on demand via person detail).
+ */
+export function slimChangeSummary(changes: UniqueIdChangeSummary): UniqueIdChangeSummary {
+  if (!changes.people.length) return changes;
+  return {
+    held: changes.held,
+    changed: changes.changed,
+    transitions: changes.transitions,
+    people: [],
+  };
+}
+
+export function slimUniqueIdOverviewPayload(payload: UniqueIdOverviewPayload): UniqueIdOverviewPayload {
+  return {
+    ...payload,
+    changes: slimChangeSummary(payload.changes),
+    candidateSummaries: payload.candidateSummaries.map((summary) => ({
+      ...summary,
+      changes: slimChangeSummary(summary.changes),
+    })),
+    ids: {
+      ...payload.ids,
+      rows: payload.ids.rows.map(slimUniqueIdRow),
+    },
+  };
+}
+
+export function personDetailFromTally(
+  tally: UniqueIdTally,
+  personId: string
+): UniqueIdPersonDetail | null {
+  const id = personId.trim();
+  if (!id) return null;
+  const row = tally.matchedRows.find((item) => item.personId === id);
+  if (row) {
+    return {
+      personId: row.personId,
+      from: row.priorFamily,
+      to: row.family,
+      events: row.events,
+    };
+  }
+  const changed = tally.changes.people.find((person) => person.personId === id);
+  if (!changed) return null;
+  return {
+    personId: changed.personId,
+    from: changed.from,
+    to: changed.to,
+    events: changed.events,
+  };
 }
 
 export function emptyFamilyCounts(): UniqueIdFamilyCounts {

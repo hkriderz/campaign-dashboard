@@ -197,6 +197,8 @@ export default function CanvasserOverviewClient() {
   const [mode, setMode] = useState<"recall" | "lit">("recall");
   const [litStartDate, setLitStartDate] = useState("");
   const [litEndDate, setLitEndDate] = useState("");
+  const [litQcStartDate, setLitQcStartDate] = useState("");
+  const [litQcEndDate, setLitQcEndDate] = useState("");
   const [litPayload, setLitPayload] = useState<LitQcTally | null>(null);
   const [litLoading, setLitLoading] = useState(false);
   const [litError, setLitError] = useState<string | null>(null);
@@ -213,6 +215,9 @@ export default function CanvasserOverviewClient() {
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
     defaultVisibleLitQcDetailColumnIds
   );
+  const [litDetailByRowId, setLitDetailByRowId] = useState<Record<string, LitQcCanvasserRow>>({});
+  const [litDetailLoadingId, setLitDetailLoadingId] = useState<string | null>(null);
+  const [litDetailError, setLitDetailError] = useState<string | null>(null);
   const percentColorScale = usePercentColorScale();
   const [litFlagsImporting, setLitFlagsImporting] = useState(false);
   const [litFlagsMessage, setLitFlagsMessage] = useState<string | null>(null);
@@ -257,14 +262,18 @@ export default function CanvasserOverviewClient() {
     const params = new URLSearchParams();
     if (litStartDate) params.set("startDate", litStartDate);
     if (litEndDate) params.set("endDate", litEndDate);
+    if (litQcStartDate) params.set("qcStartDate", litQcStartDate);
+    if (litQcEndDate) params.set("qcEndDate", litQcEndDate);
     for (const project of litProjects) params.append("project", project);
     const text = params.toString();
     return text ? `?${text}` : "";
-  }, [litStartDate, litEndDate, litProjects]);
+  }, [litStartDate, litEndDate, litQcStartDate, litQcEndDate, litProjects]);
 
   const loadLit = useCallback((signal: AbortSignal) => {
     setLitLoading(true);
     setLitError(null);
+    setLitDetailByRowId({});
+    setLitDetailError(null);
     return (async () => {
       try {
         const res = await fetch(`/api/canvassing/canvassers/lit${litQuery}`, { signal });
@@ -282,6 +291,39 @@ export default function CanvasserOverviewClient() {
       }
     })();
   }, [litQuery]);
+
+  const fetchLitCanvassersWithDetails = useCallback(async (): Promise<LitQcCanvasserRow[]> => {
+    const joiner = litQuery ? "&" : "?";
+    const res = await fetch(`/api/canvassing/canvassers/lit${litQuery}${joiner}includeDetails=1`);
+    const body = (await res.json()) as ApiResponse<LitQcTally>;
+    if (!res.ok || !body.ok || !body.data) {
+      throw new Error(body.error || `Request failed (${res.status})`);
+    }
+    return body.data.canvassers;
+  }, [litQuery]);
+
+  const loadLitRowDetails = useCallback(
+    async (rowId: string) => {
+      if (!rowId || litDetailByRowId[rowId]) return;
+      setLitDetailLoadingId(rowId);
+      setLitDetailError(null);
+      try {
+        const params = new URLSearchParams(litQuery.startsWith("?") ? litQuery.slice(1) : litQuery);
+        params.set("rowId", rowId);
+        const res = await fetch(`/api/canvassing/canvassers/lit?${params.toString()}`);
+        const body = (await res.json()) as ApiResponse<{ canvasser: LitQcCanvasserRow }>;
+        if (!res.ok || !body.ok || !body.data?.canvasser) {
+          throw new Error(body.error || `Request failed (${res.status})`);
+        }
+        setLitDetailByRowId((current) => ({ ...current, [rowId]: body.data!.canvasser }));
+      } catch (err) {
+        setLitDetailError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLitDetailLoadingId((current) => (current === rowId ? null : current));
+      }
+    },
+    [litDetailByRowId, litQuery]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -411,11 +453,16 @@ export default function CanvasserOverviewClient() {
     saveLitQcDetailColumnIds(next);
   }
 
-  function downloadLitCsv() {
+  async function downloadLitCsv() {
     if (!visibleLitCanvassers.length) return;
-    const csv = buildLitQcCsv(visibleLitCanvassers, litDetailColumns);
-    const range = [litStartDate, litEndDate].filter(Boolean).join("_") || "all";
-    downloadCsvFile(csv, `lit-qc-${range}.csv`);
+    try {
+      const rows = await fetchLitCanvassersWithDetails();
+      const csv = buildLitQcCsv(rows, litDetailColumns);
+      const range = [litStartDate, litEndDate].filter(Boolean).join("_") || "all";
+      downloadCsvFile(csv, `lit-qc-${range}.csv`);
+    } catch (err) {
+      setLitError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   async function copyLitSummary() {
@@ -428,7 +475,16 @@ export default function CanvasserOverviewClient() {
   async function copyLitDetails() {
     if (!visibleLitCanvassers.length) return;
     await flashCopyLabel(setLitCopyDetailsLabel, "Copy details", async () => {
-      await navigator.clipboard.writeText(buildLitQcDetailTsv(visibleLitCanvassers, litDetailColumns));
+      const rows = await fetchLitCanvassersWithDetails();
+      await navigator.clipboard.writeText(buildLitQcDetailTsv(rows, litDetailColumns));
+    });
+  }
+
+  function toggleLitRow(rowId: string) {
+    setOpenId((current) => {
+      const next = current === rowId ? null : rowId;
+      if (next) void loadLitRowDetails(next);
+      return next;
     });
   }
 
@@ -524,30 +580,56 @@ export default function CanvasserOverviewClient() {
       </div>
 
       <div className="dash-card space-y-3">
-        <DateRangePicker
-          startDate={mode === "lit" ? litStartDate : startDate}
-          endDate={mode === "lit" ? litEndDate : endDate}
-          onChange={(range) => {
-            if (mode === "lit") {
-              setLitStartDate(range.startDate);
-              setLitEndDate(range.endDate);
-            } else {
+        {mode === "lit" ? (
+          <>
+            <DateRangePicker
+              startDate={litStartDate}
+              endDate={litEndDate}
+              onChange={(range) => {
+                setLitStartDate(range.startDate);
+                setLitEndDate(range.endDate);
+                setOpenId(null);
+              }}
+              label="Lit drop date"
+              helpText="When the flyer/lit was left. Clear to include every drop day."
+              minDate={litPayload?.minDate || undefined}
+              maxDate={litPayload?.maxDate || undefined}
+              allowEmpty
+              tone="emerald"
+            />
+            <DateRangePicker
+              startDate={litQcStartDate}
+              endDate={litQcEndDate}
+              onChange={(range) => {
+                setLitQcStartDate(range.startDate);
+                setLitQcEndDate(range.endDate);
+                setOpenId(null);
+              }}
+              label="QC walk date"
+              helpText="When the door was QC’d. Clear to include every QC day."
+              minDate={litPayload?.minQcDate || undefined}
+              maxDate={litPayload?.maxQcDate || undefined}
+              allowEmpty
+              tone="emerald"
+            />
+          </>
+        ) : (
+          <DateRangePicker
+            startDate={startDate}
+            endDate={endDate}
+            onChange={(range) => {
               setStartDate(range.startDate);
               setEndDate(range.endDate);
-            }
-            setOpenId(null);
-          }}
-          label={mode === "lit" ? "QC project date" : "QC call date"}
-          helpText={
-            mode === "lit"
-              ? "Clear to include every lit-drop day in the knock index. Dates are when the lit was left — picking a day shows QC checks of those original drops."
-              : "Clear to include every saved QC day. Dates are the QC call date."
-          }
-          minDate={(mode === "lit" ? litPayload?.minDate : payload?.minDate) || undefined}
-          maxDate={(mode === "lit" ? litPayload?.maxDate : payload?.maxDate) || undefined}
-          allowEmpty
-          tone="emerald"
-        />
+              setOpenId(null);
+            }}
+            label="QC call date"
+            helpText="Clear to include every saved QC day. Dates are the QC call date."
+            minDate={payload?.minDate || undefined}
+            maxDate={payload?.maxDate || undefined}
+            allowEmpty
+            tone="emerald"
+          />
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {mode === "lit" ? (
             <>
@@ -676,10 +758,13 @@ export default function CanvasserOverviewClient() {
           totals={litTotals}
           voterTotal={litVoterTotal}
           openId={openId}
-          onToggle={(id) => setOpenId((current) => (current === id ? null : id))}
+          onToggle={toggleLitRow}
+          detailByRowId={litDetailByRowId}
+          detailLoadingId={litDetailLoadingId}
+          detailError={litDetailError}
           detailColumns={litDetailColumns}
           onToggleColumn={(id, on) => setLitColumns(toggleLitQcDetailColumn(litDetailColumns, id, on))}
-          onDownloadCsv={downloadLitCsv}
+          onDownloadCsv={() => void downloadLitCsv()}
           onCopySummary={() => void copyLitSummary()}
           onCopyDetails={() => void copyLitDetails()}
           copySummaryLabel={litCopySummaryLabel}
@@ -1055,6 +1140,9 @@ function LitQcSection({
   voterTotal,
   openId,
   onToggle,
+  detailByRowId,
+  detailLoadingId,
+  detailError,
   detailColumns,
   onToggleColumn,
   onDownloadCsv,
@@ -1075,6 +1163,9 @@ function LitQcSection({
   voterTotal: number;
   openId: string | null;
   onToggle: (id: string) => void;
+  detailByRowId: Record<string, LitQcCanvasserRow>;
+  detailLoadingId: string | null;
+  detailError: string | null;
   detailColumns: readonly LitQcDetailColumnId[];
   onToggleColumn: (id: LitQcDetailColumnId, on: boolean) => void;
   onDownloadCsv: () => void;
@@ -1183,6 +1274,9 @@ function LitQcSection({
                   row={row}
                   open={openId === row.rowId}
                   onToggle={() => onToggle(row.rowId)}
+                  detailRow={detailByRowId[row.rowId]}
+                  detailLoading={detailLoadingId === row.rowId}
+                  detailError={openId === row.rowId ? detailError : null}
                   detailColumns={detailColumns}
                   percentBandClass={percentBandClass}
                 />
@@ -1240,16 +1334,22 @@ function LitCanvasserRows({
   row,
   open,
   onToggle,
+  detailRow,
+  detailLoading,
+  detailError,
   detailColumns,
   percentBandClass,
 }: {
   row: LitQcCanvasserRow;
   open: boolean;
   onToggle: () => void;
+  detailRow?: LitQcCanvasserRow;
+  detailLoading: boolean;
+  detailError: string | null;
   detailColumns: readonly LitQcDetailColumnId[];
   percentBandClass: (rate: number | null) => string;
 }) {
-  const details = flattenLitQcDetails([row]);
+  const details = detailRow ? flattenLitQcDetails([detailRow]) : [];
   return (
     <Fragment>
       <tr className="odd:bg-white even:bg-gray-50/70 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
@@ -1263,7 +1363,15 @@ function LitCanvasserRows({
       {open ? (
         <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
           <td colSpan={LIT_SUMMARY_COLUMNS} className="px-3 py-3">
-            <LitDetailTable details={details} columnIds={detailColumns} />
+            {detailLoading && !detailRow ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Loading household details…</p>
+            ) : null}
+            {detailError && !detailRow ? (
+              <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+                {detailError}
+              </p>
+            ) : null}
+            {detailRow ? <LitDetailTable details={details} columnIds={detailColumns} /> : null}
           </td>
         </tr>
       ) : null}

@@ -6,9 +6,9 @@ import OutcomeTallyStrip from "@/components/common/OutcomeTallyStrip";
 import { channelDisplayLabel, familyDisplayLabel } from "@/lib/unique-ids/classify";
 import type {
   UniqueIdChannel,
-  UniqueIdContactEvent,
   UniqueIdFamily,
   UniqueIdOverviewPayload,
+  UniqueIdPersonDetail,
   UniqueIdRow,
 } from "@/lib/unique-ids/types";
 
@@ -19,13 +19,6 @@ type ApiResponse<T> = {
 };
 
 const PAGE_SIZE = 100;
-
-type PersonHistory = {
-  personId: string;
-  from: UniqueIdFamily | null;
-  to: UniqueIdFamily;
-  events: UniqueIdContactEvent[];
-};
 
 const FAMILY_FILTERS: Array<{ id: UniqueIdFamily | ""; label: string }> = [
   { id: "", label: "All labels" },
@@ -84,6 +77,9 @@ export default function CanvassingOverviewClient() {
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [openPersonId, setOpenPersonId] = useState<string | null>(null);
+  const [personDetailById, setPersonDetailById] = useState<Record<string, UniqueIdPersonDetail>>({});
+  const [personDetailLoading, setPersonDetailLoading] = useState(false);
+  const [personDetailError, setPersonDetailError] = useState<string | null>(null);
 
   useEffect(() => {
     setPage(1);
@@ -105,6 +101,8 @@ export default function CanvassingOverviewClient() {
   const loadOverview = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setPersonDetailById({});
+    setPersonDetailError(null);
     try {
       const res = await fetch(`/api/canvassing/overview${query}`);
       const body = (await res.json()) as ApiResponse<UniqueIdOverviewPayload>;
@@ -119,9 +117,40 @@ export default function CanvassingOverviewClient() {
     }
   }, [query]);
 
+  const loadPersonDetail = useCallback(
+    async (personId: string) => {
+      if (!personId || !tagId || personDetailById[personId]) return;
+      setPersonDetailLoading(true);
+      setPersonDetailError(null);
+      try {
+        const params = new URLSearchParams();
+        if (startDate) params.set("startDate", startDate);
+        if (endDate) params.set("endDate", endDate);
+        params.set("tagId", tagId);
+        params.set("personId", personId);
+        const res = await fetch(`/api/canvassing/overview?${params.toString()}`);
+        const body = (await res.json()) as ApiResponse<{ person: UniqueIdPersonDetail }>;
+        if (!res.ok || !body.ok || !body.data?.person) {
+          throw new Error(body.error || `Request failed (${res.status})`);
+        }
+        setPersonDetailById((current) => ({ ...current, [personId]: body.data!.person }));
+      } catch (err) {
+        setPersonDetailError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setPersonDetailLoading(false);
+      }
+    },
+    [endDate, personDetailById, startDate, tagId]
+  );
+
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  useEffect(() => {
+    if (!openPersonId) return;
+    void loadPersonDetail(openPersonId);
+  }, [loadPersonDetail, openPersonId]);
 
   async function onUpload(event: FormEvent) {
     event.preventDefault();
@@ -224,10 +253,7 @@ export default function CanvassingOverviewClient() {
 
   const pageCount = payload ? Math.max(1, Math.ceil(payload.ids.total / PAGE_SIZE)) : 1;
   const warnings = [payload?.meta.phoneError, payload?.meta.textError].filter(Boolean);
-  const openPerson: PersonHistory | null =
-    openPersonId && payload
-      ? historyForPerson(payload, openPersonId)
-      : null;
+  const openPerson = openPersonId ? personDetailById[openPersonId] ?? null : null;
 
   return (
     <div className="space-y-5">
@@ -546,8 +572,14 @@ export default function CanvassingOverviewClient() {
         </div>
       ) : null}
 
-      {openPerson ? (
-        <ChangedPersonModal person={openPerson} onClose={() => setOpenPersonId(null)} />
+      {openPersonId ? (
+        <ChangedPersonModal
+          personId={openPersonId}
+          person={openPerson}
+          loading={personDetailLoading && !openPerson}
+          error={personDetailError}
+          onClose={() => setOpenPersonId(null)}
+        />
       ) : null}
     </div>
   );
@@ -610,7 +642,7 @@ function ChangeTable({
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   if (!payload) return null;
-  const { held, changed, transitions, people } = payload.changes;
+  const { held, changed, transitions } = payload.changes;
   return (
     <div className="space-y-2">
       <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -630,9 +662,6 @@ function ChangeTable({
               {transitions.map((row) => {
                 const key = `${row.from}|${row.to}`;
                 const expanded = openKey === key;
-                const ids = people
-                  .filter((person) => person.from === row.from && person.to === row.to)
-                  .map((person) => person.personId);
                 return (
                   <Fragment key={key}>
                     <tr className="border-t border-[var(--section-rule)]">
@@ -653,7 +682,7 @@ function ChangeTable({
                       <tr className="border-t border-[var(--section-rule)] bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
                         <td colSpan={3} className="py-2 pr-3">
                           <ul className="flex flex-wrap gap-1.5">
-                            {ids.map((personId) => (
+                            {row.personIds.map((personId) => (
                               <li key={personId}>
                                 <button
                                   type="button"
@@ -679,16 +708,6 @@ function ChangeTable({
       )}
     </div>
   );
-}
-
-function historyForPerson(payload: UniqueIdOverviewPayload, personId: string): PersonHistory | null {
-  const row = payload.ids.rows.find((item) => item.personId === personId);
-  if (row) {
-    return { personId: row.personId, from: row.priorFamily, to: row.family, events: row.events };
-  }
-  const changed = payload.changes.people.find((person) => person.personId === personId);
-  if (!changed) return null;
-  return { personId: changed.personId, from: changed.from, to: changed.to, events: changed.events };
 }
 
 function IdRow({
@@ -723,10 +742,16 @@ function IdRow({
 }
 
 function ChangedPersonModal({
+  personId,
   person,
+  loading,
+  error,
   onClose,
 }: {
-  person: PersonHistory;
+  personId: string;
+  person: UniqueIdPersonDetail | null;
+  loading: boolean;
+  error: string | null;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -753,20 +778,22 @@ function ChangedPersonModal({
         <div className="flex items-start justify-between gap-3 border-b border-[var(--section-rule)] px-4 py-3">
           <div>
             <h2 id="unique-id-change-title" className="font-mono text-sm font-semibold text-[var(--section-ink)]">
-              {person.personId}
+              {person?.personId ?? personId}
             </h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              {person.from && person.from !== person.to ? (
-                <>
-                  <span className={familyTone(person.from)}>{familyDisplayLabel(person.from)}</span>
-                  {" → "}
+            {person ? (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {person.from && person.from !== person.to ? (
+                  <>
+                    <span className={familyTone(person.from)}>{familyDisplayLabel(person.from)}</span>
+                    {" → "}
+                    <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
+                  </>
+                ) : (
                   <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
-                </>
-              ) : (
-                <span className={familyTone(person.to)}>{familyDisplayLabel(person.to)}</span>
-              )}
-              {` · ${person.events.length} labeled contact${person.events.length === 1 ? "" : "s"} in this date range`}
-            </p>
+                )}
+                {` · ${person.events.length} labeled contact${person.events.length === 1 ? "" : "s"} in this date range`}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -777,31 +804,41 @@ function ChangedPersonModal({
           </button>
         </div>
         <div className="max-h-[65vh] overflow-auto">
-          <table className="border-collapse w-full text-xs">
-            <thead className="sticky top-0 bg-gray-800 text-white">
-              <tr>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Channel</th>
-                <th className="px-3 py-2 text-left">Label</th>
-                <th className="px-3 py-2 text-left">List / assignment</th>
-                <th className="px-3 py-2 text-left">Actor</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {person.events.map((event, index) => (
-                <tr key={`${event.occurredAt}-${event.channel}-${index}`}>
-                  <td className="px-3 py-1.5 tabular-nums">
-                    {event.occurredOn}
-                    {event.occurredAt.includes("T") ? ` ${event.occurredAt.slice(11, 16)}` : ""}
-                  </td>
-                  <td className="px-3 py-1.5">{channelDisplayLabel(event.channel)}</td>
-                  <td className={`px-3 py-1.5 ${familyTone(event.family)}`}>{familyDisplayLabel(event.family)}</td>
-                  <td className="px-3 py-1.5">{event.campaignName}</td>
-                  <td className="px-3 py-1.5">{event.actorName}</td>
+          {loading ? (
+            <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">Loading contact history…</p>
+          ) : null}
+          {error && !person ? (
+            <p className="px-4 py-8 text-sm text-center text-red-600 dark:text-red-400" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {person ? (
+            <table className="border-collapse w-full text-xs">
+              <thead className="sticky top-0 bg-gray-800 text-white">
+                <tr>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Channel</th>
+                  <th className="px-3 py-2 text-left">Label</th>
+                  <th className="px-3 py-2 text-left">List / assignment</th>
+                  <th className="px-3 py-2 text-left">Actor</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {person.events.map((event, index) => (
+                  <tr key={`${event.occurredAt}-${event.channel}-${index}`}>
+                    <td className="px-3 py-1.5 tabular-nums">
+                      {event.occurredOn}
+                      {event.occurredAt.includes("T") ? ` ${event.occurredAt.slice(11, 16)}` : ""}
+                    </td>
+                    <td className="px-3 py-1.5">{channelDisplayLabel(event.channel)}</td>
+                    <td className={`px-3 py-1.5 ${familyTone(event.family)}`}>{familyDisplayLabel(event.family)}</td>
+                    <td className="px-3 py-1.5">{event.campaignName}</td>
+                    <td className="px-3 py-1.5">{event.actorName}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : null}
         </div>
       </div>
     </div>

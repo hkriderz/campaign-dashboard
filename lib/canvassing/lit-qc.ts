@@ -74,15 +74,23 @@ export type LitQcCanvasserRow = {
 
 export type LitQcTally = {
   hasLitQuestions: boolean;
+  /** Bounds for the lit-drop / original canvass day picker. */
   minDate: string;
   maxDate: string;
+  /** Bounds for the QC walk day picker. */
+  minQcDate: string;
+  maxQcDate: string;
   projects: string[];
   canvassers: LitQcCanvasserRow[];
 };
 
 export type LitQcFilter = {
+  /** Inclusive YYYY-MM-DD range on the original lit-drop day (`projectDate`). */
   startDate?: string;
   endDate?: string;
+  /** Inclusive YYYY-MM-DD range on the QC walk day (`qcDate`). */
+  qcStartDate?: string;
+  qcEndDate?: string;
   projects?: readonly string[];
 };
 
@@ -327,21 +335,25 @@ export function summarizeLitQc(rows: readonly LitQcCanvasserRow[]): LitQcCanvass
 }
 
 function tallyMeta(rows: readonly LitQcSourceRow[], canvassers: LitQcCanvasserRow[]): LitQcTally {
-  const dates: string[] = [];
+  const dropDates: string[] = [];
+  const qcDates: string[] = [];
   const projects = new Set<string>();
   for (const canvasser of canvassers) {
     for (const household of canvasser.households) {
-      // Date picker bounds are the original lit-drop day (QC day only if unmatched).
-      const day = household.projectDate || household.qcDate;
-      if (day) dates.push(day);
+      const dropDay = household.projectDate || household.qcDate;
+      if (dropDay) dropDates.push(dropDay);
+      if (household.qcDate) qcDates.push(household.qcDate);
       if (household.project) projects.add(household.project);
     }
   }
-  dates.sort();
+  dropDates.sort();
+  qcDates.sort();
   return {
     hasLitQuestions: rows.some((row) => isLitObservationQuestion(row.question) || isFlyerReceiptQuestion(row.question)),
-    minDate: dates[0] ?? "",
-    maxDate: dates[dates.length - 1] ?? "",
+    minDate: dropDates[0] ?? "",
+    maxDate: dropDates[dropDates.length - 1] ?? "",
+    minQcDate: qcDates[0] ?? "",
+    maxQcDate: qcDates[qcDates.length - 1] ?? "",
     projects: [...projects].sort((a, b) => a.localeCompare(b)),
     canvassers,
   };
@@ -481,11 +493,32 @@ function visitDayKey(primaryId: string, occurredAt: string): string {
   return `${primaryId}\0${day || occurredAt.trim()}`;
 }
 
+function dayInRange(day: string, start: string, end: string): boolean {
+  if (start && (!day || day < start)) return false;
+  if (end && (!day || day > end)) return false;
+  return true;
+}
+
+export type BuildLitQcOptions = {
+  /**
+   * When set, only lit/flyer QC rows on these LA calendar days become visits.
+   * Prior (not-home) rows are still indexed from the full input so matching stays correct.
+   */
+  qcStartDate?: string;
+  qcEndDate?: string;
+};
+
 /**
  * One visit per PDI per QC calendar day: at most one lit answer and one flyer answer.
  * Households later group visits that share the exact same door timestamp.
  */
-function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorHit[]>): VoterVisit[] {
+function buildVisits(
+  rows: readonly LitQcSourceRow[],
+  priors: Map<string, PriorHit[]>,
+  options: BuildLitQcOptions = {}
+): VoterVisit[] {
+  const qcStart = options.qcStartDate?.trim() ?? "";
+  const qcEnd = options.qcEndDate?.trim() ?? "";
   const visitsByDay = new Map<string, VoterVisit>();
   for (const row of rows) {
     const litQuestion = isLitObservationQuestion(row.question);
@@ -494,6 +527,10 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
     const primaryId = normalizeRecontactPersonId(row.primaryId);
     if (!primaryId) continue;
     const occurredAt = row.occurredAt.trim();
+    if (qcStart || qcEnd) {
+      const qcDay = laDate(occurredAt);
+      if (!dayInRange(qcDay, qcStart, qcEnd)) continue;
+    }
     const qcCanvasser = row.canvasserName.trim();
     const qcKey = canvasserIdentityKey(qcCanvasser) || qcCanvasser.toLowerCase();
     const assignmentName = row.assignmentName.trim();
@@ -639,9 +676,9 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
   return households;
 }
 
-export function buildLitQc(rows: readonly LitQcSourceRow[]): LitQcTally {
+export function buildLitQc(rows: readonly LitQcSourceRow[], options: BuildLitQcOptions = {}): LitQcTally {
   const priors = indexPriors(rows);
-  const grouped = buildHouseholds(buildVisits(rows, priors));
+  const grouped = buildHouseholds(buildVisits(rows, priors, options));
   const byCanvasser = new Map<string, { names: string[]; households: LitQcHousehold[] }>();
 
   for (const { ownerKey, household } of grouped.values()) {
@@ -671,12 +708,17 @@ export function buildLitQc(rows: readonly LitQcSourceRow[]): LitQcTally {
 }
 
 function householdInFilter(household: LitQcHousehold, filter: LitQcFilter): boolean {
-  // Filter by the day the lit was left (original project day). Unmatched doors fall back to QC day.
-  const day = household.projectDate || household.qcDate;
-  const start = filter.startDate?.trim() ?? "";
-  const end = filter.endDate?.trim() ?? "";
-  if (start && (!day || day < start)) return false;
-  if (end && (!day || day > end)) return false;
+  // Lit-drop day: when the flyer was left. Unmatched doors fall back to QC day.
+  const dropDay = household.projectDate || household.qcDate;
+  const dropStart = filter.startDate?.trim() ?? "";
+  const dropEnd = filter.endDate?.trim() ?? "";
+  if (!dayInRange(dropDay, dropStart, dropEnd)) return false;
+
+  // QC walk day: when the door was checked.
+  const qcStart = filter.qcStartDate?.trim() ?? "";
+  const qcEnd = filter.qcEndDate?.trim() ?? "";
+  if (!dayInRange(household.qcDate, qcStart, qcEnd)) return false;
+
   const projects = (filter.projects ?? []).map((project) => project.trim()).filter(Boolean);
   if (projects.length && !projects.includes(household.project)) return false;
   return true;
@@ -698,8 +740,33 @@ export function filterLitQc(tally: LitQcTally, filter: LitQcFilter): LitQcTally 
   };
 }
 
-export function litQcProjectsInDateRange(tally: LitQcTally, startDate: string, endDate: string): string[] {
-  const dated = filterLitQc(tally, { startDate, endDate });
+/** Drop nested households for summary table responses (details load on expand). */
+export function withoutLitQcHouseholds(row: LitQcCanvasserRow): LitQcCanvasserRow {
+  if (!row.households.length) return row;
+  return { ...row, households: [] };
+}
+
+export function litQcSummaryCanvassers(rows: readonly LitQcCanvasserRow[]): LitQcCanvasserRow[] {
+  return rows.map(withoutLitQcHouseholds);
+}
+
+export function findLitQcCanvasser(
+  rows: readonly LitQcCanvasserRow[],
+  rowId: string
+): LitQcCanvasserRow | null {
+  const want = rowId.trim();
+  if (!want) return null;
+  return rows.find((row) => row.rowId === want) ?? null;
+}
+
+export function litQcProjectsInDateRange(
+  tally: LitQcTally,
+  startDate: string,
+  endDate: string,
+  qcStartDate = "",
+  qcEndDate = ""
+): string[] {
+  const dated = filterLitQc(tally, { startDate, endDate, qcStartDate, qcEndDate });
   const projects = new Set<string>();
   for (const canvasser of dated.canvassers) {
     for (const household of canvasser.households) {
