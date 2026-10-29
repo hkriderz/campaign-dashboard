@@ -88,7 +88,7 @@ export function parseLitFlagsCsv(csvText: string, sourceFileName = "lit-flags.cs
   const hasAnswer =
     headers.has(canonical("RESPONSEDESCRIPTION")) || headers.has(canonical("RESPONSECODE"));
   if (missing.length || !hasAnswer) {
-    const need = [...missing];
+    const need: string[] = [...missing];
     if (!hasAnswer) need.push("RESPONSEDESCRIPTION or RESPONSECODE");
     throw new Error(`Lit flags CSV is missing required columns: ${need.join(", ")}.`);
   }
