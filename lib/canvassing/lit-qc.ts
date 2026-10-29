@@ -5,6 +5,7 @@
 import { DateTime } from "luxon";
 import { escapeCsvCell } from "../pivot-csv-export";
 import { formatOverviewPercent } from "../qc-recontact/canvasser-overview";
+import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 import { canvasserIdentityKey, preferredCanvasserName } from "./display-names";
 import { canonical, shortDispositionLabel } from "./doorknocks-results/helpers";
 import { isKnockNonContactQuestion } from "./knock-dispositions";
@@ -94,6 +95,7 @@ type VoterVisit = {
   voterName: string;
   qcCanvasser: string;
   qcKey: string;
+  assignmentName: string;
   occurredAt: string;
   lit: LitObservation | null;
   litConflict: boolean;
@@ -107,7 +109,9 @@ export function isLitObservationQuestion(question: string): boolean {
 
 export function isFlyerReceiptQuestion(question: string): boolean {
   const value = canonical(question);
-  return value.includes("receive our flyer") || value.includes("folleto");
+  if (value.includes("folleto")) return true;
+  // "Did you receive our flyer yesterday?" and "Did you receive our nithya flyer?"
+  return value.includes("receive") && value.includes("flyer");
 }
 
 export function classifyLitObservation(response: string): LitObservation | null {
@@ -162,13 +166,79 @@ export function laDate(occurredAt: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : "";
 }
 
-function isNotHomeLeftFlyer(response: string): boolean {
+/** Prior lit-drop / not-home marks that Lit QC should credit to the original canvasser. */
+export function isLitDropPriorResponse(response: string): boolean {
   const value = canonical(response);
   if (!value) return false;
   if (value.includes("not home") || /(^|\s)nh(\s|$)/.test(value)) return true;
   if (value.includes("left flyer")) return true;
+  if (value.includes("lit drop")) return true;
   if (value.includes("dejo volante") && !value.includes("no dejo") && !value.includes("no flyer")) return true;
   return false;
+}
+
+/**
+ * True when `priorAt` is strictly before `qcAt`.
+ * Uses real timestamps — string compare fails when one stamp is Z and the other has an offset.
+ */
+export function knockOccurredBefore(priorAt: string, qcAt: string): boolean {
+  const prior = priorAt.trim();
+  const qc = qcAt.trim();
+  if (!prior || !qc) return false;
+  const priorMs = Date.parse(prior);
+  const qcMs = Date.parse(qc);
+  if (Number.isFinite(priorMs) && Number.isFinite(qcMs)) return priorMs < qcMs;
+  return prior < qc;
+}
+
+function compareOccurredAtDesc(a: string, b: string): number {
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return bMs - aMs;
+  return b.localeCompare(a);
+}
+
+/**
+ * Dates named in a QC assignment like "NH's Check for 9-15-26" or
+ * "Outreach Lit and Contact QC of 10-24 and 10-25".
+ * Bare month-day pairs reuse `referenceYear` (usually the QC year).
+ */
+export function priorDatesFromAssignment(assignmentName: string, referenceYear?: number): string[] {
+  const dates: string[] = [];
+  const seen = new Set<string>();
+  const text = assignmentName.trim();
+  if (!text) return dates;
+
+  const push = (year: number, month: number, day: number) => {
+    if (!year || !month || !day || month > 12 || day > 31) return;
+    const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (seen.has(iso)) return;
+    seen.add(iso);
+    dates.push(iso);
+  };
+
+  let inferredYear = referenceYear && referenceYear >= 2000 ? referenceYear : 0;
+  for (const match of text.matchAll(/(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/g)) {
+    const month = Number(match[1]);
+    const day = Number(match[2]);
+    let year = Number(match[3]);
+    if (year < 100) year += 2000;
+    if (!inferredYear) inferredYear = year;
+    push(year, month, day);
+  }
+
+  // "QC of 10-24 and 10-25" — month/day without a year.
+  if (inferredYear) {
+    for (const match of text.matchAll(/\b(\d{1,2})[\/.\-](\d{1,2})\b/g)) {
+      const month = Number(match[1]);
+      const day = Number(match[2]);
+      // Skip fragments already consumed as full dates (day would be a 2-digit year).
+      if (day > 31) continue;
+      push(inferredYear, month, day);
+    }
+  }
+
+  return dates;
 }
 
 function rowFromHouseholds(canvasserName: string, households: LitQcHousehold[]): LitQcCanvasserRow {
@@ -241,9 +311,9 @@ function tallyMeta(rows: readonly LitQcSourceRow[], canvassers: LitQcCanvasserRo
 function indexPriors(rows: readonly LitQcSourceRow[]): Map<string, PriorHit[]> {
   const byId = new Map<string, PriorHit[]>();
   for (const row of rows) {
-    const primaryId = row.primaryId.trim();
+    const primaryId = normalizeRecontactPersonId(row.primaryId);
     if (!primaryId || !row.canvasserName.trim()) continue;
-    if (!isKnockNonContactQuestion(row.question) || !isNotHomeLeftFlyer(row.response)) continue;
+    if (!isKnockNonContactQuestion(row.question) || !isLitDropPriorResponse(row.response)) continue;
     const hit: PriorHit = {
       canvasserName: row.canvasserName.trim(),
       project: row.assignmentName.trim(),
@@ -256,14 +326,41 @@ function indexPriors(rows: readonly LitQcSourceRow[]): Map<string, PriorHit[]> {
     byId.set(primaryId, list);
   }
   for (const list of byId.values()) {
-    list.sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    list.sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt));
   }
   return byId;
 }
 
-function latestPrior(priors: readonly PriorHit[] | undefined, beforeAt: string): PriorHit | null {
+/**
+ * Latest not-home / lit-drop before the QC knock.
+ * Falls back to NH on calendar days named in the QC assignment when timestamps
+ * are missing or mixed formats made a same-universe prior look "after" the QC.
+ */
+export function latestPrior(
+  priors: readonly PriorHit[] | undefined,
+  beforeAt: string,
+  assignmentName = ""
+): PriorHit | null {
   if (!priors?.length) return null;
-  return priors.find((prior) => prior.occurredAt < beforeAt) ?? null;
+  const earlier = priors.filter((prior) => knockOccurredBefore(prior.occurredAt, beforeAt));
+  if (earlier.length) {
+    return [...earlier].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt))[0] ?? null;
+  }
+
+  const qcDay = laDate(beforeAt);
+  const qcYear = qcDay ? Number(qcDay.slice(0, 4)) : undefined;
+  const namedDays = priorDatesFromAssignment(assignmentName, qcYear);
+  if (!namedDays.length) return null;
+  const named = priors.filter((prior) => {
+    const day = prior.projectDate || laDate(prior.occurredAt);
+    if (!day || !namedDays.includes(day)) return false;
+    // A prior on an earlier named calendar day is always before the QC visit.
+    if (qcDay && day < qcDay) return true;
+    // Same calendar day still needs a real earlier timestamp.
+    return knockOccurredBefore(prior.occurredAt, beforeAt);
+  });
+  if (!named.length) return null;
+  return [...named].sort((a, b) => compareOccurredAtDesc(a.occurredAt, b.occurredAt))[0] ?? null;
 }
 
 function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorHit[]>): VoterVisit[] {
@@ -272,26 +369,32 @@ function buildVisits(rows: readonly LitQcSourceRow[], priors: Map<string, PriorH
     const litQuestion = isLitObservationQuestion(row.question);
     const flyerQuestion = isFlyerReceiptQuestion(row.question);
     if (!litQuestion && !flyerQuestion) continue;
-    const primaryId = row.primaryId.trim();
+    const primaryId = normalizeRecontactPersonId(row.primaryId);
     if (!primaryId) continue;
     const occurredAt = row.occurredAt.trim();
     const qcCanvasser = row.canvasserName.trim();
     const qcKey = canvasserIdentityKey(qcCanvasser) || qcCanvasser.toLowerCase();
+    const assignmentName = row.assignmentName.trim();
     const key = `${primaryId}\0${qcKey}\0${occurredAt}`;
     const visit = visits.get(key) ?? {
       primaryId,
       voterName: "",
       qcCanvasser,
       qcKey,
+      assignmentName,
       occurredAt,
       lit: null,
       litConflict: false,
       flyer: null,
-      prior: latestPrior(priors.get(primaryId), occurredAt),
+      prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName),
     };
     const voterName = (row.voterName ?? "").trim();
     if (voterName && !visit.voterName) visit.voterName = voterName;
     if (qcCanvasser && !visit.qcCanvasser) visit.qcCanvasser = qcCanvasser;
+    if (assignmentName && !visit.assignmentName) visit.assignmentName = assignmentName;
+    if (!visit.prior) {
+      visit.prior = latestPrior(priors.get(primaryId), occurredAt, visit.assignmentName || assignmentName);
+    }
     if (litQuestion) {
       const lit = classifyLitObservation(row.response);
       if (lit && visit.lit && visit.lit !== lit) visit.litConflict = true;

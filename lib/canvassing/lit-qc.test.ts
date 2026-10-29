@@ -8,6 +8,9 @@ import {
   classifyLitObservation,
   filterLitQc,
   flattenLitQcDetails,
+  isFlyerReceiptQuestion,
+  knockOccurredBefore,
+  priorDatesFromAssignment,
 } from "./lit-qc";
 import type { LitQcSourceRow } from "./lit-qc";
 
@@ -234,6 +237,65 @@ test("flyer-only QC visits leave lit observation blank instead of No lit observa
   assert.equal(detail.originalMark, "Not Home");
   assert.equal(detail.litObservation, "");
   assert.equal(detail.flyer, "Got flyer");
+});
+
+test("mixed Z and offset timestamps still match an earlier not-home", () => {
+  // 11:00 LA prior stored as Z, noon LA QC stored with offset — string compare says prior is later.
+  assert.equal(knockOccurredBefore("2026-10-26T18:00:00.000Z", "2026-10-26T12:00:00.000-07:00"), true);
+  assert.equal(isFlyerReceiptQuestion("Did you receive our nithya flyer?"), true);
+
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Walk 10-25-26",
+      occurredAt: "2026-10-26T18:00:00.000Z",
+      question: "Non-Contact Mobile",
+      response: "Not Home, Left Flyer/Dejó Volante",
+      primaryId: "ca 123",
+    }),
+    row({
+      canvasserName: "Quinn, Casey",
+      assignmentName: "Outreach Lit QC of 10-25-26",
+      occurredAt: "2026-10-26T12:00:00.000-07:00",
+      question: "Did you receive our nithya flyer?",
+      response: "Got a Flyer",
+      primaryId: "CA123",
+    }),
+  ]);
+
+  assert.equal(tally.canvassers.length, 1);
+  assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
+  assert.equal(tally.canvassers[0]?.gotFlyer, 1);
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Not Home");
+});
+
+test("assignment-named prior days recover a not-home on that calendar day", () => {
+  assert.deepEqual(priorDatesFromAssignment("Nithya NH's Check for 9-15-26 - 199000897"), ["2026-09-15"]);
+  assert.deepEqual(priorDatesFromAssignment("Outreach Lit and Contact QC of 10-24 and 10-25", 2026), [
+    "2026-10-24",
+    "2026-10-25",
+  ]);
+
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Original, Pat",
+      assignmentName: "Turf",
+      occurredAt: "2026-09-15T20:00:00.000-07:00",
+      question: "Non-Contact Lit Drop",
+      response: "Lit Drop",
+      primaryId: "CA9",
+    }),
+    row({
+      canvasserName: "Quinn, Casey",
+      assignmentName: "Nithya NH's Check for 9-15-26 - 1",
+      occurredAt: "2026-09-16T12:00:00.000-07:00",
+      question: "Did you receive our flyer yesterday?/¿Recibió nuestro folleto ayer?",
+      response: "Got a Flyer",
+      primaryId: "CA9",
+    }),
+  ]);
+  assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Lit Drop");
 });
 
 test("project date and project filters keep the original canvasser's door", () => {
