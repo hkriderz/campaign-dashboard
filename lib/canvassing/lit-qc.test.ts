@@ -321,7 +321,7 @@ test("assignment-named prior days recover a not-home on that calendar day", () =
   assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Lit Drop");
 });
 
-test("project date and project filters keep the original canvasser's door", () => {
+test("QC date and original project filters keep the door being QC'd that day", () => {
   const tally = buildLitQc([
     row({
       canvasserName: "Original, Pat",
@@ -348,13 +348,18 @@ test("project date and project filters keep the original canvasser's door", () =
     row({
       question: "LIT OBSERVATION",
       response: "SAW LIT",
-      occurredAt: "2026-10-27T19:30:00.000Z",
+      occurredAt: "2026-10-28T19:30:00.000Z",
       primaryId: "drop",
     }),
   ]);
 
-  const filtered = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20", projects: ["Keep"] });
+  // Date range is the QC walk day (10-27), not the original lit-drop day (10-20).
+  const filtered = filterLitQc(tally, { startDate: "2026-10-27", endDate: "2026-10-27", projects: ["Keep"] });
   assert.equal(filtered.canvassers.length, 1);
   assert.equal(filtered.canvassers[0]!.householdsChecked, 1);
   assert.equal(filtered.canvassers[0]!.households[0]!.project, "Keep");
+  assert.equal(filtered.canvassers[0]!.households[0]!.qcDate, "2026-10-27");
+
+  const byOriginalDropDay = filterLitQc(tally, { startDate: "2026-10-20", endDate: "2026-10-20" });
+  assert.equal(byOriginalDropDay.canvassers.length, 0);
 });

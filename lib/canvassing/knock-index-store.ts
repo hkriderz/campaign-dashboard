@@ -7,7 +7,7 @@ import { normalizeRecontactPersonId } from "../qc-recontact/ids";
 import type { QcCanvassKnockIndexRow } from "../qc-recontact/types";
 import type { CanvassingKnockEvent } from "./types";
 
-export type KnockIndexImportSource = "overview" | "knock-analysis" | "seed";
+export type KnockIndexImportSource = "overview" | "knock-analysis" | "seed" | "lit-flags";
 
 export type KnockIndexImportMeta = {
   id: string;

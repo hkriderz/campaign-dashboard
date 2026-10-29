@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { DateTime } from "luxon";
 import OverviewDetailColumnControls, {
@@ -196,6 +196,9 @@ export default function CanvasserOverviewClient() {
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
     defaultVisibleLitQcDetailColumnIds
   );
+  const [litFlagsImporting, setLitFlagsImporting] = useState(false);
+  const [litFlagsMessage, setLitFlagsMessage] = useState<string | null>(null);
+  const litFlagsInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDetailColumns(loadOverviewDetailColumnIds(CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
@@ -375,6 +378,49 @@ export default function CanvasserOverviewClient() {
     }
   }
 
+  async function importLitFlags(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    setLitFlagsImporting(true);
+    setLitFlagsMessage(null);
+    setLitError(null);
+    try {
+      const form = new FormData();
+      for (const file of Array.from(fileList)) {
+        form.append("files", file, file.name);
+      }
+      const res = await fetch("/api/canvassing/canvassers/lit/flags", { method: "POST", body: form });
+      const body = (await res.json()) as ApiResponse<{
+        importMeta: { rowsAdded: number; rowsSkippedDup: number; fileNames: string[] };
+        litRows: number;
+        skippedNotLit: number;
+        skippedNoPrimaryId: number;
+        skippedUnclassified: number;
+      }>;
+      if (!res.ok || !body.ok || !body.data) {
+        throw new Error(body.error || `Import failed (${res.status})`);
+      }
+      const { importMeta, litRows: parsedLit, skippedNotLit, skippedNoPrimaryId, skippedUnclassified } =
+        body.data;
+      const parts = [
+        `Imported ${formatNumber(importMeta.rowsAdded)} new lit flag row${importMeta.rowsAdded === 1 ? "" : "s"}`,
+        `from ${importMeta.fileNames.join(", ") || "upload"}`,
+      ];
+      if (importMeta.rowsSkippedDup) parts.push(`(${formatNumber(importMeta.rowsSkippedDup)} already in index)`);
+      if (skippedNotLit || skippedNoPrimaryId || skippedUnclassified) {
+        parts.push(
+          `· skipped ${formatNumber(skippedNotLit + skippedNoPrimaryId + skippedUnclassified)} of ${formatNumber(parsedLit + skippedNotLit + skippedNoPrimaryId + skippedUnclassified)} rows`
+        );
+      }
+      setLitFlagsMessage(parts.join(" "));
+      await loadLit(new AbortController().signal);
+    } catch (err) {
+      setLitError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLitFlagsImporting(false);
+      if (litFlagsInputRef.current) litFlagsInputRef.current.value = "";
+    }
+  }
+
   const selected = Boolean(tagId);
   const showing = Boolean(payload && payload.tagId === tagId);
 
@@ -410,7 +456,7 @@ export default function CanvasserOverviewClient() {
         </div>
         <p className="section-hero__lede">
           {mode === "lit"
-            ? "Later door checks of lit left at not-homes, grouped by the canvasser who left it. Saw lit % counts USA flag as an answer. Each canvasser expands to households, with the voters at that door listed underneath."
+            ? "Later door checks of lit left at not-homes, grouped by the canvasser who left it. Import PDI lit observation flag exports for per-PDI answers. Saw lit % counts USA flag as an answer. Each canvasser expands to households, with the voters at that door listed underneath."
             : "QC calls that reached the voter, grouped by the canvasser who originally ID’d them. Recall contact is Yes ÷ (Yes+Unsure+No) on “Were you contacted?” — calls with no answer (e.g. GOTV scripts) do not dilute the rate. Strong support rates use only the voters that canvasser originally marked strong support."}
         </p>
       </div>
@@ -429,10 +475,10 @@ export default function CanvasserOverviewClient() {
             }
             setOpenName(null);
           }}
-          label={mode === "lit" ? "Project date" : "QC call date"}
+          label={mode === "lit" ? "QC project date" : "QC call date"}
           helpText={
             mode === "lit"
-              ? "Clear to include every lit drop in the knock index. Dates are the day the original canvasser left the lit."
+              ? "Clear to include every lit QC day in the knock index. Dates are the day of the lit QC walk — picking a day shows original canvassers whose prior lit drops were checked that day."
               : "Clear to include every saved QC day. Dates are the QC call date."
           }
           minDate={(mode === "lit" ? litPayload?.minDate : payload?.minDate) || undefined}
@@ -459,6 +505,22 @@ export default function CanvasserOverviewClient() {
                 groups={canvasserGroups.groups}
                 onGroupsChange={canvasserGroups.setGroups}
               />
+              <input
+                ref={litFlagsInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                multiple
+                className="hidden"
+                onChange={(event) => void importLitFlags(event.target.files)}
+              />
+              <button
+                type="button"
+                className={chipClass(false)}
+                disabled={litFlagsImporting}
+                onClick={() => litFlagsInputRef.current?.click()}
+              >
+                {litFlagsImporting ? "Importing flags…" : "Import lit flags CSV"}
+              </button>
             </>
           ) : (
             <>
@@ -505,6 +567,9 @@ export default function CanvasserOverviewClient() {
             </div>
           </div>
         ) : null}
+        {mode === "lit" && litFlagsMessage ? (
+          <p className="text-sm text-emerald-800 dark:text-emerald-300">{litFlagsMessage}</p>
+        ) : null}
       </div>
 
       {mode === "lit" ? (
@@ -523,6 +588,8 @@ export default function CanvasserOverviewClient() {
           onDownloadCsv={downloadLitCsv}
           onCopyTable={() => void copyLitTable()}
           copyLabel={litCopyLabel}
+          onImportFlags={() => litFlagsInputRef.current?.click()}
+          flagsImporting={litFlagsImporting}
         />
       ) : error ? (
         <div className="border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
@@ -808,6 +875,8 @@ function LitQcSection({
   onDownloadCsv,
   onCopyTable,
   copyLabel,
+  onImportFlags,
+  flagsImporting,
 }: {
   error: string | null;
   loading: boolean;
@@ -823,6 +892,8 @@ function LitQcSection({
   onDownloadCsv: () => void;
   onCopyTable: () => void;
   copyLabel: string;
+  onImportFlags: () => void;
+  flagsImporting: boolean;
 }) {
   if (error) {
     return (
@@ -837,11 +908,15 @@ function LitQcSection({
   if (!hasLitQuestions) {
     return (
       <div className="dash-card space-y-2">
-        <p className="text-sm text-[var(--section-ink)]">No lit QC knocks in the knock index yet.</p>
+        <p className="text-sm text-[var(--section-ink)]">No lit observation flags in the knock index yet.</p>
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          Save a Knock Analysis report for the QC walk and for the earlier not-home walk. Lit QC reads those
-          Canvasser Details rows.
+          Import a PDI lit observation flags CSV (per-PDI answers: Didn&apos;t See Lit, Saw Lit, USA Flag). Also keep
+          Knock Analysis reports for the earlier not-home / lit-drop walks so households can match to the original
+          canvasser.
         </p>
+        <button type="button" className={chipClass(false)} disabled={flagsImporting} onClick={onImportFlags}>
+          {flagsImporting ? "Importing flags…" : "Import lit flags CSV"}
+        </button>
       </div>
     );
   }

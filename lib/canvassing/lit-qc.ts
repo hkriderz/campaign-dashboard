@@ -117,6 +117,10 @@ export function isFlyerReceiptQuestion(question: string): boolean {
 export function classifyLitObservation(response: string): LitObservation | null {
   const value = canonical(response);
   if (!value) return null;
+  // PDI flag RESPONSECODE values (and short labels) from lit observation exports.
+  if (value === "nhnl") return "didnt";
+  if (value === "nhyl") return "saw";
+  if (value === "nhuf" || value === "usa flag") return "usaFlag";
   if (value.includes("usa flag")) return "usaFlag";
   if (value.includes("didn t see") || value.includes("didnt see") || value.includes("no hay volante")) return "didnt";
   if (value.includes("saw lit") || value.includes("hay volante")) return "saw";
@@ -294,7 +298,8 @@ function tallyMeta(rows: readonly LitQcSourceRow[], canvassers: LitQcCanvasserRo
   const projects = new Set<string>();
   for (const canvasser of canvassers) {
     for (const household of canvasser.households) {
-      const day = household.projectDate || household.qcDate;
+      // Date picker bounds are the QC walk day, not the original lit-drop day.
+      const day = household.qcDate || household.projectDate;
       if (day) dates.push(day);
       if (household.project) projects.add(household.project);
     }
@@ -529,7 +534,8 @@ export function buildLitQc(rows: readonly LitQcSourceRow[]): LitQcTally {
 }
 
 function householdInFilter(household: LitQcHousehold, filter: LitQcFilter): boolean {
-  const day = household.projectDate || household.qcDate;
+  // Filter by QC project day so picking a day shows original canvassers being QC'd that day.
+  const day = household.qcDate || household.projectDate;
   const start = filter.startDate?.trim() ?? "";
   const end = filter.endDate?.trim() ?? "";
   if (start && (!day || day < start)) return false;
