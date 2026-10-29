@@ -2,7 +2,27 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import OverviewDetailColumnControls from "@/components/canvassing/OverviewDetailColumnControls";
+import { DateTime } from "luxon";
+import OverviewDetailColumnControls, {
+  ColumnChecklist,
+} from "@/components/canvassing/OverviewDetailColumnControls";
+import {
+  buildLitQcCsv,
+  buildLitQcDetailTsv,
+  defaultVisibleLitQcDetailColumnIds,
+  flattenLitQcDetails,
+  LIT_QC_DETAIL_COLUMNS,
+  litQcDetailCellValue,
+  litQcDetailHeaders,
+  loadLitQcDetailColumnIds,
+  saveLitQcDetailColumnIds,
+  summarizeLitQc,
+  toggleLitQcDetailColumn,
+  type LitQcCanvasserRow,
+  type LitQcDetailColumnId,
+  type LitQcDetailRow,
+  type LitQcTally,
+} from "@/lib/canvassing/lit-qc";
 import CheckboxFilterMenu, { useActorGroups } from "@/components/qc-recontact/CheckboxFilterMenu";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import { downloadCsvFile } from "@/lib/pivot-csv-export";
@@ -53,7 +73,7 @@ function formatNumber(value: number): string {
 
 function chipClass(active: boolean): string {
   return [
-    "border px-2.5 py-1 text-xs font-medium",
+    "border px-2.5 py-1 text-xs font-medium disabled:opacity-50",
     active
       ? "border-[var(--section-accent)] bg-[color-mix(in_srgb,var(--section-accent)_12%,transparent)] text-[var(--section-ink)]"
       : "border-[var(--section-rule)] bg-transparent text-[var(--section-muted)] hover:border-[var(--section-accent)]",
@@ -163,9 +183,23 @@ export default function CanvasserOverviewClient() {
   const [canvasserMode, setCanvasserMode] = useState<PeopleFilterMode>("include");
   const canvasserGroups = useActorGroups("canvasser");
   const [copyLabel, setCopyLabel] = useState("Copy table");
+  const [mode, setMode] = useState<"recall" | "lit">("recall");
+  const [litStartDate, setLitStartDate] = useState("");
+  const [litEndDate, setLitEndDate] = useState("");
+  const [litPayload, setLitPayload] = useState<LitQcTally | null>(null);
+  const [litLoading, setLitLoading] = useState(false);
+  const [litError, setLitError] = useState<string | null>(null);
+  const [litProjects, setLitProjects] = useState<string[]>([]);
+  const [litCanvassersSelected, setLitCanvassersSelected] = useState<string[]>([]);
+  const [litCanvasserMode, setLitCanvasserMode] = useState<PeopleFilterMode>("include");
+  const [litCopyLabel, setLitCopyLabel] = useState("Copy table");
+  const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
+    defaultVisibleLitQcDetailColumnIds
+  );
 
   useEffect(() => {
     setDetailColumns(loadOverviewDetailColumnIds(CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
+    setLitDetailColumns(loadLitQcDetailColumnIds());
   }, []);
 
   const query = useMemo(() => {
@@ -198,11 +232,48 @@ export default function CanvasserOverviewClient() {
     })();
   }, [query]);
 
+  const litQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (litStartDate) params.set("startDate", litStartDate);
+    if (litEndDate) params.set("endDate", litEndDate);
+    for (const project of litProjects) params.append("project", project);
+    const text = params.toString();
+    return text ? `?${text}` : "";
+  }, [litStartDate, litEndDate, litProjects]);
+
+  const loadLit = useCallback((signal: AbortSignal) => {
+    setLitLoading(true);
+    setLitError(null);
+    return (async () => {
+      try {
+        const res = await fetch(`/api/canvassing/canvassers/lit${litQuery}`, { signal });
+        const body = (await res.json()) as ApiResponse<LitQcTally>;
+        if (signal.aborted) return;
+        if (!res.ok || !body.ok || !body.data) {
+          throw new Error(body.error || `Request failed (${res.status})`);
+        }
+        setLitPayload(body.data);
+      } catch (err) {
+        if (signal.aborted) return;
+        setLitError(err instanceof Error ? err.message : String(err));
+      } finally {
+        if (!signal.aborted) setLitLoading(false);
+      }
+    })();
+  }, [litQuery]);
+
   useEffect(() => {
     const controller = new AbortController();
     void loadOverview(controller.signal);
     return () => controller.abort();
   }, [loadOverview]);
+
+  useEffect(() => {
+    if (mode !== "lit") return;
+    const controller = new AbortController();
+    void loadLit(controller.signal);
+    return () => controller.abort();
+  }, [mode, loadLit]);
 
   const dateRows = payload?.canvassers ?? [];
   const projectOptions = useMemo(() => canvasserProjectOptions(dateRows), [dateRows]);
@@ -229,6 +300,24 @@ export default function CanvasserOverviewClient() {
     [visibleCanvassers]
   );
   const totals = useMemo(() => summarizeCanvasserOverview(visibleCanvassers), [visibleCanvassers]);
+  const litRows = litPayload?.canvassers ?? [];
+  const litCanvasserOptions = useMemo(() => litRows.map((row) => row.canvasserName), [litRows]);
+  const visibleLitCanvassers = useMemo(
+    () =>
+      filterNamedRows(
+        litRows,
+        litCanvassersSelected,
+        litCanvasserMode,
+        (row) => row.canvasserName,
+        recontactNamesMatch
+      ),
+    [litRows, litCanvassersSelected, litCanvasserMode]
+  );
+  const litTotals = useMemo(() => summarizeLitQc(visibleLitCanvassers), [visibleLitCanvassers]);
+  const litVoterTotal = useMemo(
+    () => visibleLitCanvassers.reduce((sum, row) => sum + row.votersChecked, 0),
+    [visibleLitCanvassers]
+  );
 
   function selectCandidate(id: string) {
     setTagId(id);
@@ -262,6 +351,30 @@ export default function CanvasserOverviewClient() {
     }
   }
 
+  function setLitColumns(next: LitQcDetailColumnId[]) {
+    setLitDetailColumns(next);
+    saveLitQcDetailColumnIds(next);
+  }
+
+  function downloadLitCsv() {
+    if (!visibleLitCanvassers.length) return;
+    const csv = buildLitQcCsv(visibleLitCanvassers, litDetailColumns);
+    const range = [litStartDate, litEndDate].filter(Boolean).join("_") || "all";
+    downloadCsvFile(csv, `lit-qc-${range}.csv`);
+  }
+
+  async function copyLitTable() {
+    if (!visibleLitCanvassers.length) return;
+    try {
+      await navigator.clipboard.writeText(buildLitQcDetailTsv(visibleLitCanvassers, litDetailColumns));
+      setLitCopyLabel("Copied");
+      window.setTimeout(() => setLitCopyLabel("Copy table"), 1600);
+    } catch {
+      setLitCopyLabel("Copy failed");
+      window.setTimeout(() => setLitCopyLabel("Copy table"), 1600);
+    }
+  }
+
   const selected = Boolean(tagId);
   const showing = Boolean(payload && payload.tagId === tagId);
 
@@ -271,82 +384,157 @@ export default function CanvasserOverviewClient() {
         <p className="section-kicker text-teal-800 dark:text-teal-300">Field / QC</p>
         <h1 className="font-display text-3xl font-semibold text-[var(--section-ink)]">Canvasser QC Overview</h1>
         <hr className="section-hero__rule bg-teal-700 dark:bg-teal-300" />
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            className={chipClass(mode === "recall")}
+            aria-pressed={mode === "recall"}
+            onClick={() => {
+              setMode("recall");
+              setOpenName(null);
+            }}
+          >
+            Recall
+          </button>
+          <button
+            type="button"
+            className={chipClass(mode === "lit")}
+            aria-pressed={mode === "lit"}
+            onClick={() => {
+              setMode("lit");
+              setOpenName(null);
+            }}
+          >
+            Lit QC
+          </button>
+        </div>
         <p className="section-hero__lede">
-          QC calls that reached the voter, grouped by the canvasser who originally ID’d them. Recall
-          contact is Yes ÷ (Yes+Unsure+No) on “Were you contacted?” — calls with no answer
-          (e.g. GOTV scripts) do not dilute the rate. Strong support rates use only the voters that
-          canvasser originally marked strong support.
+          {mode === "lit"
+            ? "Later door checks of lit left at not-homes, grouped by the canvasser who left it. Saw lit % counts USA flag as an answer. Each canvasser expands to households, with the voters at that door listed underneath."
+            : "QC calls that reached the voter, grouped by the canvasser who originally ID’d them. Recall contact is Yes ÷ (Yes+Unsure+No) on “Were you contacted?” — calls with no answer (e.g. GOTV scripts) do not dilute the rate. Strong support rates use only the voters that canvasser originally marked strong support."}
         </p>
       </div>
 
       <div className="dash-card space-y-3">
         <DateRangePicker
-          startDate={startDate}
-          endDate={endDate}
+          startDate={mode === "lit" ? litStartDate : startDate}
+          endDate={mode === "lit" ? litEndDate : endDate}
           onChange={(range) => {
-            setStartDate(range.startDate);
-            setEndDate(range.endDate);
+            if (mode === "lit") {
+              setLitStartDate(range.startDate);
+              setLitEndDate(range.endDate);
+            } else {
+              setStartDate(range.startDate);
+              setEndDate(range.endDate);
+            }
+            setOpenName(null);
           }}
-          label="QC call date"
-          helpText="Clear to include every saved QC day. Dates are the QC call date."
-          minDate={payload?.minDate || undefined}
-          maxDate={payload?.maxDate || undefined}
+          label={mode === "lit" ? "Project date" : "QC call date"}
+          helpText={
+            mode === "lit"
+              ? "Clear to include every lit drop in the knock index. Dates are the day the original canvasser left the lit."
+              : "Clear to include every saved QC day. Dates are the QC call date."
+          }
+          minDate={(mode === "lit" ? litPayload?.minDate : payload?.minDate) || undefined}
+          maxDate={(mode === "lit" ? litPayload?.maxDate : payload?.maxDate) || undefined}
           allowEmpty
           tone="emerald"
         />
         <div className="flex flex-wrap items-center gap-2">
-          <CheckboxFilterMenu
-            label="Canvass projects"
-            options={projectOptions}
-            selected={projects}
-            onSelectedChange={setProjects}
-          />
-          <CheckboxFilterMenu
-            label="QC phone banks"
-            options={qcPhonebankOptions}
-            selected={qcPhonebanks}
-            onSelectedChange={setQcPhonebanks}
-          />
-          <CheckboxFilterMenu
-            label="Canvassers"
-            options={canvasserOptions}
-            selected={canvassersSelected}
-            onSelectedChange={setCanvassersSelected}
-            mode={canvasserMode}
-            onModeChange={setCanvasserMode}
-            groups={canvasserGroups.groups}
-            onGroupsChange={canvasserGroups.setGroups}
-          />
+          {mode === "lit" ? (
+            <>
+              <CheckboxFilterMenu
+                label="Canvass projects"
+                options={litPayload?.projects ?? []}
+                selected={litProjects}
+                onSelectedChange={setLitProjects}
+              />
+              <CheckboxFilterMenu
+                label="Canvassers"
+                options={litCanvasserOptions}
+                selected={litCanvassersSelected}
+                onSelectedChange={setLitCanvassersSelected}
+                mode={litCanvasserMode}
+                onModeChange={setLitCanvasserMode}
+                groups={canvasserGroups.groups}
+                onGroupsChange={canvasserGroups.setGroups}
+              />
+            </>
+          ) : (
+            <>
+              <CheckboxFilterMenu
+                label="Canvass projects"
+                options={projectOptions}
+                selected={projects}
+                onSelectedChange={setProjects}
+              />
+              <CheckboxFilterMenu
+                label="QC phone banks"
+                options={qcPhonebankOptions}
+                selected={qcPhonebanks}
+                onSelectedChange={setQcPhonebanks}
+              />
+              <CheckboxFilterMenu
+                label="Canvassers"
+                options={canvasserOptions}
+                selected={canvassersSelected}
+                onSelectedChange={setCanvassersSelected}
+                mode={canvasserMode}
+                onModeChange={setCanvasserMode}
+                groups={canvasserGroups.groups}
+                onGroupsChange={canvasserGroups.setGroups}
+              />
+            </>
+          )}
         </div>
-        <div>
-          <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Candidate</p>
-          <div className="flex flex-wrap gap-1.5">
-            {(payload?.candidates ?? []).map((candidate) => (
-              <button
-                key={candidate.id}
-                type="button"
-                onClick={() => selectCandidate(candidate.id)}
-                className={chipClass(tagId === candidate.id)}
-                aria-pressed={tagId === candidate.id}
-              >
-                {candidate.label}
-              </button>
-            ))}
+        {mode === "recall" ? (
+          <div>
+            <p className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Candidate</p>
+            <div className="flex flex-wrap gap-1.5">
+              {(payload?.candidates ?? []).map((candidate) => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => selectCandidate(candidate.id)}
+                  className={chipClass(tagId === candidate.id)}
+                  aria-pressed={tagId === candidate.id}
+                >
+                  {candidate.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
-      {error ? (
+      {mode === "lit" ? (
+        <LitQcSection
+          error={litError}
+          loading={litLoading}
+          hasLitQuestions={litPayload?.hasLitQuestions ?? false}
+          loaded={litPayload !== null}
+          rows={visibleLitCanvassers}
+          totals={litTotals}
+          voterTotal={litVoterTotal}
+          openName={openName}
+          onToggle={(name) => setOpenName((current) => (current === name ? null : name))}
+          detailColumns={litDetailColumns}
+          onToggleColumn={(id, on) => setLitColumns(toggleLitQcDetailColumn(litDetailColumns, id, on))}
+          onDownloadCsv={downloadLitCsv}
+          onCopyTable={() => void copyLitTable()}
+          copyLabel={litCopyLabel}
+        />
+      ) : error ? (
         <div className="border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
           {error}
         </div>
       ) : null}
 
-      {!selected ? (
+      {mode === "recall" && !error && !selected ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">Select a candidate to see canvasser QC recall.</p>
-      ) : !showing ? (
+      ) : mode === "recall" && !error && !showing ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">Loading canvasser overview…</p>
-      ) : payload && !payload.hasSnapshot ? (
+      ) : mode === "recall" && !error && payload && !payload.hasSnapshot ? (
         <div className="dash-card space-y-2">
           <p className="text-sm text-[var(--section-ink)]">
             No QC recontact snapshot for {payload.tagLabel || "this candidate"} yet.
@@ -359,7 +547,7 @@ export default function CanvasserOverviewClient() {
             and refresh that candidate. This page reads the snapshot that page already builds.
           </p>
         </div>
-      ) : (
+      ) : mode === "recall" && !error ? (
         <div className="border border-[var(--section-rule)] overflow-hidden bg-[var(--section-paper)]">
           <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[var(--section-rule)]">
             <div className="min-w-0 space-y-1">
@@ -460,7 +648,7 @@ export default function CanvasserOverviewClient() {
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -538,6 +726,260 @@ function CanvasserRows({
         <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
           <td colSpan={summaryColSpan} className="px-3 py-3">
             <DetailTable details={row.details} columnIds={detailColumns} />
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
+  );
+}
+
+const LIT_SUMMARY_COLUMNS = 11;
+
+function formatQcStamp(iso: string): string {
+  const parsed = DateTime.fromISO(iso, { setZone: true });
+  if (!parsed.isValid) return iso || "—";
+  return parsed.setZone("America/Los_Angeles").toFormat("M/d/yy h:mm a");
+}
+
+function LitDetailTable({
+  details,
+  columnIds,
+}: {
+  details: readonly LitQcDetailRow[];
+  columnIds: readonly LitQcDetailColumnId[];
+}) {
+  const headers = litQcDetailHeaders(columnIds);
+  return (
+    <table className="border-collapse w-full text-xs min-w-max">
+      <thead>
+        <tr className="text-left text-gray-500 dark:text-gray-400">
+          {headers.map((header) => (
+            <th key={header} className="px-2.5 py-1.5 font-medium">
+              {header}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+        {details.map((detail, index) => (
+          <tr key={`${detail.pdiId || "hh"}-${detail.qcTime}-${index}`}>
+            {columnIds.map((id) => {
+              let text = litQcDetailCellValue(detail, id);
+              if (id === "projectDate" || id === "voterProjectDate") text = formatShortUsDate(text) || text;
+              if (id === "qcTime") text = formatQcStamp(text);
+              if (
+                (id === "flyer" ||
+                  id === "voterName" ||
+                  id === "project" ||
+                  id === "litObservation" ||
+                  id === "originalMark") &&
+                !text
+              ) {
+                text = "—";
+              }
+              const mono = id === "pdiId" ? "font-mono" : "";
+              const nums =
+                id === "projectDate" || id === "voterProjectDate" || id === "qcTime" ? "tabular-nums" : "";
+              return (
+                <td key={id} className={`px-2.5 py-1.5 ${mono} ${nums}`}>
+                  {text}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function LitQcSection({
+  error,
+  loading,
+  hasLitQuestions,
+  loaded,
+  rows,
+  totals,
+  voterTotal,
+  openName,
+  onToggle,
+  detailColumns,
+  onToggleColumn,
+  onDownloadCsv,
+  onCopyTable,
+  copyLabel,
+}: {
+  error: string | null;
+  loading: boolean;
+  hasLitQuestions: boolean;
+  loaded: boolean;
+  rows: readonly LitQcCanvasserRow[];
+  totals: LitQcCanvasserRow | null;
+  voterTotal: number;
+  openName: string | null;
+  onToggle: (name: string) => void;
+  detailColumns: readonly LitQcDetailColumnId[];
+  onToggleColumn: (id: LitQcDetailColumnId, on: boolean) => void;
+  onDownloadCsv: () => void;
+  onCopyTable: () => void;
+  copyLabel: string;
+}) {
+  if (error) {
+    return (
+      <div className="border border-rose-200 dark:border-rose-900 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2 text-sm text-rose-800 dark:text-rose-200">
+        {error}
+      </div>
+    );
+  }
+  if (!loaded) {
+    return <p className="text-sm text-gray-500 dark:text-gray-400">Loading lit QC…</p>;
+  }
+  if (!hasLitQuestions) {
+    return (
+      <div className="dash-card space-y-2">
+        <p className="text-sm text-[var(--section-ink)]">No lit QC knocks in the knock index yet.</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Save a Knock Analysis report for the QC walk and for the earlier not-home walk. Lit QC reads those
+          Canvasser Details rows.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="border border-[var(--section-rule)] overflow-hidden bg-[var(--section-paper)]">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-[var(--section-rule)]">
+        <div className="min-w-0 space-y-1">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {loading
+              ? "Updating…"
+              : `${formatNumber(rows.length)} canvassers · ${formatNumber(voterTotal)} voters`}
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Click each canvasser name to show more details</p>
+        </div>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ColumnChecklist
+            columns={LIT_QC_DETAIL_COLUMNS}
+            visibleIds={detailColumns}
+            onToggle={onToggleColumn}
+            menuLabel="Detail table columns"
+          />
+          <button type="button" className={chipClass(false)} disabled={!rows.length} onClick={onDownloadCsv}>
+            Download CSV
+          </button>
+          <button type="button" className={chipClass(false)} disabled={!rows.length} onClick={onCopyTable}>
+            {copyLabel}
+          </button>
+        </div>
+      </div>
+      {!rows.length ? (
+        <p className="px-4 py-8 text-sm text-center text-gray-500 dark:text-gray-400">
+          No lit QC households in this date range.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="border-collapse w-full text-xs min-w-max">
+            <thead className="sticky top-0 z-10 bg-gray-800 text-white">
+              <tr>
+                <th rowSpan={2} className="px-2.5 py-2 text-left align-bottom">Canvasser</th>
+                <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Households</th>
+                <th rowSpan={2} className="px-2.5 py-2 text-right align-bottom">Voters</th>
+                <th colSpan={4} className="px-2.5 py-2 text-center border-l border-white/20">Lit observation</th>
+                <th colSpan={4} className="px-2.5 py-2 text-center border-l border-white/20">Received flyer</th>
+              </tr>
+              <tr>
+                {["Saw lit", "Didn't see", "USA flag", "Saw lit %"].map((label, index) => (
+                  <th
+                    key={label}
+                    className={`px-2.5 py-1.5 text-right font-medium ${index === 0 ? "border-l border-white/20" : ""}`}
+                  >
+                    {label}
+                  </th>
+                ))}
+                {["Got flyer", "Didn't get", "Undecided", "Received %"].map((label, index) => (
+                  <th
+                    key={label}
+                    className={`px-2.5 py-1.5 text-right font-medium ${index === 0 ? "border-l border-white/20" : ""}`}
+                  >
+                    {label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {totals ? <LitTotalRow row={totals} /> : null}
+              {rows.map((row) => (
+                <LitCanvasserRows
+                  key={row.canvasserName}
+                  row={row}
+                  open={openName === row.canvasserName}
+                  onToggle={() => onToggle(row.canvasserName)}
+                  detailColumns={detailColumns}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LitMetricCells({ row }: { row: LitQcCanvasserRow }) {
+  return (
+    <>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.householdsChecked)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.votersChecked)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
+        {formatNumber(row.sawLit)}
+      </td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntSeeLit)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.usaFlag)}</td>
+      <PercentCell rate={row.sawLitRate} />
+      <td className="px-2.5 py-1.5 text-right tabular-nums border-l border-[var(--section-rule)]">
+        {formatNumber(row.gotFlyer)}
+      </td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.didntGetFlyer)}</td>
+      <td className="px-2.5 py-1.5 text-right tabular-nums">{formatNumber(row.flyerUndecided)}</td>
+      <PercentCell rate={row.receivedRate} />
+    </>
+  );
+}
+
+function LitTotalRow({ row }: { row: LitQcCanvasserRow }) {
+  return (
+    <tr className="border-b-2 border-gray-800 bg-gray-100 font-semibold dark:border-gray-200 dark:bg-gray-800">
+      <td className="px-2.5 py-1.5">Total</td>
+      <LitMetricCells row={row} />
+    </tr>
+  );
+}
+
+function LitCanvasserRows({
+  row,
+  open,
+  onToggle,
+  detailColumns,
+}: {
+  row: LitQcCanvasserRow;
+  open: boolean;
+  onToggle: () => void;
+  detailColumns: readonly LitQcDetailColumnId[];
+}) {
+  const details = flattenLitQcDetails([row]);
+  return (
+    <Fragment>
+      <tr className="odd:bg-white even:bg-gray-50/70 dark:odd:bg-gray-900 dark:even:bg-gray-800/40">
+        <td className="px-2.5 py-1.5 font-medium">
+          <button type="button" onClick={onToggle} aria-expanded={open} className="underline-offset-2 hover:underline text-left">
+            {row.canvasserName}
+          </button>
+        </td>
+        <LitMetricCells row={row} />
+      </tr>
+      {open ? (
+        <tr className="bg-[color-mix(in_srgb,var(--section-accent)_6%,transparent)]">
+          <td colSpan={LIT_SUMMARY_COLUMNS} className="px-3 py-3">
+            <LitDetailTable details={details} columnIds={detailColumns} />
           </td>
         </tr>
       ) : null}
