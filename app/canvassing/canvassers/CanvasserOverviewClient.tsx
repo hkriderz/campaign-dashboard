@@ -18,6 +18,8 @@ import {
   filterLitQcCanvasserRows,
   flattenLitQcDetails,
   LIT_QC_DETAIL_COLUMNS,
+  LIT_QC_FLYER_FILTER_OPTIONS,
+  LIT_QC_LIT_FILTER_OPTIONS,
   litQcCanvasserOptions,
   litQcDetailCellValue,
   litQcDetailHeaders,
@@ -269,6 +271,13 @@ export default function CanvasserOverviewClient() {
     return text ? `?${text}` : "";
   }, [litStartDate, litEndDate, litQcStartDate, litQcEndDate, litProjects]);
 
+  // Household-level filters need nested households; summary payloads omit them.
+  const litNeedsHouseholdDetails =
+    litQcCanvassersSelected.length > 0 ||
+    Boolean(litPdiSearch.trim()) ||
+    litObservationsSelected.length > 0 ||
+    litFlyerAnswersSelected.length > 0;
+
   const loadLit = useCallback((signal: AbortSignal) => {
     setLitLoading(true);
     setLitError(null);
@@ -276,7 +285,11 @@ export default function CanvasserOverviewClient() {
     setLitDetailError(null);
     return (async () => {
       try {
-        const res = await fetch(`/api/canvassing/canvassers/lit${litQuery}`, { signal });
+        const joiner = litQuery ? "&" : "?";
+        const url = litNeedsHouseholdDetails
+          ? `/api/canvassing/canvassers/lit${litQuery}${joiner}includeDetails=1`
+          : `/api/canvassing/canvassers/lit${litQuery}`;
+        const res = await fetch(url, { signal });
         const body = (await res.json()) as ApiResponse<LitQcTally>;
         if (signal.aborted) return;
         if (!res.ok || !body.ok || !body.data) {
@@ -290,7 +303,7 @@ export default function CanvasserOverviewClient() {
         if (!signal.aborted) setLitLoading(false);
       }
     })();
-  }, [litQuery]);
+  }, [litNeedsHouseholdDetails, litQuery]);
 
   const fetchLitCanvassersWithDetails = useCallback(async (): Promise<LitQcCanvasserRow[]> => {
     const joiner = litQuery ? "&" : "?";
@@ -366,8 +379,15 @@ export default function CanvasserOverviewClient() {
   const litRows = litPayload?.canvassers ?? [];
   const litCanvasserOptions = useMemo(() => litRows.map((row) => row.canvasserName), [litRows]);
   const litQcCanvasserFilterOptions = useMemo(() => litQcCanvasserOptions(litRows), [litRows]);
-  const litObservationFilterOptions = useMemo(() => litQcLitObservationOptions(litRows), [litRows]);
-  const litFlyerFilterOptions = useMemo(() => litQcFlyerAnswerOptions(litRows), [litRows]);
+  // Summary payloads omit households; fall back to full option lists so filters stay usable.
+  const litObservationFilterOptions = useMemo(() => {
+    const present = litQcLitObservationOptions(litRows);
+    return present.length ? present : [...LIT_QC_LIT_FILTER_OPTIONS];
+  }, [litRows]);
+  const litFlyerFilterOptions = useMemo(() => {
+    const present = litQcFlyerAnswerOptions(litRows);
+    return present.length ? present : [...LIT_QC_FLYER_FILTER_OPTIONS];
+  }, [litRows]);
   const visibleLitCanvassers = useMemo(() => {
     const byOriginal = filterNamedRows(
       litRows,

@@ -847,6 +847,9 @@ export function litQcFlyerAnswerOptions(rows: readonly LitQcCanvasserRow[]): str
 /**
  * Client-side Lit QC filters after the date/project API response.
  * QC canvasser matching uses the caller's name matcher (usually recontactNamesMatch).
+ *
+ * Summary API rows omit `households` but keep aggregate counts. With no household-level
+ * filters, return those rows as-is so the table is not wiped empty.
  */
 export function filterLitQcCanvasserRows(
   rows: readonly LitQcCanvasserRow[],
@@ -867,6 +870,13 @@ export function filterLitQcCanvasserRows(
   const namesMatch =
     options.namesMatch ??
     ((left, right) => canvasserIdentityKey(left) === canvasserIdentityKey(right) && Boolean(canvasserIdentityKey(left)));
+
+  const needsHouseholds =
+    selected.length > 0 || Boolean(pdiQuery) || litObservations.length > 0 || flyerAnswers.length > 0;
+  if (!needsHouseholds) return [...rows];
+
+  // Summary payloads have counts but empty households — keep rows until details arrive.
+  if (!rows.some((row) => row.households.length > 0)) return [...rows];
 
   return rows
     .map((row) =>

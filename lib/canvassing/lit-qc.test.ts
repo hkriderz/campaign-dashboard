@@ -523,6 +523,13 @@ test("one lit and one flyer per PDI per QC day merge even a minute apart", () =>
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { litObservations: ["Saw lit"] }).length, 0);
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Got flyer"] }).length, 1);
   assert.equal(filterLitQcCanvasserRows(tally.canvassers, { flyerAnswers: ["Didn't get flyer"] }).length, 0);
+
+  const summaryOnly = litQcSummaryCanvassers(tally.canvassers);
+  assert.deepEqual(summaryOnly[0]?.households, []);
+  assert.equal(filterLitQcCanvasserRows(summaryOnly, {}).length, 1);
+  assert.equal(filterLitQcCanvasserRows(summaryOnly, {})[0]?.householdsChecked, 1);
+  // Detail filters stay open until households are present (summary → details fetch).
+  assert.equal(filterLitQcCanvasserRows(summaryOnly, { pdiQuery: "12721125" }).length, 1);
 });
 
 test("same PDI on two QC days stays two visits; same-time PDIs are one household", () => {
