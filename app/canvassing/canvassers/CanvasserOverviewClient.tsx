@@ -17,15 +17,20 @@ import {
   defaultVisibleLitQcDetailColumnIds,
   filterLitQcCanvasserRows,
   flattenLitQcDetails,
+  DEFAULT_LIT_QC_CAMPAIGN_START,
   LIT_QC_DETAIL_COLUMNS,
   LIT_QC_FLYER_FILTER_OPTIONS,
   LIT_QC_LIT_FILTER_OPTIONS,
+  LIT_QC_ORIGINAL_MARK_OPTIONS,
   litQcCanvasserOptions,
   litQcDetailCellValue,
   litQcDetailHeaders,
   litQcFlyerAnswerOptions,
   litQcLitObservationOptions,
+  litQcOriginalMarkOptions,
+  loadLitQcCampaignStart,
   loadLitQcDetailColumnIds,
+  saveLitQcCampaignStart,
   saveLitQcDetailColumnIds,
   summarizeLitQc,
   toggleLitQcDetailColumn,
@@ -211,7 +216,9 @@ export default function CanvasserOverviewClient() {
   const [litQcCanvasserMode, setLitQcCanvasserMode] = useState<PeopleFilterMode>("include");
   const [litObservationsSelected, setLitObservationsSelected] = useState<string[]>([]);
   const [litFlyerAnswersSelected, setLitFlyerAnswersSelected] = useState<string[]>([]);
+  const [litOriginalMarksSelected, setLitOriginalMarksSelected] = useState<string[]>([]);
   const [litPdiSearch, setLitPdiSearch] = useState("");
+  const [litCampaignStartDate, setLitCampaignStartDate] = useState(DEFAULT_LIT_QC_CAMPAIGN_START);
   const [litCopySummaryLabel, setLitCopySummaryLabel] = useState("Copy summary");
   const [litCopyDetailsLabel, setLitCopyDetailsLabel] = useState("Copy details");
   const [litDetailColumns, setLitDetailColumns] = useState<LitQcDetailColumnId[]>(
@@ -228,6 +235,7 @@ export default function CanvasserOverviewClient() {
   useEffect(() => {
     setDetailColumns(loadOverviewDetailColumnIds(CANVASSER_OVERVIEW_DETAIL_COLS_STORAGE_KEY));
     setLitDetailColumns(loadLitQcDetailColumnIds());
+    setLitCampaignStartDate(loadLitQcCampaignStart());
   }, []);
 
   const query = useMemo(() => {
@@ -266,17 +274,19 @@ export default function CanvasserOverviewClient() {
     if (litEndDate) params.set("endDate", litEndDate);
     if (litQcStartDate) params.set("qcStartDate", litQcStartDate);
     if (litQcEndDate) params.set("qcEndDate", litQcEndDate);
+    if (litCampaignStartDate) params.set("campaignStartDate", litCampaignStartDate);
     for (const project of litProjects) params.append("project", project);
     const text = params.toString();
     return text ? `?${text}` : "";
-  }, [litStartDate, litEndDate, litQcStartDate, litQcEndDate, litProjects]);
+  }, [litStartDate, litEndDate, litQcStartDate, litQcEndDate, litCampaignStartDate, litProjects]);
 
   // Household-level filters need nested households; summary payloads omit them.
   const litNeedsHouseholdDetails =
     litQcCanvassersSelected.length > 0 ||
     Boolean(litPdiSearch.trim()) ||
     litObservationsSelected.length > 0 ||
-    litFlyerAnswersSelected.length > 0;
+    litFlyerAnswersSelected.length > 0 ||
+    litOriginalMarksSelected.length > 0;
 
   const loadLit = useCallback((signal: AbortSignal) => {
     setLitLoading(true);
@@ -388,6 +398,10 @@ export default function CanvasserOverviewClient() {
     const present = litQcFlyerAnswerOptions(litRows);
     return present.length ? present : [...LIT_QC_FLYER_FILTER_OPTIONS];
   }, [litRows]);
+  const litOriginalMarkFilterOptions = useMemo(() => {
+    const present = litQcOriginalMarkOptions(litRows);
+    return present.length ? present : [...LIT_QC_ORIGINAL_MARK_OPTIONS];
+  }, [litRows]);
   const visibleLitCanvassers = useMemo(() => {
     const byOriginal = filterNamedRows(
       litRows,
@@ -402,6 +416,7 @@ export default function CanvasserOverviewClient() {
       pdiQuery: litPdiSearch,
       litObservations: litObservationsSelected,
       flyerAnswers: litFlyerAnswersSelected,
+      originalMarks: litOriginalMarksSelected,
       namesMatch: recontactNamesMatch,
     });
   }, [
@@ -413,6 +428,7 @@ export default function CanvasserOverviewClient() {
     litPdiSearch,
     litObservationsSelected,
     litFlyerAnswersSelected,
+    litOriginalMarksSelected,
   ]);
   const litTotals = useMemo(() => summarizeLitQc(visibleLitCanvassers), [visibleLitCanvassers]);
   const litVoterTotal = useMemo(
@@ -691,6 +707,27 @@ export default function CanvasserOverviewClient() {
                 selected={litFlyerAnswersSelected}
                 onSelectedChange={setLitFlyerAnswersSelected}
               />
+              <CheckboxFilterMenu
+                label="Original mark"
+                options={litOriginalMarkFilterOptions}
+                selected={litOriginalMarksSelected}
+                onSelectedChange={setLitOriginalMarksSelected}
+              />
+              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--section-muted)]">
+                <span className="whitespace-nowrap">Campaign start</span>
+                <input
+                  type="date"
+                  value={litCampaignStartDate}
+                  onChange={(event) => {
+                    const next = event.target.value || DEFAULT_LIT_QC_CAMPAIGN_START;
+                    setLitCampaignStartDate(next);
+                    saveLitQcCampaignStart(next);
+                    setOpenId(null);
+                  }}
+                  className="border border-[var(--section-rule)] bg-transparent px-2 py-1 text-xs text-[var(--section-ink)]"
+                  title="Not Home / Gated history is collected from this day forward"
+                />
+              </label>
               <label className="inline-flex items-center gap-1.5 text-xs text-[var(--section-muted)]">
                 <span className="whitespace-nowrap">PDI</span>
                 <input

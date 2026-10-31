@@ -13,6 +13,10 @@ import { isKnockNonContactQuestion } from "./knock-dispositions";
 export const LIT_QC_UNMATCHED = "Unmatched";
 const LA_TIME_ZONE = "America/Los_Angeles";
 
+/** Default campaign start for collecting Not Home / Gated history (global Lit QC setting). */
+export const DEFAULT_LIT_QC_CAMPAIGN_START = "2026-09-05";
+export const LIT_QC_CAMPAIGN_START_STORAGE_KEY = "lit-qc-campaign-start";
+
 export type LitObservation = "saw" | "didnt";
 export type FlyerAnswer = "got" | "didnt" | "undecided";
 
@@ -26,15 +30,27 @@ export type LitQcSourceRow = {
   voterName?: string;
 };
 
+/** One Not Home or Gated knock before the QC visit. */
+export type LitQcOriginalMarkHit = {
+  mark: string;
+  occurredAt: string;
+  canvasserName: string;
+};
+
 export type LitQcVoter = {
   primaryId: string;
   voterName: string;
   flyer: FlyerAnswer | null;
   originalCanvasser: string;
-  /** Short disposition the original canvasser marked that day (usually Not Home). */
+  /**
+   * Display line of Not Home / Gated marks (with times), after campaign-start filtering.
+   * May include a multi-canvasser side note when flattened for the detail table.
+   */
   originalMark: string;
-  /** ISO timestamp of the original lit-drop / not-home knock. */
+  /** ISO timestamp of the preferred original lit-drop / not-home knock. */
   originalAt: string;
+  /** All NH/Gated knocks before QC (campaign-start applied in `applyLitQcCampaignStart`). */
+  originalMarks: LitQcOriginalMarkHit[];
   project: string;
   projectDate: string;
 };
@@ -52,6 +68,8 @@ export type LitQcHousehold = {
   voters: LitQcVoter[];
   /** True when multiple voters share this exact QC timestamp (one household). */
   sameDoorGroup: boolean;
+  /** Side note when NH/Gated history includes canvassers beyond the preferred owner. */
+  priorCanvassersNote: string;
 };
 
 export type LitQcCanvasserRow = {
@@ -116,6 +134,8 @@ type VoterVisit = {
   litConflict: boolean;
   flyer: FlyerAnswer | null;
   prior: PriorHit | null;
+  /** All Not Home / Gated knocks before this QC visit (full history; campaign start applied later). */
+  originalMarks: LitQcOriginalMarkHit[];
 };
 
 export function isLitObservationQuestion(question: string): boolean {
@@ -161,6 +181,7 @@ export function litObservationLabel(lit: LitObservation | null, disagreement: bo
 
 export const LIT_QC_LIT_FILTER_BLANK = "No lit observation";
 export const LIT_QC_FLYER_FILTER_BLANK = "No flyer answer";
+export const LIT_QC_ORIGINAL_MARK_BLANK = "No original mark";
 
 export const LIT_QC_LIT_FILTER_OPTIONS = [
   "Saw lit",
@@ -175,6 +196,86 @@ export const LIT_QC_FLYER_FILTER_OPTIONS = [
   "Didn't get flyer",
   LIT_QC_FLYER_FILTER_BLANK,
 ] as const;
+
+export const LIT_QC_ORIGINAL_MARK_OPTIONS = ["Not Home", "Gated", LIT_QC_ORIGINAL_MARK_BLANK] as const;
+
+export function isNotHomeOrGatedMark(response: string): boolean {
+  const mark = originalMarkLabel(response);
+  return mark === "Not Home" || mark === "Gated";
+}
+
+export function formatOriginalMarkStamp(occurredAt: string): string {
+  const stamp = occurredAt.trim();
+  if (!stamp) return "";
+  const parsed = DateTime.fromISO(stamp, { setZone: true });
+  if (!parsed.isValid) return stamp;
+  return parsed.setZone(LA_TIME_ZONE).toFormat("M/d/yy h:mm a");
+}
+
+/** One line: `Not Home 9/12/26 4:10 PM · Gated 10/3/26 2:05 PM`. */
+export function formatOriginalMarksLine(marks: readonly LitQcOriginalMarkHit[]): string {
+  return marks
+    .map((mark) => {
+      const when = formatOriginalMarkStamp(mark.occurredAt);
+      return when ? `${mark.mark} ${when}` : mark.mark;
+    })
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function filterOriginalMarksByCampaignStart(
+  marks: readonly LitQcOriginalMarkHit[],
+  campaignStartDate: string
+): LitQcOriginalMarkHit[] {
+  const start = campaignStartDate.trim();
+  if (!start) return [...marks];
+  return marks.filter((mark) => {
+    const day = laDate(mark.occurredAt);
+    return Boolean(day) && day >= start;
+  });
+}
+
+/** Other canvassers who also left NH/Gated (beyond the preferred owner). */
+export function buildPriorCanvassersNote(
+  marks: readonly LitQcOriginalMarkHit[],
+  preferredCanvasser: string
+): string {
+  const preferredKey = canvasserIdentityKey(preferredCanvasser);
+  const others = new Map<string, string>();
+  for (const mark of marks) {
+    const name = mark.canvasserName.trim();
+    if (!name) continue;
+    const key = canvasserIdentityKey(name) || name.toLowerCase();
+    if (preferredKey && key === preferredKey) continue;
+    if (!others.has(key)) others.set(key, name);
+  }
+  if (!others.size) return "";
+  const list = [...others.values()].sort((a, b) => a.localeCompare(b));
+  return list.length === 1 ? `Also marked by ${list[0]}` : `Also marked by ${list.join(", ")}`;
+}
+
+export function normalizeLitQcCampaignStart(raw: string | null | undefined): string {
+  const value = raw?.trim() ?? "";
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : DEFAULT_LIT_QC_CAMPAIGN_START;
+}
+
+export function loadLitQcCampaignStart(): string {
+  if (typeof window === "undefined") return DEFAULT_LIT_QC_CAMPAIGN_START;
+  try {
+    return normalizeLitQcCampaignStart(window.localStorage.getItem(LIT_QC_CAMPAIGN_START_STORAGE_KEY));
+  } catch {
+    return DEFAULT_LIT_QC_CAMPAIGN_START;
+  }
+}
+
+export function saveLitQcCampaignStart(value: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LIT_QC_CAMPAIGN_START_STORAGE_KEY, normalizeLitQcCampaignStart(value));
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
 export function litObservationFilterLabel(lit: LitObservation | null, disagreement: boolean): string {
   return litObservationLabel(lit, disagreement) || LIT_QC_LIT_FILTER_BLANK;
@@ -240,6 +341,41 @@ function compareOccurredAtDesc(a: string, b: string): number {
   const bMs = Date.parse(b);
   if (Number.isFinite(aMs) && Number.isFinite(bMs) && aMs !== bMs) return bMs - aMs;
   return b.localeCompare(a);
+}
+
+function compareOccurredAtAsc(a: string, b: string): number {
+  return -compareOccurredAtDesc(a, b);
+}
+
+/**
+ * Every Not Home / Gated knock for this PDI strictly before the QC visit.
+ * Dedupes same mark + LA day + canvasser. Campaign start is applied later.
+ */
+function collectNhGatedMarks(
+  priors: readonly PriorHit[] | undefined,
+  beforeAt: string
+): LitQcOriginalMarkHit[] {
+  if (!priors?.length) return [];
+  const seen = new Set<string>();
+  const out: LitQcOriginalMarkHit[] = [];
+  for (const prior of priors) {
+    if (!knockOccurredBefore(prior.occurredAt, beforeAt)) continue;
+    if (!isNotHomeOrGatedMark(prior.response)) continue;
+    const mark = originalMarkLabel(prior.response);
+    const day = priorDay(prior);
+    const canvasserKey =
+      canvasserIdentityKey(prior.canvasserName) || prior.canvasserName.trim().toLowerCase();
+    const key = `${mark}|${day}|${canvasserKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      mark,
+      occurredAt: prior.occurredAt.trim(),
+      canvasserName: prior.canvasserName.trim(),
+    });
+  }
+  out.sort((a, b) => compareOccurredAtAsc(a.occurredAt, b.occurredAt));
+  return out;
 }
 
 /**
@@ -559,6 +695,7 @@ function buildVisits(
     const dayKey = visitDayKey(primaryId, occurredAt);
     let visit = visitsByDay.get(dayKey);
     if (!visit) {
+      const priorList = priors.get(primaryId);
       visit = {
         primaryId,
         voterName: "",
@@ -570,7 +707,8 @@ function buildVisits(
         lit: null,
         litConflict: false,
         flyer: null,
-        prior: latestPrior(priors.get(primaryId), occurredAt, assignmentName, qcCanvasser),
+        prior: latestPrior(priorList, occurredAt, assignmentName, qcCanvasser),
+        originalMarks: collectNhGatedMarks(priorList, occurredAt),
       };
       visitsByDay.set(dayKey, visit);
     }
@@ -583,12 +721,15 @@ function buildVisits(
     if (assignmentName && !visit.assignmentName) visit.assignmentName = assignmentName;
     pushFlagTime(visit, occurredAt);
     // Re-resolve prior after QC name settles so same-person same-day NH is deprioritized.
+    const priorList = priors.get(primaryId);
+    const priorAt = visit.occurredAt || occurredAt;
     visit.prior = latestPrior(
-      priors.get(primaryId),
-      visit.occurredAt || occurredAt,
+      priorList,
+      priorAt,
       visit.assignmentName || assignmentName,
       visit.qcCanvasser
     );
+    visit.originalMarks = collectNhGatedMarks(priorList, priorAt);
     if (litQuestion) {
       const lit = classifyLitObservation(row.response);
       // One lit flag per PDI per day — first wins unless a later row disagrees.
@@ -668,17 +809,29 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
     const lit = householdLit(doorVisits);
     const qcNames = doorVisits.map((visit) => visit.qcCanvasser);
     const voters = doorVisits
-      .map((visit) => ({
-        primaryId: visit.primaryId,
-        voterName: visit.voterName,
-        flyer: visit.flyer,
-        originalCanvasser: visit.prior?.canvasserName ?? "",
-        originalMark: visit.prior ? originalMarkLabel(visit.prior.response) : "",
-        originalAt: visit.prior?.occurredAt ?? "",
-        project: visit.prior?.project ?? "",
-        projectDate: visit.prior?.projectDate ?? "",
-      }))
+      .map((visit) => {
+        const originalMarks = visit.originalMarks;
+        return {
+          primaryId: visit.primaryId,
+          voterName: visit.voterName,
+          flyer: visit.flyer,
+          originalCanvasser: visit.prior?.canvasserName ?? "",
+          originalMark: formatOriginalMarksLine(originalMarks),
+          originalAt: visit.prior?.occurredAt ?? "",
+          originalMarks,
+          project: visit.prior?.project ?? "",
+          projectDate: visit.prior?.projectDate ?? "",
+        };
+      })
       .sort((a, b) => a.voterName.localeCompare(b.voterName) || a.primaryId.localeCompare(b.primaryId));
+    const preferredOwner =
+      owner.name !== LIT_QC_UNMATCHED
+        ? owner.name
+        : preferredCanvasserName(voters.map((voter) => voter.originalCanvasser).filter(Boolean));
+    const priorCanvassersNote = buildPriorCanvassersNote(
+      voters.flatMap((voter) => voter.originalMarks),
+      preferredOwner
+    );
     households.set(key, {
       ownerKey: owner.key,
       household: {
@@ -692,6 +845,7 @@ function buildHouseholds(visits: readonly VoterVisit[]): Map<string, { ownerKey:
         projectDate: owner.projectDate,
         voters,
         sameDoorGroup: voters.length > 1,
+        priorCanvassersNote,
       },
     });
   }
@@ -760,6 +914,57 @@ export function filterLitQc(tally: LitQcTally, filter: LitQcFilter): LitQcTally 
     ...tally,
     canvassers,
   };
+}
+
+function projectVoterMarksForCampaignStart(
+  voter: LitQcVoter,
+  campaignStartDate: string
+): LitQcVoter {
+  const originalMarks = filterOriginalMarksByCampaignStart(voter.originalMarks, campaignStartDate);
+  return {
+    ...voter,
+    originalMarks,
+    originalMark: formatOriginalMarksLine(originalMarks),
+  };
+}
+
+function projectHouseholdForCampaignStart(
+  household: LitQcHousehold,
+  campaignStartDate: string
+): LitQcHousehold {
+  const voters = household.voters.map((voter) =>
+    projectVoterMarksForCampaignStart(voter, campaignStartDate)
+  );
+  const preferredOwner = preferredCanvasserName(
+    voters.map((voter) => voter.originalCanvasser).filter(Boolean)
+  );
+  return {
+    ...household,
+    voters,
+    priorCanvassersNote: buildPriorCanvassersNote(
+      voters.flatMap((voter) => voter.originalMarks),
+      preferredOwner
+    ),
+  };
+}
+
+/**
+ * Restrict NH/Gated history to knocks on/after the global campaign start date and
+ * refresh display strings + multi-canvasser notes. Does not change ownership.
+ */
+export function applyLitQcCampaignStart(
+  tally: LitQcTally,
+  campaignStartDate: string
+): LitQcTally {
+  const start = normalizeLitQcCampaignStart(campaignStartDate);
+  const canvassers = tally.canvassers.map((row) =>
+    rowFromHouseholds(
+      row.canvasserName,
+      row.households.map((household) => projectHouseholdForCampaignStart(household, start)),
+      row.rowId
+    )
+  );
+  return { ...tally, canvassers };
 }
 
 /** Drop nested households for summary table responses (details load on expand). */
@@ -866,6 +1071,36 @@ export function litQcFlyerAnswerOptions(rows: readonly LitQcCanvasserRow[]): str
   return LIT_QC_FLYER_FILTER_OPTIONS.filter((option) => present.has(option));
 }
 
+export function litQcOriginalMarkOptions(rows: readonly LitQcCanvasserRow[]): string[] {
+  const present = new Set<string>();
+  for (const row of rows) {
+    for (const household of row.households) {
+      if (!household.voters.length) {
+        present.add(LIT_QC_ORIGINAL_MARK_BLANK);
+        continue;
+      }
+      for (const voter of household.voters) {
+        if (!voter.originalMarks.length) present.add(LIT_QC_ORIGINAL_MARK_BLANK);
+        for (const mark of voter.originalMarks) present.add(mark.mark);
+      }
+    }
+  }
+  return LIT_QC_ORIGINAL_MARK_OPTIONS.filter((option) => present.has(option));
+}
+
+function householdMatchesOriginalMarks(
+  household: LitQcHousehold,
+  selected: readonly string[]
+): boolean {
+  if (!selected.length) return true;
+  if (!household.voters.length) return selected.includes(LIT_QC_ORIGINAL_MARK_BLANK);
+  return household.voters.some((voter) => {
+    if (!voter.originalMarks.length) return selected.includes(LIT_QC_ORIGINAL_MARK_BLANK);
+    // OR: a PDI with both Not Home and Gated matches when either is selected.
+    return voter.originalMarks.some((mark) => selected.includes(mark.mark));
+  });
+}
+
 /**
  * Client-side Lit QC filters after the date/project API response.
  * QC canvasser matching uses the caller's name matcher (usually recontactNamesMatch).
@@ -881,6 +1116,7 @@ export function filterLitQcCanvasserRows(
     pdiQuery?: string;
     litObservations?: readonly string[];
     flyerAnswers?: readonly string[];
+    originalMarks?: readonly string[];
     namesMatch?: (left: string, right: string) => boolean;
   }
 ): LitQcCanvasserRow[] {
@@ -889,12 +1125,17 @@ export function filterLitQcCanvasserRows(
   const pdiQuery = options.pdiQuery?.trim() ?? "";
   const litObservations = (options.litObservations ?? []).map((value) => value.trim()).filter(Boolean);
   const flyerAnswers = (options.flyerAnswers ?? []).map((value) => value.trim()).filter(Boolean);
+  const originalMarks = (options.originalMarks ?? []).map((value) => value.trim()).filter(Boolean);
   const namesMatch =
     options.namesMatch ??
     ((left, right) => canvasserIdentityKey(left) === canvasserIdentityKey(right) && Boolean(canvasserIdentityKey(left)));
 
   const needsHouseholds =
-    selected.length > 0 || Boolean(pdiQuery) || litObservations.length > 0 || flyerAnswers.length > 0;
+    selected.length > 0 ||
+    Boolean(pdiQuery) ||
+    litObservations.length > 0 ||
+    flyerAnswers.length > 0 ||
+    originalMarks.length > 0;
   if (!needsHouseholds) return [...rows];
 
   // Summary payloads have counts but empty households — keep rows until details arrive.
@@ -909,7 +1150,8 @@ export function filterLitQcCanvasserRows(
             householdMatchesQcCanvassers(household, selected, mode, namesMatch) &&
             householdMatchesPdi(household, pdiQuery) &&
             householdMatchesLitObservations(household, litObservations) &&
-            householdMatchesFlyerAnswers(household, flyerAnswers)
+            householdMatchesFlyerAnswers(household, flyerAnswers) &&
+            householdMatchesOriginalMarks(household, originalMarks)
         ),
         row.rowId
       )
@@ -1072,7 +1314,7 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
       if (!household.voters.length) {
         details.push({
           canvasserName: row.canvasserName,
-          originalMark: "",
+          originalMark: household.priorCanvassersNote || "",
           originalTime: "",
           litObservation: lit,
           qcCanvasser: household.qcCanvasser,
@@ -1091,9 +1333,14 @@ export function flattenLitQcDetails(rows: readonly LitQcCanvasserRow[]): LitQcDe
         continue;
       }
       for (const voter of household.voters) {
+        const markLine = voter.originalMark || formatOriginalMarksLine(voter.originalMarks);
+        const originalMark =
+          markLine && household.priorCanvassersNote
+            ? `${markLine} — ${household.priorCanvassersNote}`
+            : markLine || household.priorCanvassersNote || "";
         details.push({
           canvasserName: row.canvasserName,
-          originalMark: voter.originalMark,
+          originalMark,
           originalTime: voter.originalAt,
           litObservation: lit,
           qcCanvasser: household.qcCanvasser,

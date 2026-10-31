@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCachedLitQcTally } from "@/lib/canvassing/lit-qc-cache";
 import {
+  applyLitQcCampaignStart,
   filterLitQc,
   findLitQcCanvasser,
   litQcProjectsInDateRange,
   litQcSummaryCanvassers,
+  normalizeLitQcCampaignStart,
   type LitQcCanvasserRow,
   type LitQcFilter,
 } from "@/lib/canvassing/lit-qc";
@@ -23,6 +25,7 @@ export type LitQcPayload = {
   maxDate: string;
   minQcDate: string;
   maxQcDate: string;
+  campaignStartDate: string;
   projects: string[];
   canvassers: LitQcCanvasserRow[];
 };
@@ -41,10 +44,11 @@ export const GET = withCredentialContext(async (req) => {
   try {
     const url = new URL(req.url);
     const filter = parseLitQcFilter(url);
+    const campaignStartDate = normalizeLitQcCampaignStart(url.searchParams.get("campaignStartDate"));
     const rowId = url.searchParams.get("rowId")?.trim() ?? "";
     const includeDetails = url.searchParams.get("includeDetails") === "1";
 
-    const tally = getCachedLitQcTally();
+    const tally = applyLitQcCampaignStart(getCachedLitQcTally(), campaignStartDate);
     const filtered = filterLitQc(tally, filter);
 
     // Single-canvasser expand: return that row with households only.
@@ -69,6 +73,7 @@ export const GET = withCredentialContext(async (req) => {
       maxDate: tally.maxDate,
       minQcDate: tally.minQcDate,
       maxQcDate: tally.maxQcDate,
+      campaignStartDate,
       projects: litQcProjectsInDateRange(
         tally,
         filter.startDate ?? "",

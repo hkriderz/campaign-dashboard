@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   LIT_QC_UNMATCHED,
+  applyLitQcCampaignStart,
   buildLitQc,
   buildLitQcDetailTsv,
   classifyFlyerAnswer,
@@ -12,6 +13,7 @@ import {
   flattenLitQcDetails,
   isFlyerReceiptQuestion,
   knockOccurredBefore,
+  laDate,
   litQcCanvasserOptions,
   litQcSummaryCanvassers,
   priorDatesFromAssignment,
@@ -291,10 +293,10 @@ test("detail rows and copy TSV use the selected columns", () => {
   const details = flattenLitQcDetails(tally.canvassers);
   assert.equal(details.length, 1);
   assert.equal(details[0]!.flyer, "Got flyer");
-  assert.equal(details[0]!.originalMark, "Not Home");
+  assert.match(details[0]!.originalMark, /^Not Home /);
   const tsv = buildLitQcDetailTsv(tally.canvassers, ["voterName", "originalMark", "flyer", "litObservation"]);
   assert.match(tsv, /^Voter\tOriginal mark\tFlyer\tLit observation/);
-  assert.match(tsv, /Ada Lopez\tNot Home\tGot flyer\tSaw lit/);
+  assert.match(tsv, /Ada Lopez\tNot Home .+\tGot flyer\tSaw lit/);
 });
 
 test("flyer-only QC visits leave lit observation blank instead of No lit observation", () => {
@@ -315,7 +317,7 @@ test("flyer-only QC visits leave lit observation blank instead of No lit observa
     }),
   ]);
   const detail = flattenLitQcDetails(tally.canvassers)[0]!;
-  assert.equal(detail.originalMark, "Not Home");
+  assert.match(detail.originalMark, /^Not Home /);
   assert.equal(detail.litObservation, "");
   assert.equal(detail.flyer, "Got flyer");
 });
@@ -340,7 +342,9 @@ test("gated counts as an earlier lit-drop prior, not only not home", () => {
     }),
   ]);
   assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
-  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Gated");
+  const voter = tally.canvassers[0]?.households[0]?.voters[0];
+  assert.match(voter?.originalMark ?? "", /^Gated /);
+  assert.equal(voter?.originalMarks[0]?.mark, "Gated");
 });
 
 test("mixed Z and offset timestamps still match an earlier not-home", () => {
@@ -370,7 +374,7 @@ test("mixed Z and offset timestamps still match an earlier not-home", () => {
   assert.equal(tally.canvassers.length, 1);
   assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
   assert.equal(tally.canvassers[0]?.gotFlyer, 1);
-  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Not Home");
+  assert.match(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark ?? "", /^Not Home /);
 });
 
 test("assignment-named prior days recover a not-home on that calendar day", () => {
@@ -399,7 +403,10 @@ test("assignment-named prior days recover a not-home on that calendar day", () =
     }),
   ]);
   assert.equal(tally.canvassers[0]?.canvasserName, "Original, Pat");
-  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "Lit Drop");
+  // Lit Drop still owns the household; NH/Gated display list stays empty for that prior type.
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalCanvasser, "Original, Pat");
+  assert.deepEqual(tally.canvassers[0]?.households[0]?.voters[0]?.originalMarks, []);
+  assert.equal(tally.canvassers[0]?.households[0]?.voters[0]?.originalMark, "");
 });
 
 test("date range and project filters use the original lit-drop day", () => {
@@ -593,6 +600,74 @@ test("same PDI on two QC days stays two visits; same-time PDIs are one household
   const laterDay = canvasser!.households.find((household) => household.voters.length === 1);
   assert.ok(laterDay);
   assert.equal(laterDay!.lit, null);
+});
+
+test("NH and Gated history shows both marks; OR filter; campaign start; multi-canvasser note", () => {
+  const tally = buildLitQc([
+    row({
+      canvasserName: "Alpha, Ann",
+      assignmentName: "Walk A",
+      occurredAt: "2026-08-01T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA-BOTH",
+    }),
+    row({
+      canvasserName: "Alpha, Ann",
+      assignmentName: "Walk B",
+      occurredAt: "2026-09-10T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Not Home",
+      primaryId: "CA-BOTH",
+    }),
+    row({
+      canvasserName: "Beta, Bob",
+      assignmentName: "Walk C",
+      occurredAt: "2026-10-01T16:00:00.000-07:00",
+      question: "Non-Contact Mobile",
+      response: "Gated",
+      primaryId: "CA-BOTH",
+    }),
+    row({
+      canvasserName: "QC, One",
+      assignmentName: "Lit QC",
+      occurredAt: "2026-10-20T14:00:00.000-07:00",
+      question: "Lit Observation",
+      response: "Saw Lit",
+      primaryId: "CA-BOTH",
+    }),
+  ]);
+
+  const voter = tally.canvassers[0]?.households[0]?.voters[0];
+  assert.ok(voter);
+  assert.equal(voter!.originalMarks.length, 3);
+  assert.equal(voter!.originalMarks[0]?.mark, "Not Home");
+  assert.equal(voter!.originalMarks[2]?.mark, "Gated");
+  assert.match(voter!.originalMark, /Not Home .+ · Gated /);
+  assert.match(tally.canvassers[0]!.households[0]!.priorCanvassersNote, /Also marked by/);
+
+  const afterStart = applyLitQcCampaignStart(tally, "2026-09-05");
+  const trimmed = afterStart.canvassers[0]?.households[0]?.voters[0];
+  assert.equal(trimmed?.originalMarks.length, 2);
+  assert.equal(trimmed?.originalMarks[0]?.mark, "Not Home");
+  assert.ok(trimmed!.originalMarks.every((mark) => laDate(mark.occurredAt) >= "2026-09-05"));
+
+  assert.equal(
+    filterLitQcCanvasserRows(afterStart.canvassers, { originalMarks: ["Not Home"] }).length,
+    1
+  );
+  assert.equal(
+    filterLitQcCanvasserRows(afterStart.canvassers, { originalMarks: ["Gated"] }).length,
+    1
+  );
+  assert.equal(
+    filterLitQcCanvasserRows(afterStart.canvassers, { originalMarks: ["Not Home", "Gated"] }).length,
+    1
+  );
+
+  const detail = flattenLitQcDetails(afterStart.canvassers)[0]!;
+  assert.match(detail.originalMark, /Not Home .+ · Gated /);
+  assert.match(detail.originalMark, /Also marked by/);
 });
 
 test("summary canvassers drop households; findLitQcCanvasser keeps details by rowId", () => {
