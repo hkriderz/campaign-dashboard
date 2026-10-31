@@ -101,3 +101,32 @@ export function mappingAnswerKey(
 ): string {
   return `${mappingQuestionKey(channel, displaySurveyName, questionName, scope)}||${answerValue}`;
 }
+
+/** Campaign mapping wins. Text falls back to the shared Nithya lesson. */
+export function lookupMappedQuestion<T>(
+  mappings: Record<string, T>,
+  channel: PdiSyncChannel,
+  surveyName: string,
+  questionName: string
+): T | undefined {
+  const own = mappings[`${surveyName}||${questionName}`];
+  if (own) return own;
+  if (channel !== "text" || surveyName === TEXT_MAPPING_SURVEY_NAME) return undefined;
+  return mappings[`${TEXT_MAPPING_SURVEY_NAME}||${questionName}`];
+}
+
+/** Shared text answers apply only when this list has not mapped the question itself. */
+export function lookupMappedAnswer<T>(
+  mappings: Record<string, T>,
+  questionMappings: Record<string, unknown>,
+  channel: PdiSyncChannel,
+  surveyName: string,
+  questionName: string,
+  answerValue: string
+): T | undefined {
+  const own = mappings[`${surveyName}||${questionName}||${answerValue}`];
+  if (own) return own;
+  if (channel !== "text" || surveyName === TEXT_MAPPING_SURVEY_NAME) return undefined;
+  if (questionMappings[`${surveyName}||${questionName}`]) return undefined;
+  return mappings[`${TEXT_MAPPING_SURVEY_NAME}||${questionName}||${answerValue}`];
+}

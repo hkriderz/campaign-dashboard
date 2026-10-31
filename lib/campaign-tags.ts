@@ -299,6 +299,26 @@ export function campaignBelongsInDailyAggregate(
   return membership === "qc" ? isQc : !isQc;
 }
 
+/** Primary texting tag whose search terms match this campaign display name. */
+export function resolveTextingTagForCampaignName(
+  campaignName: string
+): CampaignTag | undefined {
+  return getTextingTags().find((tag) => campaignNameMatchesTag(campaignName, tag));
+}
+
+export function campaignTagMatchesForNames(
+  names: string[],
+  kind: "phone" | "text"
+): Record<string, { id: string; label: string; searchTerms?: string[] } | null> {
+  const resolve = kind === "text" ? resolveTextingTagForCampaignName : resolvePhonebankingTagForCampaignName;
+  const out: Record<string, { id: string; label: string; searchTerms?: string[] } | null> = {};
+  for (const name of names) {
+    const tag = resolve(name);
+    out[name] = tag ? { id: tag.id, label: tag.label, searchTerms: tag.searchTerms } : null;
+  }
+  return out;
+}
+
 /** Look up a tag by its slug ID */
 export function getTagById(id: string): CampaignTag | undefined {
   return allTagsList().find((t) => t.id === id);

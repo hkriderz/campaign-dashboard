@@ -17,27 +17,30 @@ import type {
 import { autoMatchAllAnswers } from "./auto-match";
 import { hasMappableTextQuestions } from "./text-tag-stw-data";
 import {
-  mappingIdentitySurveyName,
   mapperStorageKey,
   parsePdiSyncChannel,
   parseTextMappingScope,
+  TEXT_MAPPING_SURVEY_NAME,
   type PdiSyncChannel,
   type TextMappingScope,
 } from "./channel";
-import { collectAnswersAcrossSurveys } from "./text-tag-stw-data";
 import {
   applyTemplatesToSurvey,
   buildQuestionTemplate,
+  copyMappedQuestion,
   deleteQuestionTemplate,
+  learnQuestionTemplate,
   parseQuestionTemplates,
   templateStorageKey,
   type QuestionTemplates,
 } from "./mapping-templates";
 import {
   premapPhonebanks,
+  premapTextLists,
   type PhonebankForPremap,
   type PhonebankMapScope,
   type PhonebankPremapSummary,
+  type PhonebankTagMatch,
 } from "./premap-phonebanks";
 
 const CHANNEL_STORAGE_KEY = "campaign_dashboard_pdi_mapper_channel";
@@ -102,6 +105,8 @@ export interface AppState {
   loadError: string | null;
   lastRefreshedAt: string | null;
   questionTemplates: QuestionTemplates;
+  /** Candidate tag for each loaded campaign, when the name matches the tag list. */
+  campaignTags: Record<string, PhonebankTagMatch | null>;
   /** Survey names for the selected day range. Null shows every loaded survey. */
   phonebankSurveyFilter: string[] | null;
   phonebankPremapSummary: PhonebankPremapSummary | null;
@@ -121,12 +126,18 @@ const initialState: AppState = {
   loadError: null,
   lastRefreshedAt: null,
   questionTemplates: {},
+  campaignTags: {},
   phonebankSurveyFilter: null,
   phonebankPremapSummary: null,
 };
 
 type Action =
-  | { type: "LOAD_DATA"; pdiQuestions: PdiQuestion[]; stwData: StwData }
+  | {
+      type: "LOAD_DATA";
+      pdiQuestions: PdiQuestion[];
+      stwData: StwData;
+      campaignTags?: Record<string, PhonebankTagMatch | null>;
+    }
   | { type: "SET_ACTIVE_SURVEY"; survey: string }
   | {
       type: "MAP_QUESTION";
@@ -178,6 +189,12 @@ type Action =
       campaigns: PhonebankForPremap[];
       scope: PhonebankMapScope;
     }
+  | {
+      type: "PREMAP_TEXT_LISTS";
+      campaigns: PhonebankForPremap[];
+      scope: PhonebankMapScope;
+    }
+  | { type: "PROMOTE_MAPPINGS"; surveyName: string; questionNames: string[] }
   | { type: "SET_PHONEBANK_FILTER"; names: string[] }
   | { type: "CLEAR_PHONEBANK_FILTER" };
 
@@ -187,6 +204,45 @@ function qKey(survey: string, question: string): string {
 
 function aKey(survey: string, question: string, answer: string): string {
   return `${survey}||${question}||${answer}`;
+}
+
+function learnMappedQuestion(
+  state: AppState,
+  displaySurveyName: string,
+  questionName: string,
+  answers: string[],
+  force: boolean
+): AppState {
+  const template = buildQuestionTemplate({
+    displaySurveyName,
+    writeSurveyName: displaySurveyName,
+    questionName,
+    questionMappings: state.questionMappings,
+    answerMappings: state.answerMappings,
+    answers,
+    candidateTagId: state.campaignTags[displaySurveyName]?.id ?? null,
+  });
+  if (!template) return state;
+  const existing = state.questionTemplates[questionName];
+  const diverged = Boolean(existing && existing.pdiQuestionId !== template.pdiQuestionId && !force);
+  const questionTemplates = diverged
+    ? state.questionTemplates
+    : {
+        ...state.questionTemplates,
+        [questionName]: learnQuestionTemplate(existing, template, force),
+      };
+  if (state.channel !== "text" || diverged) {
+    return { ...state, questionTemplates };
+  }
+  const mirrored = copyMappedQuestion({
+    questionMappings: state.questionMappings,
+    answerMappings: state.answerMappings,
+    fromSurvey: displaySurveyName,
+    toSurvey: TEXT_MAPPING_SURVEY_NAME,
+    questionName,
+    force,
+  });
+  return { ...state, questionTemplates, ...mirrored };
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -200,6 +256,7 @@ function reducer(state: AppState, action: Action): AppState {
         dataLoaded: true,
         loadError: null,
         isRefreshing: false,
+        campaignTags: action.campaignTags ?? {},
         phonebankSurveyFilter: null,
         phonebankPremapSummary: null,
       };
@@ -245,19 +302,15 @@ function reducer(state: AppState, action: Action): AppState {
         answerMappings = newAnswerMappings;
       }
 
-      const writeSurveyName = mappingIdentitySurveyName(
-        state.channel,
-        survey,
-        state.textMappingScope
-      );
       const applied = applyTemplatesToSurvey({
         displaySurveyName: survey,
-        writeSurveyName,
+        writeSurveyName: survey,
         surveyQuestions: state.stwData[survey] ?? {},
         templates: state.questionTemplates,
         questionMappings,
         answerMappings,
         pdiQuestions: state.pdiQuestions,
+        targetCandidateTagId: state.campaignTags[survey]?.id ?? null,
       });
 
       return {
@@ -303,19 +356,25 @@ function reducer(state: AppState, action: Action): AppState {
         };
       }
 
-      return {
-        ...state,
-        questionMappings: {
-          ...state.questionMappings,
-          [key]: {
-            pdiQuestionId,
-            mode: "question",
-            confidence: "manual",
-            method: "user-selected",
+      return learnMappedQuestion(
+        {
+          ...state,
+          questionMappings: {
+            ...state.questionMappings,
+            [key]: {
+              pdiQuestionId,
+              mode: "question",
+              confidence: "manual",
+              method: "user-selected",
+            },
           },
+          answerMappings: newAnswerMappings,
         },
-        answerMappings: newAnswerMappings,
-      };
+        surveyName,
+        questionName,
+        answers,
+        false
+      );
     }
 
     case "UNMAP_QUESTION": {
@@ -339,7 +398,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "MAP_ANSWER": {
       const { surveyName, questionName, answerValue, pdiQuestionId, option, confidence } = action;
       const key = aKey(surveyName, questionName, answerValue);
-      return {
+      const withAnswer: AppState = {
         ...state,
         answerMappings: {
           ...state.answerMappings,
@@ -354,6 +413,9 @@ function reducer(state: AppState, action: Action): AppState {
           },
         },
       };
+      if (confidence !== "manual") return withAnswer;
+      const questionAnswers = state.stwData[surveyName]?.[questionName] ?? [answerValue];
+      return learnMappedQuestion(withAnswer, surveyName, questionName, questionAnswers, false);
     }
 
     case "UNMAP_ANSWER": {
@@ -410,6 +472,7 @@ function reducer(state: AppState, action: Action): AppState {
         loadError: null,
         lastRefreshedAt: null,
         questionTemplates: {},
+        campaignTags: {},
         phonebankSurveyFilter: null,
         phonebankPremapSummary: null,
       };
@@ -460,6 +523,51 @@ function reducer(state: AppState, action: Action): AppState {
       };
     }
 
+    case "PREMAP_TEXT_LISTS": {
+      const premapped = premapTextLists({
+        campaigns: action.campaigns,
+        scope: action.scope,
+        stwData: state.stwData,
+        pdiQuestions: state.pdiQuestions,
+        questionMappings: state.questionMappings,
+        answerMappings: state.answerMappings,
+        questionTemplates: state.questionTemplates,
+      });
+      const included = premapped.summary.included;
+      const activeSurvey = included.includes(state.activeSurvey ?? "")
+        ? state.activeSurvey
+        : (included[0] ?? null);
+      return {
+        ...state,
+        questionMappings: premapped.questionMappings,
+        answerMappings: premapped.answerMappings,
+        phonebankSurveyFilter: included,
+        phonebankPremapSummary: premapped.summary,
+        activeSurvey,
+      };
+    }
+
+    case "PROMOTE_MAPPINGS": {
+      let next = state;
+      for (const questionName of action.questionNames) {
+        const answers = state.stwData[action.surveyName]?.[questionName] ?? [];
+        const own = next.questionMappings[`${action.surveyName}||${questionName}`];
+        if (!own && state.channel === "text") {
+          const shared = copyMappedQuestion({
+            questionMappings: next.questionMappings,
+            answerMappings: next.answerMappings,
+            fromSurvey: TEXT_MAPPING_SURVEY_NAME,
+            toSurvey: action.surveyName,
+            questionName,
+            force: true,
+          });
+          next = { ...next, ...shared };
+        }
+        next = learnMappedQuestion(next, action.surveyName, questionName, answers, true);
+      }
+      return next;
+    }
+
     case "SET_PHONEBANK_FILTER": {
       const included = action.names;
       const current = state.phonebankSurveyFilter;
@@ -502,6 +610,7 @@ interface AppContextValue {
   setTextMappingScope: (scope: TextMappingScope) => void;
   mappingSurveyName: (displaySurveyName: string) => string;
   saveQuestionTemplate: (displaySurveyName: string, questionName: string) => void;
+  saveSurveyMappings: (displaySurveyName: string) => void;
   deleteSavedQuestionTemplate: (questionName: string) => void;
 }
 
@@ -523,7 +632,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let initial: PdiSyncChannel = "dialer";
     try {
-      initial = parsePdiSyncChannel(localStorage.getItem(CHANNEL_STORAGE_KEY));
+      const fromUrl = new URLSearchParams(window.location.search).get("channel");
+      if (fromUrl === "text" || fromUrl === "dialer") {
+        initial = fromUrl;
+        localStorage.setItem(CHANNEL_STORAGE_KEY, fromUrl);
+      } else {
+        initial = parsePdiSyncChannel(localStorage.getItem(CHANNEL_STORAGE_KEY));
+      }
     } catch {
       initial = "dialer";
     }
@@ -581,6 +696,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         type: "LOAD_DATA",
         pdiQuestions: pdiData.questions,
         stwData: stwData.surveys,
+        campaignTags: stwData.campaignTags ?? {},
       });
 
       if (source === "api") {
@@ -615,20 +731,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [state.channel, state.questionMappings, state.answerMappings, state.questionTemplates]
   );
 
-  const mappingSurveyName = useCallback(
-    (displaySurveyName: string) =>
-      mappingIdentitySurveyName(state.channel, displaySurveyName, state.textMappingScope),
-    [state.channel, state.textMappingScope]
-  );
+  const mappingSurveyName = useCallback((displaySurveyName: string) => displaySurveyName, []);
 
   const answersForQuestion = useCallback(
     (displaySurveyName: string, questionName: string) => {
-      if (state.channel === "text" && state.textMappingScope === "all") {
-        return collectAnswersAcrossSurveys(state.stwData, questionName);
-      }
       return state.stwData[displaySurveyName]?.[questionName] ?? [];
     },
-    [state.channel, state.textMappingScope, state.stwData]
+    [state.stwData]
   );
 
   const mapQuestion = useCallback(
@@ -637,26 +746,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (!pdiQuestion) return;
       dispatch({
         type: "MAP_QUESTION",
-        surveyName: mappingIdentitySurveyName(state.channel, surveyName, state.textMappingScope),
+        surveyName,
         questionName,
         pdiQuestionId,
         pdiQuestion,
         answers: answersForQuestion(surveyName, questionName),
       });
     },
-    [state.pdiQuestions, state.channel, state.textMappingScope, answersForQuestion]
+    [state.pdiQuestions, answersForQuestion]
   );
 
   const unmapQuestion = useCallback(
     (surveyName: string, questionName: string) => {
       dispatch({
         type: "UNMAP_QUESTION",
-        surveyName: mappingIdentitySurveyName(state.channel, surveyName, state.textMappingScope),
+        surveyName,
         questionName,
         answers: answersForQuestion(surveyName, questionName),
       });
     },
-    [state.channel, state.textMappingScope, answersForQuestion]
+    [answersForQuestion]
   );
 
   const mapAnswer = useCallback(
@@ -669,7 +778,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ) => {
       dispatch({
         type: "MAP_ANSWER",
-        surveyName: mappingIdentitySurveyName(state.channel, surveyName, state.textMappingScope),
+        surveyName,
         questionName,
         answerValue,
         pdiQuestionId,
@@ -677,19 +786,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         confidence: "manual",
       });
     },
-    [state.channel, state.textMappingScope]
+    []
   );
 
   const unmapAnswer = useCallback(
     (surveyName: string, questionName: string, answerValue: string) => {
       dispatch({
         type: "UNMAP_ANSWER",
-        surveyName: mappingIdentitySurveyName(state.channel, surveyName, state.textMappingScope),
+        surveyName,
         questionName,
         answerValue,
       });
     },
-    [state.channel, state.textMappingScope]
+    []
   );
 
   const setTextMappingScope = useCallback((scope: TextMappingScope) => {
@@ -703,30 +812,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const saveQuestionTemplate = useCallback(
     (displaySurveyName: string, questionName: string) => {
-      const writeSurveyName = mappingIdentitySurveyName(
-        state.channel,
-        displaySurveyName,
-        state.textMappingScope
-      );
-      const template = buildQuestionTemplate({
-        displaySurveyName,
-        writeSurveyName,
-        questionName,
-        questionMappings: state.questionMappings,
-        answerMappings: state.answerMappings,
-        answers: answersForQuestion(displaySurveyName, questionName),
+      dispatch({
+        type: "PROMOTE_MAPPINGS",
+        surveyName: displaySurveyName,
+        questionNames: [questionName],
       });
-      if (!template) return;
-      dispatch({ type: "SAVE_QUESTION_TEMPLATE", questionName, template });
     },
-    [
-      state.channel,
-      state.textMappingScope,
-      state.questionMappings,
-      state.answerMappings,
-      answersForQuestion,
-    ]
+    []
   );
+
+  const saveSurveyMappings = useCallback((displaySurveyName: string) => {
+    const questionNames = Object.keys(state.stwData[displaySurveyName] ?? {});
+    if (questionNames.length === 0) return;
+    dispatch({
+      type: "PROMOTE_MAPPINGS",
+      surveyName: displaySurveyName,
+      questionNames,
+    });
+  }, [state.stwData]);
 
   const deleteSavedQuestionTemplate = useCallback((questionName: string) => {
     dispatch({ type: "DELETE_QUESTION_TEMPLATE", questionName });
@@ -746,6 +849,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         setTextMappingScope,
         mappingSurveyName,
         saveQuestionTemplate,
+        saveSurveyMappings,
         deleteSavedQuestionTemplate,
       }}
     >

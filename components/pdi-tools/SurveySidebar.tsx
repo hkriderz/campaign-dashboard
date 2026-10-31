@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import type { PdiQuestion, StwRow } from "@/lib/pdi-tools/types";
-import { mappingAnswerKey, mappingQuestionKey } from "@/lib/pdi-tools/channel";
+import { lookupMappedAnswer, lookupMappedQuestion } from "@/lib/pdi-tools/channel";
 import { hasMappableTextQuestions } from "@/lib/pdi-tools/text-tag-stw-data";
 import { laCalendarYmd } from "@/lib/la-dates";
 import {
@@ -96,7 +96,7 @@ export default function SurveySidebar() {
     }
     mapAfterLoad.current = false;
     dispatch({
-      type: "PREMAP_PHONEBANKS",
+      type: state.channel === "text" ? "PREMAP_TEXT_LISTS" : "PREMAP_PHONEBANKS",
       campaigns: dayCampaigns,
       scope: mapScope,
     });
@@ -104,7 +104,7 @@ export default function SurveySidebar() {
   }
 
   useEffect(() => {
-    if (!applyRange || !state.dataLoaded || state.channel !== "dialer") return;
+    if (!applyRange || !state.dataLoaded || (state.channel !== "dialer" && state.channel !== "text")) return;
     const start = mapRange.start.trim();
     const through = mapRange.end.trim() || start;
     if (!start || !through || start > through) {
@@ -120,8 +120,10 @@ export default function SurveySidebar() {
     const ac = new AbortController();
     setListBusy(true);
     setMapError(null);
+    const listPath =
+      state.channel === "text" ? "/api/pdi/text-campaigns-for-day" : "/api/pdi/phonebanks-for-day";
     fetch(
-      `/api/pdi/phonebanks-for-day?start=${encodeURIComponent(start)}&end=${encodeURIComponent(through)}`,
+      `${listPath}?start=${encodeURIComponent(start)}&end=${encodeURIComponent(through)}`,
       { credentials: "same-origin", cache: "no-store", signal: ac.signal }
     )
       .then(async (res) => {
@@ -135,7 +137,13 @@ export default function SurveySidebar() {
       .catch((e: unknown) => {
         if (ac.signal.aborted) return;
         setDayCampaigns(null);
-        setMapError(e instanceof Error ? e.message : "Could not load phonebanks");
+        setMapError(
+          e instanceof Error
+            ? e.message
+            : state.channel === "text"
+              ? "Could not load text lists"
+              : "Could not load phonebanks"
+        );
       })
       .finally(() => {
         if (!ac.signal.aborted) setListBusy(false);
@@ -145,12 +153,17 @@ export default function SurveySidebar() {
   }, [applyRange, state.dataLoaded, state.channel, mapRange.start, mapRange.end]);
 
   useEffect(() => {
-    if (!applyRange || state.channel !== "dialer" || !listSummary) return;
+    setDayCampaigns(null);
+    setMappedKey(null);
+  }, [state.channel]);
+
+  useEffect(() => {
+    if (!applyRange || (state.channel !== "dialer" && state.channel !== "text") || !listSummary) return;
     dispatch({ type: "SET_PHONEBANK_FILTER", names: listSummary.included });
     if (!mapAfterLoad.current || !dayCampaigns) return;
     mapAfterLoad.current = false;
     dispatch({
-      type: "PREMAP_PHONEBANKS",
+      type: state.channel === "text" ? "PREMAP_TEXT_LISTS" : "PREMAP_PHONEBANKS",
       campaigns: dayCampaigns,
       scope: mapScope,
     });
@@ -203,7 +216,7 @@ export default function SurveySidebar() {
     const questionNames = Object.keys(questions);
     const totalQ = questionNames.length;
     const mappedQ = questionNames.filter((q) =>
-      state.questionMappings[mappingQuestionKey(state.channel, surveyName, q, state.textMappingScope)]
+      lookupMappedQuestion(state.questionMappings, state.channel, surveyName, q)
     ).length;
     let totalA = 0;
     let mappedA = 0;
@@ -211,7 +224,7 @@ export default function SurveySidebar() {
       const answers = questions[q];
       totalA += answers.length;
       for (const a of answers) {
-        if (state.answerMappings[mappingAnswerKey(state.channel, surveyName, q, a, state.textMappingScope)]) {
+        if (lookupMappedAnswer(state.answerMappings, state.questionMappings, state.channel, surveyName, q, a)) {
           mappedA++;
         }
       }
@@ -288,10 +301,10 @@ export default function SurveySidebar() {
         </div>
       </div>
 
-      {state.channel === "dialer" ? (
+      {state.channel === "dialer" || state.channel === "text" ? (
         <div className="px-3 py-2.5 border-b border-gray-200 dark:border-zinc-700/50 space-y-2">
           <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider">
-            Map phonebanks
+            {state.channel === "text" ? "Map text lists" : "Map phonebanks"}
           </p>
           <button
             type="button"
@@ -355,22 +368,22 @@ export default function SurveySidebar() {
             onClick={mapPhonebanks}
             className="w-full text-[11px] py-1.5 rounded bg-green-600 text-white font-medium hover:bg-green-500 disabled:opacity-50"
           >
-            Map phonebanks
+            {state.channel === "text" ? "Map text lists" : "Map phonebanks"}
           </button>
           {listBusy ? (
-            <p className="text-[10px] text-gray-500 dark:text-zinc-400">Loading phonebanks…</p>
+            <p className="text-[10px] text-gray-500 dark:text-zinc-400">Loading campaigns…</p>
           ) : null}
           {mapError ? <p className="text-[10px] text-red-600 dark:text-red-400">{mapError}</p> : null}
           {!listBusy && applyRange && listSummary ? (
             <div className="text-[10px] text-gray-500 dark:text-zinc-400 leading-snug space-y-1">
               <p>
                 {mappedKey === rangeKey && state.phonebankPremapSummary
-                  ? `${state.phonebankPremapSummary.included.length} phonebank${
-                      state.phonebankPremapSummary.included.length === 1 ? "" : "s"
-                    } premapped.`
-                  : `${listSummary.included.length} phonebank${
-                      listSummary.included.length === 1 ? "" : "s"
-                    } in this range.`}
+                  ? `${state.phonebankPremapSummary.included.length} ${
+                      state.channel === "text" ? "text list" : "phonebank"
+                    }${state.phonebankPremapSummary.included.length === 1 ? "" : "s"} premapped.`
+                  : `${listSummary.included.length} ${
+                      state.channel === "text" ? "text list" : "phonebank"
+                    }${listSummary.included.length === 1 ? "" : "s"} in this range.`}
                 {listSummary.skippedUntagged > 0
                   ? ` ${listSummary.skippedUntagged} without a campaign tag left out.`
                   : ""}
@@ -388,7 +401,9 @@ export default function SurveySidebar() {
       <div className="px-3 pt-2.5 pb-2 border-b border-gray-200 dark:border-zinc-700/50">
         <p className="text-[10px] font-semibold text-gray-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5">
           {state.channel === "text"
-            ? "Text campaigns"
+            ? state.phonebankSurveyFilter
+              ? "Text lists"
+              : "Text campaigns"
             : state.phonebankSurveyFilter
               ? "Phonebanks"
               : "STW Surveys"}{" "}

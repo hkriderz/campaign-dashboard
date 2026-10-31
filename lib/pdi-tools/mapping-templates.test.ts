@@ -6,7 +6,9 @@ import {
   buildQuestionTemplate,
   campaignNamesSimilar,
   deleteQuestionTemplate,
+  learnQuestionTemplate,
   parseQuestionTemplates,
+  templateAppliesToCampaign,
   templateStorageKey,
   type QuestionTemplate,
 } from "./mapping-templates";
@@ -217,4 +219,47 @@ test("parseQuestionTemplates ignores malformed entries", () => {
   assert.ok(parsed.Support);
   assert.equal(parsed.Bad, undefined);
   assert.equal(parsed.AlsoBad, undefined);
+});
+
+test("a lesson applies to the same candidate even when the list name differs", () => {
+  const tagged: QuestionTemplate = { ...savedSupport, candidateTagId: "nithya" };
+  assert.equal(templateAppliesToCampaign(tagged, "October GOTV", "nithya"), true);
+  assert.equal(templateAppliesToCampaign(tagged, "October GOTV", "ada"), false);
+  assert.equal(templateAppliesToCampaign(tagged, "Nithya PAC", null), false);
+});
+
+test("learnQuestionTemplate keeps a different saved question and fills new answers", () => {
+  const other: QuestionTemplate = { ...savedSupport, pdiQuestionId: "pdi_other", answers: {} };
+  assert.equal(learnQuestionTemplate(savedSupport, other, false).pdiQuestionId, "pdi_support");
+  const added: QuestionTemplate = {
+    ...savedSupport,
+    answers: {
+      ...savedSupport.answers,
+      NithyaMayorNO: {
+        pdiQuestionId: "pdi_support",
+        pdiAnswerOptionId: "opt_no",
+        pdiFlagId: "flag_no",
+        pdiFlagCode: "NO",
+        pdiFlagDesc: "No",
+      },
+    },
+  };
+  const learned = learnQuestionTemplate(savedSupport, added, false);
+  assert.equal(learned.answers.NithyaMayorYES?.pdiFlagId, "flag_yes");
+  assert.equal(learned.answers.NithyaMayorNO?.pdiFlagId, "flag_no");
+  assert.equal(learnQuestionTemplate(savedSupport, other, true).pdiQuestionId, "pdi_other");
+});
+
+test("applyTemplatesToSurvey uses the candidate tag instead of the list title", () => {
+  const { questionMappings } = applyTemplatesToSurvey({
+    displaySurveyName: "October GOTV",
+    writeSurveyName: "October GOTV",
+    surveyQuestions: { Support: ["NithyaMayorYES"] },
+    templates: { Support: { ...savedSupport, candidateTagId: "nithya" } },
+    questionMappings: {},
+    answerMappings: {},
+    pdiQuestions: [supportQuestion],
+    targetCandidateTagId: "nithya",
+  });
+  assert.equal(questionMappings["October GOTV||Support"]?.pdiQuestionId, "pdi_support");
 });

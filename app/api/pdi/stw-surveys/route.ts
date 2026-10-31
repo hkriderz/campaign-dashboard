@@ -6,6 +6,7 @@ import { withCredentialContext } from "@/lib/credentials";
 import type { StwRow, StwData } from "@/lib/pdi-tools/types";
 import { parseNdjson, buildStwData } from "@/lib/pdi-tools/parse-ndjson";
 import { resolveNdjsonDataDir } from "@/lib/pdi-tools/resolve-ndjson-dir";
+import { campaignTagMatchesForNames } from "@/lib/campaign-tags";
 import { resolvePdiToolsCredentials } from "@/lib/pdi-tools/resolve-pdi-credentials";
 
 const BQ_DATASET = process.env.BQ_DATASET ?? "l11_stw";
@@ -87,7 +88,10 @@ export const GET = withCredentialContext(
       surveys = await fetchFromBigQuery();
     }
 
-    return NextResponse.json({ surveys }, { status: 200 });
+    return NextResponse.json(
+      { surveys, campaignTags: campaignTagMatchesForNames(Object.keys(surveys), "phone") },
+      { status: 200 }
+    );
   },
   { gcp: true }
 );

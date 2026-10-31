@@ -214,10 +214,67 @@ export function premapPhonebanks(args: {
         questionMappings,
         answerMappings,
         pdiQuestions: args.pdiQuestions,
+        targetCandidateTagId: campaign.tag?.id ?? null,
       });
       Object.assign(questionMappings, applied.questionMappings);
       Object.assign(answerMappings, applied.answerMappings);
     }
+  }
+
+  included.sort();
+  missingFromSurveys.sort();
+  return {
+    questionMappings,
+    answerMappings,
+    summary: {
+      scope: args.scope,
+      included,
+      missingFromSurveys,
+      skippedUntagged,
+    },
+  };
+}
+
+/** Apply saved lessons to text lists in the selected day range. Does not invent canvass or prop mappings. */
+export function premapTextLists(args: {
+  campaigns: PhonebankForPremap[];
+  scope: PhonebankMapScope;
+  stwData: StwData;
+  pdiQuestions: PdiQuestion[];
+  questionMappings: QuestionMappings;
+  answerMappings: AnswerMappings;
+  questionTemplates?: QuestionTemplates;
+}): {
+  questionMappings: QuestionMappings;
+  answerMappings: AnswerMappings;
+  summary: PhonebankPremapSummary;
+} {
+  const { selected, skippedUntagged } = selectPhonebanksForPremap(args.campaigns, args.scope);
+  let questionMappings = { ...args.questionMappings };
+  let answerMappings = { ...args.answerMappings };
+  const included: string[] = [];
+  const missingFromSurveys: string[] = [];
+
+  for (const campaign of selected) {
+    const questions = args.stwData[campaign.campaignName];
+    if (!questions) {
+      missingFromSurveys.push(campaign.campaignName);
+      continue;
+    }
+    included.push(campaign.campaignName);
+    if (!args.questionTemplates) continue;
+    const applied = applyTemplatesToSurvey({
+      displaySurveyName: campaign.campaignName,
+      writeSurveyName: campaign.campaignName,
+      surveyQuestions: questions,
+      templates: args.questionTemplates,
+      questionMappings,
+      answerMappings,
+      pdiQuestions: args.pdiQuestions,
+      targetCandidateTagId: campaign.tag?.id ?? null,
+    });
+    questionMappings = applied.questionMappings;
+    answerMappings = applied.answerMappings;
   }
 
   included.sort();

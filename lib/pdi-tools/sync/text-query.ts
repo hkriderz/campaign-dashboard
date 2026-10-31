@@ -39,6 +39,44 @@ export function buildTextTagCatalogQuery(): string {
  * was applied, so each flag is dated on that day even when the person was
  * contacted on other lists.
  */
+function assertIsoDay(value: string): string {
+  const day = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+    throw new Error(`Invalid date (expected YYYY-MM-DD): ${value}`);
+  }
+  return day;
+}
+
+/**
+ * Text campaigns that received a contact tag or a message on a Pacific day range.
+ * Used to filter the text mapper the same way phone calls filter the dialer mapper.
+ */
+export function buildTextCampaignsActiveQuery(startDate: string, endDate: string): string {
+  const start = assertIsoDay(startDate);
+  const end = assertIsoDay(endDate);
+  return `
+    SELECT DISTINCT campaigns.name AS campaign_name
+    FROM \`${P}.${D}.campaigns\` AS campaigns
+    JOIN \`${P}.${D}.campaign_contact_tags\` AS campaign_contact_tags
+      ON campaign_contact_tags.campaign_id = campaigns.id
+      AND campaign_contact_tags.deleted_at IS NULL
+    WHERE campaigns.name IS NOT NULL
+      AND TRIM(campaigns.name) != ""
+      AND DATE(campaign_contact_tags.created_at, 'America/Los_Angeles') BETWEEN '${start}' AND '${end}'
+    UNION DISTINCT
+    SELECT DISTINCT campaigns.name AS campaign_name
+    FROM \`${P}.${D}.messages\` AS messages
+    JOIN \`${P}.${D}.campaign_contacts\` AS campaign_contacts
+      ON campaign_contacts.id = messages.campaign_contact_id
+    JOIN \`${P}.${D}.campaigns\` AS campaigns
+      ON campaigns.id = campaign_contacts.campaign_id
+    WHERE campaigns.name IS NOT NULL
+      AND TRIM(campaigns.name) != ""
+      AND DATE(COALESCE(messages.thread_order_time, messages.created_at), 'America/Los_Angeles') BETWEEN '${start}' AND '${end}'
+    ORDER BY campaign_name
+  `.trim();
+}
+
 export function buildTextTagQuery(startIso: string, endIso: string): string {
   const startStr = startIso.slice(0, 19).replace("T", " ");
   const endStr = endIso.slice(0, 19).replace("T", " ");

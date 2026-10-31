@@ -46,12 +46,20 @@ export default async function TextingPage() {
             title="Texting"
             lede="Scale to Win Text campaigns since Dec 1, 2025, grouped by candidate. Support and moved tags are shown on each candidate page."
           />
-          <Link
-            href="/phonebanking/campaign-tags"
-            className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-accent)] hover:underline mt-1"
-          >
-            Campaign tags
-          </Link>
+          <div className="flex flex-col items-start gap-2 mt-1">
+            <Link
+              href="/pdi/mapper?channel=text"
+              className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-accent)] hover:underline"
+            >
+              Map text lists
+            </Link>
+            <Link
+              href="/phonebanking/campaign-tags"
+              className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--section-accent)] hover:underline"
+            >
+              Campaign tags
+            </Link>
+          </div>
         </div>
 
         <div className="mb-6">

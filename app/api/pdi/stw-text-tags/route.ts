@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { editorDenied } from "@/lib/auth/http";
 import { withCredentialContext } from "@/lib/credentials";
 import { runQuery } from "@/lib/bigquery";
+import { campaignTagMatchesForNames } from "@/lib/campaign-tags";
 import { buildNithyaTextCampaignStwData } from "@/lib/pdi-tools/text-tag-stw-data";
 import { buildTextTagCatalogQuery } from "@/lib/pdi-tools/sync/text-query";
 import { TEXT_MAPPING_SURVEY_NAME } from "@/lib/pdi-tools/channel";
@@ -19,6 +20,7 @@ export const GET = withCredentialContext(
     return NextResponse.json(
       {
         surveys,
+        campaignTags: campaignTagMatchesForNames(Object.keys(surveys), "text"),
         surveyName: TEXT_MAPPING_SURVEY_NAME,
         campaignCount: Object.keys(surveys).length,
         tagCount: catalogRows.filter((r) => r.tagName).length,

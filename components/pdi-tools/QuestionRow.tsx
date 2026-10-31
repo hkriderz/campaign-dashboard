@@ -4,8 +4,8 @@ import React from "react";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
 import type { PdiQuestion, PdiAnswerOption, AnswerMappingEntry } from "@/lib/pdi-tools/types";
 import {
-  mappingAnswerKey,
-  mappingQuestionKey,
+  lookupMappedAnswer,
+  lookupMappedQuestion,
   TEXT_CANDIDATE_TAG_ID,
 } from "@/lib/pdi-tools/channel";
 import { classifyTextContactTag } from "@/lib/texting-tag-labels";
@@ -22,11 +22,14 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
   const { state, mapQuestion, unmapQuestion, mapAnswer, unmapAnswer, saveQuestionTemplate, deleteSavedQuestionTemplate } =
     useApp();
 
-  const questionKey = mappingQuestionKey(state.channel, surveyName, questionName, state.textMappingScope);
-  const qMapping = state.questionMappings[questionKey];
+  const ownQuestion = state.questionMappings[`${surveyName}||${questionName}`];
+  const qMapping = lookupMappedQuestion(state.questionMappings, state.channel, surveyName, questionName);
+  const usingSavedDefault = state.channel === "text" && !ownQuestion && Boolean(qMapping);
   const mappedPdiQuestion = qMapping ? pdiQuestions.find((q) => q.id === qMapping.pdiQuestionId) : null;
 
-  const mappedAnswerCount = answers.filter((a) => state.answerMappings[`${questionKey}||${a}`]).length;
+  const mappedAnswerCount = answers.filter((a) =>
+    lookupMappedAnswer(state.answerMappings, state.questionMappings, state.channel, surveyName, questionName, a)
+  ).length;
 
   function handleQuestionChange(id: string) {
     if (!id) {
@@ -48,10 +51,6 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
 
   const isFullyMapped = Boolean(qMapping && mappedAnswerCount === answers.length);
   const savedTemplate = state.questionTemplates[questionName];
-  const sharedQuestionMapped =
-    state.channel === "text" &&
-    state.textMappingScope === "one" &&
-    Boolean(state.questionMappings[mappingQuestionKey(state.channel, surveyName, questionName, "all")]);
 
   return (
     <div
@@ -93,7 +92,7 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
             onClick={() => saveQuestionTemplate(surveyName, questionName)}
             className="text-[10px] px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700/50 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            {savedTemplate ? "Update saved mapping" : "Save mapping"}
+            {savedTemplate ? "Update saved default" : "Save as default"}
           </button>
           {savedTemplate ? (
             <button
@@ -110,16 +109,16 @@ export default function QuestionRow({ surveyName, questionName, answers, pdiQues
       {savedTemplate ? (
         <div className="px-3 py-1 border-b border-gray-100 dark:border-zinc-700/40 bg-emerald-50/70 dark:bg-emerald-950/20">
           <span className="text-[10px] text-emerald-700 dark:text-emerald-400">
-            Saved for other lists
+            Saved default for this question
             {savedTemplate.sourceSurveyName ? ` · from ${savedTemplate.sourceSurveyName}` : ""}
           </span>
         </div>
       ) : null}
 
-      {sharedQuestionMapped && !qMapping ? (
+      {usingSavedDefault ? (
         <div className="px-3 py-1 border-b border-gray-100 dark:border-zinc-700/40 bg-amber-50/70 dark:bg-amber-950/20">
           <span className="text-[10px] text-amber-700 dark:text-amber-400">
-            A shared All-lists mapping exists. Sync will use it unless you map this list.
+            Using the saved default. Mapping this list differently stays on this list until you save it as the new default.
           </span>
         </div>
       ) : null}
@@ -186,8 +185,14 @@ function AnswerRow({
   onSelect,
 }: AnswerRowProps) {
   const { state } = useApp();
-  const aKeyFull = mappingAnswerKey(state.channel, surveyName, questionName, answerValue, state.textMappingScope);
-  const aMapping: AnswerMappingEntry | undefined = state.answerMappings[aKeyFull];
+  const aMapping: AnswerMappingEntry | undefined = lookupMappedAnswer(
+    state.answerMappings,
+    state.questionMappings,
+    state.channel,
+    surveyName,
+    questionName,
+    answerValue
+  );
   const textStatus =
     state.channel === "text" ? classifyTextContactTag(answerValue, TEXT_CANDIDATE_TAG_ID).answer : "";
 

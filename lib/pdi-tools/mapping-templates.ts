@@ -18,6 +18,8 @@ export interface SavedAnswerTemplate {
 export interface QuestionTemplate {
   sourceSurveyName: string;
   pdiQuestionId: string;
+  /** Candidate tag this lesson belongs to. Absent lessons still match by campaign name. */
+  candidateTagId?: string;
   answers: Record<string, SavedAnswerTemplate>;
 }
 
@@ -84,6 +86,7 @@ export function parseQuestionTemplates(raw: unknown): QuestionTemplates {
     const rec = value as Record<string, unknown>;
     const sourceSurveyName = typeof rec.sourceSurveyName === "string" ? rec.sourceSurveyName.trim() : "";
     const pdiQuestionId = typeof rec.pdiQuestionId === "string" ? rec.pdiQuestionId.trim() : "";
+    const candidateTagId = typeof rec.candidateTagId === "string" ? rec.candidateTagId.trim() : "";
     if (!sourceSurveyName || !pdiQuestionId) continue;
     const answers: Record<string, SavedAnswerTemplate> = {};
     if (rec.answers && typeof rec.answers === "object") {
@@ -105,7 +108,12 @@ export function parseQuestionTemplates(raw: unknown): QuestionTemplates {
         };
       }
     }
-    out[questionName] = { sourceSurveyName, pdiQuestionId, answers };
+    out[questionName] = {
+      sourceSurveyName,
+      pdiQuestionId,
+      ...(candidateTagId ? { candidateTagId } : {}),
+      answers,
+    };
   }
   return out;
 }
@@ -117,6 +125,7 @@ export function buildQuestionTemplate(args: {
   questionMappings: QuestionMappings;
   answerMappings: AnswerMappings;
   answers: string[];
+  candidateTagId?: string | null;
 }): QuestionTemplate | null {
   const qMapping = args.questionMappings[`${args.writeSurveyName}||${args.questionName}`];
   if (!qMapping) return null;
@@ -132,9 +141,53 @@ export function buildQuestionTemplate(args: {
       pdiFlagDesc: mapped.pdiFlagDesc,
     };
   }
+  const candidateTagId = args.candidateTagId?.trim() || "";
   return {
     sourceSurveyName: args.displaySurveyName,
     pdiQuestionId: qMapping.pdiQuestionId,
+    ...(candidateTagId ? { candidateTagId } : {}),
+    answers,
+  };
+}
+
+/**
+ * A saved lesson applies to a campaign from the same candidate.
+ * Lessons saved before candidate tags existed still match by campaign name.
+ * A different PDI question on one list does not replace the lesson.
+ */
+export function templateAppliesToCampaign(
+  template: QuestionTemplate,
+  displaySurveyName: string,
+  targetCandidateTagId?: string | null
+): boolean {
+  const templateTag = template.candidateTagId?.trim() || "";
+  const targetTag = targetCandidateTagId?.trim() || "";
+  if (templateTag || targetTag) {
+    return Boolean(templateTag && targetTag && templateTag === targetTag);
+  }
+  return campaignNamesSimilar(template.sourceSurveyName, displaySurveyName);
+}
+
+/**
+ * Learn a mapping without replacing a different saved question.
+ * New answers fill gaps. Save mappings passes force and replaces the lesson.
+ */
+export function learnQuestionTemplate(
+  existing: QuestionTemplate | undefined,
+  incoming: QuestionTemplate,
+  force: boolean
+): QuestionTemplate {
+  if (!existing || force) {
+    return { ...incoming, answers: { ...incoming.answers } };
+  }
+  if (existing.pdiQuestionId !== incoming.pdiQuestionId) return existing;
+  const answers = { ...existing.answers };
+  for (const [answerValue, saved] of Object.entries(incoming.answers)) {
+    if (!answers[answerValue]) answers[answerValue] = saved;
+  }
+  return {
+    ...existing,
+    candidateTagId: existing.candidateTagId ?? incoming.candidateTagId,
     answers,
   };
 }
@@ -147,6 +200,45 @@ export function deleteQuestionTemplate(
   const next = { ...templates };
   delete next[questionName];
   return next;
+}
+
+/** Copy one question onto another survey name. A different saved question is left in place unless force is set. */
+export function copyMappedQuestion(args: {
+  questionMappings: QuestionMappings;
+  answerMappings: AnswerMappings;
+  fromSurvey: string;
+  toSurvey: string;
+  questionName: string;
+  force?: boolean;
+}): { questionMappings: QuestionMappings; answerMappings: AnswerMappings } {
+  const fromKey = qKey(args.fromSurvey, args.questionName);
+  const source = args.questionMappings[fromKey];
+  if (!source) {
+    return { questionMappings: args.questionMappings, answerMappings: args.answerMappings };
+  }
+  const toKey = qKey(args.toSurvey, args.questionName);
+  const destination = args.questionMappings[toKey];
+  if (destination && destination.pdiQuestionId !== source.pdiQuestionId && !args.force) {
+    return { questionMappings: args.questionMappings, answerMappings: args.answerMappings };
+  }
+
+  const questionMappings = { ...args.questionMappings, [toKey]: source };
+  const answerMappings = { ...args.answerMappings };
+  const fromPrefix = `${fromKey}||`;
+  const toPrefix = `${toKey}||`;
+  if (args.force || !destination) {
+    for (const key of Object.keys(answerMappings)) {
+      if (key.startsWith(toPrefix)) delete answerMappings[key];
+    }
+  }
+  for (const [key, entry] of Object.entries(args.answerMappings)) {
+    if (!key.startsWith(fromPrefix)) continue;
+    const answerValue = key.slice(fromPrefix.length);
+    const destKey = `${toPrefix}${answerValue}`;
+    if (!args.force && answerMappings[destKey]) continue;
+    answerMappings[destKey] = entry;
+  }
+  return { questionMappings, answerMappings };
 }
 
 function qKey(survey: string, question: string): string {
@@ -181,6 +273,7 @@ export function applyTemplatesToSurvey(args: {
   questionMappings: QuestionMappings;
   answerMappings: AnswerMappings;
   pdiQuestions: PdiQuestion[];
+  targetCandidateTagId?: string | null;
 }): { questionMappings: QuestionMappings; answerMappings: AnswerMappings } {
   const questionMappings = { ...args.questionMappings };
   const answerMappings = { ...args.answerMappings };
@@ -190,7 +283,7 @@ export function applyTemplatesToSurvey(args: {
     if (questionMappings[questionKey]) continue;
     const template = args.templates[questionName];
     if (!template) continue;
-    if (!campaignNamesSimilar(template.sourceSurveyName, args.displaySurveyName)) continue;
+    if (!templateAppliesToCampaign(template, args.displaySurveyName, args.targetCandidateTagId)) continue;
     const pdiQuestion = args.pdiQuestions.find((q) => q.id === template.pdiQuestionId);
     if (!pdiQuestion) continue;
 

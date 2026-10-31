@@ -2,13 +2,13 @@
 
 import React, { useState } from "react";
 import { useApp } from "@/lib/pdi-tools/mapping-context";
-import { mappingQuestionKey } from "@/lib/pdi-tools/channel";
+import { lookupMappedQuestion } from "@/lib/pdi-tools/channel";
 import QuestionRow from "./QuestionRow";
 
 export default function SurveyMapper() {
-  const { state, dispatch, mappingSurveyName, setTextMappingScope } = useApp();
+  const { state, dispatch, mappingSurveyName, saveSurveyMappings } = useApp();
   const [confirmClear, setConfirmClear] = useState(false);
-  const { activeSurvey, stwData, pdiQuestions, questionMappings, channel, textMappingScope } = state;
+  const { activeSurvey, stwData, pdiQuestions, questionMappings, channel } = state;
 
   if (!activeSurvey) {
     return (
@@ -19,35 +19,9 @@ export default function SurveyMapper() {
         </h2>
         <p className="text-[11px] text-gray-400 dark:text-zinc-600 max-w-xs leading-relaxed">
           {channel === "text"
-            ? "Each text list that has tags is shown separately. Nithya Mayor and Moved tags group into Support and Moved. Other tags stay under Other. Use All lists to map once, or This list only to fill one campaign. Save mapping applies when you open the next similar list."
-            : "Each STW survey shows its questions. Map each STW question to a PDI question, then answer-level flags auto-populate. Save mapping applies when you open the next similar list."}
+            ? "Each text list that has tags is shown separately. Nithya Mayor and Moved tags group into Support and Moved. Other tags stay under Other. A mapping you set is remembered for the same question on later lists from that candidate. Save mappings makes this list the new default."
+            : "Each STW survey shows its questions. Map each STW question to a PDI question, then answer-level flags auto-populate. A mapping you set is remembered for the same question on later lists from that candidate. Save mappings makes this list the new default."}
         </p>
-        {channel === "text" ? (
-          <div className="mt-4 inline-flex rounded border border-gray-300 dark:border-zinc-600 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setTextMappingScope("all")}
-              className={`text-[11px] px-2.5 py-1 ${
-                textMappingScope === "all"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
-              }`}
-            >
-              All lists
-            </button>
-            <button
-              type="button"
-              onClick={() => setTextMappingScope("one")}
-              className={`text-[11px] px-2.5 py-1 ${
-                textMappingScope === "one"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
-              }`}
-            >
-              This list only
-            </button>
-          </div>
-        ) : null}
       </div>
     );
   }
@@ -56,7 +30,7 @@ export default function SurveyMapper() {
   const questionNames = Object.keys(questions).sort();
   const mappingName = mappingSurveyName(activeSurvey);
   const totalMapped = questionNames.filter((q) =>
-    questionMappings[mappingQuestionKey(channel, activeSurvey, q, textMappingScope)]
+    lookupMappedQuestion(questionMappings, channel, activeSurvey, q)
   ).length;
   const pct = questionNames.length > 0 ? Math.round((totalMapped / questionNames.length) * 100) : 0;
 
@@ -69,41 +43,18 @@ export default function SurveyMapper() {
           </h2>
           <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">
             {questionNames.length} question{questionNames.length !== 1 ? "s" : ""} · {totalMapped} mapped
-            {channel === "text"
-              ? textMappingScope === "one"
-                ? " · this list only"
-                : " · shared Nithya mapping"
-              : ""}
-            {" · saved mappings apply on the next similar list"}
+            {" · saved mappings apply to the next list from this candidate"}
           </p>
         </div>
 
-        {channel === "text" ? (
-          <div className="inline-flex rounded border border-gray-300 dark:border-zinc-600 overflow-hidden flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => setTextMappingScope("all")}
-              className={`text-[10px] px-2 py-1 ${
-                textMappingScope === "all"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
-              }`}
-            >
-              All lists
-            </button>
-            <button
-              type="button"
-              onClick={() => setTextMappingScope("one")}
-              className={`text-[10px] px-2 py-1 ${
-                textMappingScope === "one"
-                  ? "bg-green-600 text-white"
-                  : "text-gray-600 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800"
-              }`}
-            >
-              This list only
-            </button>
-          </div>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => saveSurveyMappings(activeSurvey)}
+          disabled={totalMapped === 0}
+          className="text-[11px] px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700/50 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+        >
+          Save mappings
+        </button>
 
         <div className="flex items-center gap-2">
           <div className="w-24 h-1 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
