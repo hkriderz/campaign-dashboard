@@ -2,6 +2,9 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExcludeCanvassersControl from "@/components/canvassing/ExcludeCanvassersControl";
+import SystemDefaultsControls, {
+  fetchReportDefaults,
+} from "@/components/report-defaults/SystemDefaultsControls";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
 import { defaultFlagCountThreshold, FLAG_DISPOSITIONS } from "@/lib/canvassing/doorknocks-results/helpers";
@@ -719,6 +722,14 @@ function SettingsPanel({
           <span className="mt-1 block text-xs text-gray-500 dark:text-gray-400">Skip these non-contact columns in outlier review (default: Not Home).</span>
         </label>
       </div>
+      <SystemDefaultsControls
+        className="mt-4"
+        kind="doorknocks-results"
+        getSettings={() => settings}
+        applySettings={(raw) => {
+          setSettings(raw as DoorknockSummarySettings);
+        }}
+      />
     </div>
   );
 }
@@ -994,17 +1005,40 @@ export default function DoorknocksResultsClient() {
     : 0;
 
   useEffect(() => {
-    const persisted = readPersistedState();
-    setSettings(persisted.settings);
-    setReportName(persisted.reportName);
-    setResult(persisted.result);
-    setActiveReport(persisted.activeReport);
-    setExcludedCanvassersRaw(persisted.excludedCanvassersRaw);
-    setExcludeSections(persisted.excludeSections);
-    setActiveTab(
-      persisted.activeReport?.campaigns[0]?.id ?? persisted.result?.campaigns[0]?.id ?? "summary"
-    );
-    setHasHydratedSession(true);
+    let cancelled = false;
+    async function hydrate() {
+      const hadSession = Boolean(window.sessionStorage.getItem(SESSION_KEY));
+      const persisted = readPersistedState();
+      if (cancelled) return;
+      setReportName(persisted.reportName);
+      setResult(persisted.result);
+      setActiveReport(persisted.activeReport);
+      setExcludedCanvassersRaw(persisted.excludedCanvassersRaw);
+      setExcludeSections(persisted.excludeSections);
+      setActiveTab(
+        persisted.activeReport?.campaigns[0]?.id ?? persisted.result?.campaigns[0]?.id ?? "summary"
+      );
+
+      if (hadSession) {
+        setSettings(persisted.settings);
+        setHasHydratedSession(true);
+        return;
+      }
+
+      try {
+        const defaults = await fetchReportDefaults("doorknocks-results");
+        if (cancelled) return;
+        setSettings(defaults.settings as DoorknockSummarySettings);
+      } catch {
+        if (!cancelled) setSettings(DEFAULT_DOORKNOCK_SUMMARY_SETTINGS);
+      } finally {
+        if (!cancelled) setHasHydratedSession(true);
+      }
+    }
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

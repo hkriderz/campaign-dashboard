@@ -115,17 +115,30 @@ export default function Sidebar({ tags, basePath }: SidebarProps) {
             </Link>
           ) : null}
           {basePath === "/phonebanking" ? (
-            <Link
-              href="/phonebanking/csv-upload"
-              onClick={onNavClick}
-              className={navLinkClass(
-                pathname === "/phonebanking/csv-upload" ||
-                  pathname.startsWith("/phonebanking/csv-upload")
-              )}
-            >
-              <span className="w-1.5 h-1.5 rounded-none bg-mint-600 dark:bg-mint-400 flex-shrink-0" />
-              CSV upload
-            </Link>
+            <>
+              <Link
+                href="/phonebanking/csv-upload"
+                onClick={onNavClick}
+                className={navLinkClass(
+                  pathname === "/phonebanking/csv-upload" ||
+                    pathname.startsWith("/phonebanking/csv-upload")
+                )}
+              >
+                <span className="w-1.5 h-1.5 rounded-none bg-mint-600 dark:bg-mint-400 flex-shrink-0" />
+                CSV upload
+              </Link>
+              <Link
+                href="/phonebanking/gap-reports"
+                onClick={onNavClick}
+                className={navLinkClass(
+                  pathname === "/phonebanking/gap-reports" ||
+                    pathname.startsWith("/phonebanking/gap-reports")
+                )}
+              >
+                <span className="w-1.5 h-1.5 rounded-none bg-orange-700 dark:bg-orange-400 flex-shrink-0" />
+                Gap reports
+              </Link>
+            </>
           ) : null}
         </div>
 

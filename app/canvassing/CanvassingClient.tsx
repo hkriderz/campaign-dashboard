@@ -2,8 +2,12 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { writeTextToClipboard } from "@/lib/browser-clipboard";
+import SystemDefaultsControls, {
+  fetchReportDefaults,
+} from "@/components/report-defaults/SystemDefaultsControls";
 import { buildDisplayNameMap, displayNameFor } from "@/lib/canvassing/display-names";
 import ExcludeCanvassersControl from "@/components/canvassing/ExcludeCanvassersControl";
+import type { KnockAnalysisSystemDefaults } from "@/lib/report-defaults/types";
 import {
   DEFAULT_KNOCK_EXCLUDE_SECTIONS,
   resolveExcludeSections,
@@ -1341,6 +1345,10 @@ function ReportResults({
 
 export default function CanvassingClient() {
   const initialState = useMemo(() => readPersistedState(), []);
+  const hadSessionDraft = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    return Boolean(window.sessionStorage.getItem(SESSION_STATE_KEY));
+  }, []);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [reportName, setReportName] = useState(initialState.reportName);
   const [reportDate, setReportDate] = useState(initialState.reportDate);
@@ -1357,6 +1365,7 @@ export default function CanvassingClient() {
   const [endTime, setEndTime] = useState(initialState.endTime);
   const [asOfTime, setAsOfTime] = useState(initialState.asOfTime);
   const [customGapMinutesRaw, setCustomGapMinutesRaw] = useState(initialState.customGapMinutesRaw);
+  const [defaultsReady, setDefaultsReady] = useState(hadSessionDraft);
   const [loadingReports, setLoadingReports] = useState(true);
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1417,6 +1426,37 @@ export default function CanvassingClient() {
   }, [loadReports]);
 
   useEffect(() => {
+    if (hadSessionDraft) return;
+    let cancelled = false;
+    async function hydrateSystemDefaultsIfNeeded() {
+      try {
+        const defaults = await fetchReportDefaults("knock-analysis");
+        if (cancelled) return;
+        const settings = defaults.settings as KnockAnalysisSystemDefaults;
+        setStartTime(settings.startTime);
+        setLunchClockOutTime(settings.lunchClockOutTime);
+        setLunchReturnTime(settings.lunchReturnTime);
+        setEndTime(settings.endTime);
+        setAsOfTime(currentLaTimeHm());
+        if (settings.customGapMinutes != null) {
+          setCustomGapMinutesRaw(String(settings.customGapMinutes));
+        } else {
+          setCustomGapMinutesRaw("");
+        }
+      } catch {
+        /* keep built-in seed already in state */
+      } finally {
+        if (!cancelled) setDefaultsReady(true);
+      }
+    }
+    void hydrateSystemDefaultsIfNeeded();
+    return () => {
+      cancelled = true;
+    };
+  }, [hadSessionDraft]);
+
+  useEffect(() => {
+    if (!defaultsReady) return;
     const state: PersistedKnockAnalysisState = {
       reportName,
       reportDate,
@@ -1439,6 +1479,7 @@ export default function CanvassingClient() {
     activeResultsTab,
     asOfTime,
     customGapMinutesRaw,
+    defaultsReady,
     endTime,
     excludeSections,
     excludedCanvassersRaw,
@@ -1452,12 +1493,7 @@ export default function CanvassingClient() {
   ]);
 
   function applyReportMode(mode: KnockAnalysisReportMode) {
-    const defaults = defaultShiftSettings(mode);
     setReportMode(mode);
-    setStartTime(defaults.startTime);
-    setLunchClockOutTime(defaults.lunchClockOutTime);
-    setLunchReturnTime(defaults.lunchReturnTime);
-    setEndTime(defaults.endTime);
     setAsOfTime(currentLaTimeHm());
     setActiveResultsTab("shift");
   }
@@ -1835,6 +1871,28 @@ export default function CanvassingClient() {
               </span>
             </label>
           </div>
+
+          <SystemDefaultsControls
+            kind="knock-analysis"
+            getSettings={() => ({
+              startTime,
+              lunchClockOutTime,
+              lunchReturnTime,
+              endTime,
+              customGapMinutes: customGapMinutes,
+            })}
+            applySettings={(raw) => {
+              const settings = raw as KnockAnalysisSystemDefaults;
+              setStartTime(settings.startTime);
+              setLunchClockOutTime(settings.lunchClockOutTime);
+              setLunchReturnTime(settings.lunchReturnTime);
+              setEndTime(settings.endTime);
+              setAsOfTime(currentLaTimeHm());
+              setCustomGapMinutesRaw(
+                settings.customGapMinutes != null ? String(settings.customGapMinutes) : ""
+              );
+            }}
+          />
 
           <div className="rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-5 dark:border-violet-800 dark:bg-violet-950/20">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">Upload files</h2>
