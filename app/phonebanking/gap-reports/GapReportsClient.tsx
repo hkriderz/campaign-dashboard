@@ -33,10 +33,12 @@ import type {
 import type { PhonebankGapsSystemDefaults } from "@/lib/report-defaults/types";
 
 const LA = "America/Los_Angeles";
-const SESSION_KEY = "phonebanking.gapReports.v2";
+const SESSION_KEY = "phonebanking.gapReports.v3";
+const LEGACY_SESSION_KEYS = ["phonebanking.gapReports.v1", "phonebanking.gapReports.v2"] as const;
 
 type TagOption = { id: string; label: string };
 
+/** Form/settings only — full report results (especially calls) exceed sessionStorage quota. */
 type SessionState = {
   workDate: string;
   tagId: string;
@@ -48,8 +50,35 @@ type SessionState = {
   postLunchBreakStart: string;
   asOfTime: string;
   excludeRaw: string;
-  result: PhonebankGapReportResult | null;
 };
+
+function clearLegacyGapReportSessions() {
+  for (const key of LEGACY_SESSION_KEYS) {
+    try {
+      window.sessionStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function writeGapReportSession(state: SessionState) {
+  try {
+    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(state));
+  } catch (err) {
+    const isQuota =
+      err instanceof DOMException &&
+      (err.name === "QuotaExceededError" || err.name === "NS_ERROR_DOM_QUOTA_REACHED");
+    if (!isQuota) return;
+    clearLegacyGapReportSessions();
+    try {
+      window.sessionStorage.removeItem(SESSION_KEY);
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(state));
+    } catch {
+      /* session restore is best-effort; keep the in-memory report */
+    }
+  }
+}
 
 type TabId = "shift" | "gaps" | "matrix" | "timeline" | "pivot";
 
@@ -197,6 +226,8 @@ export default function GapReportsClient({ tags }: { tags: TagOption[] }) {
   useEffect(() => {
     let cancelled = false;
     async function hydrate() {
+      clearLegacyGapReportSessions();
+
       let session: SessionState | null = null;
       try {
         const raw = window.sessionStorage.getItem(SESSION_KEY);
@@ -217,7 +248,6 @@ export default function GapReportsClient({ tags }: { tags: TagOption[] }) {
           setPostLunchBreakStart(session.postLunchBreakStart || seed.postLunchBreakStart);
           setAsOfTime(session.asOfTime || currentLaTimeHm());
           setExcludeRaw(session.excludeRaw || "");
-          setResult(session.result);
           setHydrated(true);
         }
         return;
@@ -255,7 +285,7 @@ export default function GapReportsClient({ tags }: { tags: TagOption[] }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: SessionState = {
+    writeGapReportSession({
       workDate,
       tagId,
       startTime,
@@ -266,9 +296,7 @@ export default function GapReportsClient({ tags }: { tags: TagOption[] }) {
       postLunchBreakStart,
       asOfTime,
       excludeRaw,
-      result,
-    };
-    window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(state));
+    });
   }, [
     asOfTime,
     endTime,
@@ -278,7 +306,6 @@ export default function GapReportsClient({ tags }: { tags: TagOption[] }) {
     lunchReturnTime,
     postLunchBreakStart,
     preLunchBreakStart,
-    result,
     startTime,
     tagId,
     workDate,
