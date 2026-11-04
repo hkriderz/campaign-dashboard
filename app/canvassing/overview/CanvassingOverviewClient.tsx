@@ -1,8 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { ChangeEvent, FormEvent, Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import DateRangePicker from "@/components/common/DateRangePicker";
 import OutcomeTallyStrip from "@/components/common/OutcomeTallyStrip";
+import PdiIdentityCsvImport from "@/components/pdi-identity/PdiIdentityCsvImport";
+import PdiIdentityGapTallyChips from "@/components/pdi-identity/PdiIdentityGapTally";
 import { channelDisplayLabel, familyDisplayLabel } from "@/lib/unique-ids/classify";
 import type {
   UniqueIdChannel,
@@ -78,6 +81,7 @@ export default function CanvassingOverviewClient() {
   const [files, setFiles] = useState<File[]>([]);
   const [openPersonId, setOpenPersonId] = useState<string | null>(null);
   const [personDetailById, setPersonDetailById] = useState<Record<string, UniqueIdPersonDetail>>({});
+  const [identityMessage, setIdentityMessage] = useState<string | null>(null);
   const [personDetailLoading, setPersonDetailLoading] = useState(false);
   const [personDetailError, setPersonDetailError] = useState<string | null>(null);
 
@@ -325,6 +329,41 @@ export default function CanvassingOverviewClient() {
           snapshots. QC calls are included as their own flags.
           {files.length ? ` ${files.length} file${files.length === 1 ? "" : "s"} selected.` : ""}
         </p>
+      </div>
+
+      <div className="dash-card space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-50">PDI name &amp; address</h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Import a CSV with column mapping to fill blank voter names and addresses. Tallies update
+              after each import using the current date range
+              {tagId ? " and selected candidate" : " across candidates"}.
+            </p>
+          </div>
+          <Link
+            href="/canvassing/pdi-identity"
+            className="text-xs font-semibold text-sky-700 hover:underline dark:text-sky-400"
+          >
+            Manage all identities
+          </Link>
+        </div>
+        <PdiIdentityGapTallyChips
+          gaps={payload?.meta.identityGaps}
+          loading={loading && !payload}
+        />
+        {identityMessage ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+            {identityMessage}
+          </div>
+        ) : null}
+        <PdiIdentityCsvImport
+          compact
+          onImported={(_records, summary) => {
+            setIdentityMessage(summary);
+            void loadOverview();
+          }}
+        />
       </div>
 
       <div className="dash-card space-y-3">

@@ -3,6 +3,12 @@ import { runQuery, PROJECT, DATASET } from "../bigquery";
 import { assertDataAccessAllowed } from "@/lib/credentials/gate";
 import { pdiIdExtractSql, selectPdiIdFromJson } from "@/lib/pdi-tools/sync/pdi-id-sql";
 import { mergeCalleeIdentityIndex, readCalleeIdentityIndex, type CalleeIdentityRecord } from "../bq-identity-index";
+import {
+  readPdiIdentityMap,
+  stampKnockRowsWithPdiIdentity,
+  stampQcPairsWithPdiIdentity,
+  stampRowsWithPdiIdentityMap,
+} from "../pdi-identity/store";
 import { createdAtOnOrAfterSql } from "../snapshot-merge";
 import {
   loadCallSurveyFillSnapshot,
@@ -172,7 +178,9 @@ export async function stampFillIdentities(
   fetchMissing: boolean
 ): Promise<CallSurveyRowForFill[]> {
   const index = readCalleeIdentityIndex().byCalleeId;
-  const stamped = rows.map((row) => applySavedCalleeIdentity(row, index[row.calleeId?.trim() ?? ""]));
+  let stamped = rows.map((row) => applySavedCalleeIdentity(row, index[row.calleeId?.trim() ?? ""]));
+  // Manual / imported PDI identity fills blanks after callee JSON (never overwrites non-empty fields).
+  stamped = stampRowsWithPdiIdentityMap(stamped, readPdiIdentityMap());
   if (!fetchMissing) return stamped;
 
   const pending: SurveyRowWithCallee[] = [];
@@ -198,10 +206,12 @@ export async function stampFillIdentities(
       calleeId,
     });
   }
-  if (!pending.length) return stamped;
+  if (!pending.length) {
+    return stampRowsWithPdiIdentityMap(stamped, readPdiIdentityMap());
+  }
   await fillMissingCalleeIdentities(pending, index);
   const found = new Map(pending.map((row) => [row.calleeId, row]));
-  return stamped.map((row) => {
+  const afterBq = stamped.map((row) => {
     const match = found.get(row.calleeId?.trim() ?? "");
     if (!match) return row;
     return applySavedCalleeIdentity(row, {
@@ -211,6 +221,7 @@ export async function stampFillIdentities(
       addressChecked: true,
     });
   });
+  return stampRowsWithPdiIdentityMap(afterBq, readPdiIdentityMap());
 }
 
 /**
@@ -401,10 +412,12 @@ export function buildQcRecontactPairsFromSources(
     groupRowsIntoCallSummaries(primaryRows, profile, terms),
     profile
   );
-  const knocks = loadKnockIndexRows();
+  const knocks = stampKnockRowsWithPdiIdentity(loadKnockIndexRows());
   const withCanvass = mergeCanvassPriorsIntoPairs(phonePairs, primaryTag, knocks, profile);
   const withText = mergeTextPriorsIntoPairs(withCanvass, primaryTag, textContacts, profile);
-  return replaceCanvassPriorsFromKnockIndex(withText, primaryTag, knocks, profile);
+  return stampQcPairsWithPdiIdentity(
+    replaceCanvassPriorsFromKnockIndex(withText, primaryTag, knocks, profile)
+  );
 }
 
 export async function buildQcRecontactPairsFromBigQuery(qcTagId: string): Promise<QcRecontactPair[]> {
@@ -455,15 +468,18 @@ export async function loadQcRecontactPairsForPage(tagId: string): Promise<QcReco
   const { buildQcRecontactPairsFromLocalFiles } = await import("../qc-recontact/local-pairs");
   const localPairs = await buildQcRecontactPairsFromLocalFiles(tagId);
   if (localPairs) {
-    return { pairs: localPairs, hasSnapshot: true };
+    return { pairs: stampQcPairsWithPdiIdentity(localPairs), hasSnapshot: true };
   }
 
   const snap = loadRecontactPairsSnapshot(tagId);
   if (!snap) return { pairs: [], hasSnapshot: false };
   const fillRows = loadCallSurveyFillSnapshot(tagId)?.rows ?? [];
   const hydrated = hydrateRecontactPairsFromSurveyFill(snap.pairs, fillRows, profile, terms);
+  const knocks = stampKnockRowsWithPdiIdentity(loadKnockIndexRows());
   return {
-    pairs: replaceCanvassPriorsFromKnockIndex(hydrated, primaryTag, loadKnockIndexRows(), profile),
+    pairs: stampQcPairsWithPdiIdentity(
+      replaceCanvassPriorsFromKnockIndex(hydrated, primaryTag, knocks, profile)
+    ),
     hasSnapshot: true,
   };
 }

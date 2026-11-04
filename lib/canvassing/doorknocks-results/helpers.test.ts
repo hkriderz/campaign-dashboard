@@ -255,7 +255,9 @@ test("summarize flags bilingual survey SS and any hostile count", () => {
   assert.ok(struggle);
   assert.equal(struggle.metrics.strongSupport, 2);
   assert.equal(struggle.metrics.undecided, 10);
+  assert.equal(struggle.metrics.strongOppose, 8);
   assert.equal(struggle.metrics.support, 2);
+  assert.match(struggle.message, /2 SS, 10 U, 8 SO/);
 });
 
 test("support flags use the first Strong Support question, not a leading lit question", () => {

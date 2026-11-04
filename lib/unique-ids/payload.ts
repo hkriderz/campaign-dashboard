@@ -9,6 +9,17 @@ import {
   resolveUniqueIdTag,
 } from "../queries/unique-id-contacts";
 import type { CampaignTag } from "../types";
+import {
+  countPdiIdentityGaps,
+  emptyPdiIdentityGapTally,
+  eventInDateRange,
+  peopleNamesFromEvents,
+} from "../pdi-identity/gaps";
+import {
+  readPdiIdentityMap,
+  stampKnockRowsWithPdiIdentity,
+  stampUniqueIdEventsWithPdiIdentity,
+} from "../pdi-identity/store";
 import { collectKnockEvents, collectKnockEventsByTag } from "./collect";
 import {
   emptyChangeSummary,
@@ -81,9 +92,15 @@ async function loadTagEvents(
     loadPhoneUniqueIdEvents(tag, options),
     loadTextUniqueIdEvents(tag, options),
   ]);
-  const knockEvents = knocks ?? collectKnockEvents(loadKnockIndex().rows, { tag, profile });
+  const knockEvents =
+    knocks ??
+    collectKnockEvents(stampKnockRowsWithPdiIdentity(loadKnockIndex().rows), { tag, profile });
   return {
-    events: [...phone.events, ...text.events, ...knockEvents],
+    events: stampUniqueIdEventsWithPdiIdentity([
+      ...phone.events,
+      ...text.events,
+      ...knockEvents,
+    ]),
     phoneUpdatedAt: phone.savedAt,
     textUpdatedAt: text.savedAt,
     phoneError: phone.error,
@@ -102,6 +119,18 @@ function summaryFromTally(
     byChannel: tally.byChannel,
     changes: tally.changes,
   };
+}
+
+function identityGapsForEvents(
+  events: readonly UniqueIdContactEvent[],
+  startDate: string,
+  endDate: string
+) {
+  const byPdiId = readPdiIdentityMap();
+  const inRange = events.filter((event) =>
+    eventInDateRange(event.occurredOn, startDate, endDate)
+  );
+  return countPdiIdentityGaps(peopleNamesFromEvents(inRange), byPdiId);
 }
 
 export async function buildUniqueIdOverviewPayload(
@@ -134,6 +163,7 @@ export async function buildUniqueIdOverviewPayload(
         maxDate: "",
         knockRowCount: knockIndex.rows.length,
         phoneError: "Unknown candidate tag.",
+        identityGaps: emptyPdiIdentityGapTally(Object.keys(readPdiIdentityMap()).length),
       },
       candidates,
       combined: empty.combined,
@@ -163,6 +193,7 @@ export async function buildUniqueIdOverviewPayload(
         knockRowCount: knockIndex.rows.length,
         phoneError: loaded.phoneError,
         textError: loaded.textError,
+        identityGaps: identityGapsForEvents(loaded.events, query.startDate, query.endDate),
       },
       candidates,
       combined: tally.combined,
@@ -176,6 +207,7 @@ export async function buildUniqueIdOverviewPayload(
   const tags = getCoreCampaignTags();
   const knocksByTag = collectKnockEventsByTag(rangedKnockRows, tags);
   const summaries: UniqueIdCandidateSummary[] = [];
+  const allEvents: UniqueIdContactEvent[] = [];
   let phoneUpdatedAt = "";
   let textUpdatedAt = "";
   let phoneError: string | undefined;
@@ -194,6 +226,7 @@ export async function buildUniqueIdOverviewPayload(
       endDate: query.endDate,
     });
     summaries.push(summaryFromTally(tag, tally));
+    allEvents.push(...loaded.events);
     phoneUpdatedAt = laterStamp(phoneUpdatedAt, loaded.phoneUpdatedAt);
     textUpdatedAt = laterStamp(textUpdatedAt, loaded.textUpdatedAt);
     if (loaded.phoneError) {
@@ -235,6 +268,7 @@ export async function buildUniqueIdOverviewPayload(
       knockRowCount: knockIndex.rows.length,
       phoneError,
       textError,
+      identityGaps: identityGapsForEvents(allEvents, query.startDate, query.endDate),
     },
     candidates,
     combined: emptyFamilyCounts(),

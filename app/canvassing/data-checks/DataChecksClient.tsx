@@ -233,14 +233,19 @@ function formatMetricNumber(value: number | string | undefined): string {
   return value === undefined ? "" : String(value);
 }
 
+function soSuffix(metrics: DataCheckFlag["metrics"]): string {
+  const so = metrics.strongOppose;
+  return typeof so === "number" && so > 0 ? `, ${formatMetricNumber(so)} SO` : "";
+}
+
 function summaryFlagRegularText(flag: DataCheckFlag): string {
   switch (flag.kind) {
     case "low_doors_low_support":
-      return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.doorsKnocked)} knocks, ${formatMetricNumber(flag.metrics.contacts)} contacts (${formatMetricNumber(flag.metrics.strongSupport)} SS)`;
+      return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.doorsKnocked)} knocks, ${formatMetricNumber(flag.metrics.contacts)} contacts (${formatMetricNumber(flag.metrics.strongSupport)} SS${soSuffix(flag.metrics)})`;
     case "low_contact_rate":
       return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.doorsKnocked)} knocks, ${formatMetricNumber(flag.metrics.contacts)} contacts (${formatMetricNumber(flag.metrics.contactRatePct)}%)`;
     case "survey_support_struggle":
-      return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.strongSupport)} SS, ${formatMetricNumber(flag.metrics.undecided)} U`;
+      return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.strongSupport)} SS, ${formatMetricNumber(flag.metrics.undecided)} U${soSuffix(flag.metrics)}`;
     case "non_contact_outlier":
       return `${flag.canvasserName} - ${formatMetricNumber(flag.metrics.value)} ${formatMetricNumber(flag.metrics.column)}`;
     default:

@@ -89,9 +89,11 @@ export function recontactPairsStampIsCurrent(
 
 function fillNeedsSavedIdentity(rows: readonly CallSurveyRowForFill[]): boolean {
   return rows.some((row) => {
-    const calleeId = row.calleeId?.trim() ?? "";
-    if (!calleeId) return false;
-    return !row.pdiId?.trim() || !row.voterName?.trim() || !row.voterAddress?.trim();
+    const missingFields =
+      !row.pdiId?.trim() || !row.voterName?.trim() || !row.voterAddress?.trim();
+    if (!missingFields) return false;
+    // Callee JSON index and/or manual PDI identity store can fill blanks.
+    return Boolean(row.calleeId?.trim() || row.pdiId?.trim());
   });
 }
 

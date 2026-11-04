@@ -104,6 +104,14 @@ export type UniqueIdCandidateSummary = {
   changes: UniqueIdChangeSummary;
 };
 
+export type UniqueIdIdentityGapTally = {
+  uniqueIdCount: number;
+  missingName: number;
+  missingAddress: number;
+  missingBoth: number;
+  identitiesSaved: number;
+};
+
 export type UniqueIdOverviewMeta = {
   phoneUpdatedAt: string;
   textUpdatedAt: string;
@@ -115,6 +123,8 @@ export type UniqueIdOverviewMeta = {
   knockRowCount: number;
   phoneError?: string;
   textError?: string;
+  /** Missing name/address among Unique IDs in the current date range (and candidate when selected). */
+  identityGaps?: UniqueIdIdentityGapTally;
 };
 
 export type UniqueIdOverviewPayload = {

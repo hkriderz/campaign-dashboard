@@ -63,24 +63,42 @@ function countAnswers(
   return total;
 }
 
+const STRONG_OPPOSE_ANSWER_LABELS = ["strong oppose"];
+
+function formatSsSoSuffix(strongSupport: number, strongOppose: number): string {
+  return strongOppose > 0 ? `${strongSupport} SS, ${strongOppose} SO` : `${strongSupport} SS`;
+}
+
+function formatSurveySupportBreakdown(
+  strongSupport: number,
+  undecided: number,
+  strongOppose: number
+): string {
+  const parts = [`${strongSupport} SS`, `${undecided} U`];
+  if (strongOppose > 0) parts.push(`${strongOppose} SO`);
+  return parts.join(", ");
+}
+
 function buildLowDoorsFlags(campaign: DoorknockCampaignReport, settings: DoorknockSummarySettings): DoorknockSummaryFlag[] {
   return campaign.rows
     .filter((row) => row.doorsKnocked < settings.lowDoorsThreshold)
     .map((row) => {
       const strongSupport = countAnswers(campaign, row, settings.strongSupportAnswerLabels, "first");
-      return { row, strongSupport };
+      const strongOppose = countAnswers(campaign, row, STRONG_OPPOSE_ANSWER_LABELS, "first");
+      return { row, strongSupport, strongOppose };
     })
     .filter(({ strongSupport }) => strongSupport < settings.lowDoorsMaxStrongSupport)
-    .map(({ row, strongSupport }) => ({
+    .map(({ row, strongSupport, strongOppose }) => ({
       kind: "low_doors_low_support" as const,
       campaignId: campaign.campaignId,
       campaignName: campaign.campaignName,
       canvasserName: row.canvasserName,
-      message: `${row.canvasserName} - ${row.doorsKnocked} knocks, ${row.contacts} contacts (${strongSupport} SS)`,
+      message: `${row.canvasserName} - ${row.doorsKnocked} knocks, ${row.contacts} contacts (${formatSsSoSuffix(strongSupport, strongOppose)})`,
       metrics: {
         doorsKnocked: row.doorsKnocked,
         contacts: row.contacts,
         strongSupport,
+        strongOppose,
       },
     }));
 }
@@ -135,6 +153,7 @@ function buildSurveyFlags(
       let support = 0;
       let strongSupport = 0;
       let undecided = 0;
+      let strongOppose = 0;
       let answered = 0;
       for (const col of group.columns) {
         const value = row.surveyAnswers[col.key] ?? 0;
@@ -142,6 +161,7 @@ function buildSurveyFlags(
         if (countsAsSupport(col.answer, settings, countLeanSupport)) support += value;
         if (answerMatches(col.answer, settings.strongSupportAnswerLabels)) strongSupport += value;
         if (answerMatches(col.answer, settings.undecidedAnswerLabels)) undecided += value;
+        if (answerMatches(col.answer, STRONG_OPPOSE_ANSWER_LABELS)) strongOppose += value;
       }
 
       const rate = support / row.contacts;
@@ -151,11 +171,12 @@ function buildSurveyFlags(
         campaignId: campaign.campaignId,
         campaignName: campaign.campaignName,
         canvasserName: row.canvasserName,
-        message: `${row.canvasserName} - ${strongSupport} SS, ${undecided} U on ${campaign.campaignName} (${percent(rate)} support on "${group.question}")`,
+        message: `${row.canvasserName} - ${formatSurveySupportBreakdown(strongSupport, undecided, strongOppose)} on ${campaign.campaignName} (${percent(rate)} support on "${group.question}")`,
         metrics: {
           strongSupport,
           support,
           undecided,
+          strongOppose,
           contacts: row.contacts,
           answered,
           supportRatePct: rate * 100,
